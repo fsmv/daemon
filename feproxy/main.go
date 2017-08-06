@@ -1,9 +1,9 @@
 package main
 
 import (
+    "log"
     "os"
     "os/signal"
-    "log"
 
     "feproxy/proxyserv"
     "feproxy/rpcserv"
@@ -27,12 +27,18 @@ func main() {
         close(quit)
     }()
 
-    proxySrv := proxyserv.StartNew(tlsCert, tlsKey,
+    proxySrv, err := proxyserv.StartNew(tlsCert, tlsKey,
         portRangeStart, portRangeEnd, leaseTTL, quit)
     log.Print("Started frontend proxy server")
+    if err != nil {
+        log.Fatal(err)
+    }
 
-    rpcserv.StartNew(proxySrv, rpcPort, quit)
+    _, err = rpcserv.StartNew(proxySrv, rpcPort, quit)
     log.Print("Started rpc server on port ", rpcPort)
+    if err != nil {
+        log.Fatal(err)
+    }
 
     <-quit // Wait for quit
 }
