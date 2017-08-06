@@ -178,7 +178,7 @@ func (p *ProxyServ) selectForwarder(url string) *forwarder {
 func (p *ProxyServ) ServeHTTP(w http.ResponseWriter, req *http.Request) {
     fwd := p.selectForwarder(req.URL.Path)
     // No handler for this path, 404
-    if fwd != nil {
+    if fwd == nil {
         http.NotFound(w, req)
         return
     }

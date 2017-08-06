@@ -36,12 +36,14 @@ func (s *RPCServ) Unregister(pattern string, _ *struct{}) error {
     return nil
 }
 
+// Quit quits stops this binary
 func (s *RPCServ) Quit(_, _ *struct{}) error {
     log.Print("Shutting down")
     close(s.quit)
     return nil
 }
 
+// StartNew creates a new RPCServ and starts it
 func StartNew(proxyServ *proxyserv.ProxyServ, port uint16,
               quit chan struct{}) (*RPCServ, error) {
     s := &RPCServ{
