@@ -190,7 +190,7 @@ func StartNew(tlsCert, tlsKey string,
             log.Print("Proxy server error: ", err)
         }
         log.Print("Proxy server died, shutting down")
-        s.quit <- struct{}{}
+        close(s.quit)
     }()
     go func () {
         <-s.quit

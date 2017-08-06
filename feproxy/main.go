@@ -24,7 +24,7 @@ func main() {
     signal.Notify(sigs, os.Interrupt, os.Kill)
     go func() {
         <-sigs
-        quit <- struct{}{}
+        close(quit)
     }()
 
     proxySrv := proxyserv.StartNew(tlsCert, tlsKey,
