@@ -18,7 +18,7 @@ func main() {
 
     client, err := rpc.Dial("tcp", "127.0.0.1:2048")
     if err != nil {
-        log.Fatal("Failed to connect to frontend proxy RPC server:", err)
+        log.Fatalf("Failed to connect to frontend proxy RPC server: %v", err)
     }
     defer client.Close()
 
@@ -27,14 +27,14 @@ func main() {
     if err != nil {
         log.Fatal("Failed to obtain lease from feproxy:", err)
     }
-    log.Printf("Obtained lease, port: %v, ttl: %v",
-        lease.AssignedPort, lease.TTL)
+    log.Printf("Obtained lease, port: %v, ttl: %v", lease.Port, lease.TTL)
 
     defer client.Call("feproxy.Deregister", "/test/", &lease)
     go func() {
         <-sigs
         client.Call("feproxy.Deregister", "/test/", &lease)
         log.Print("Shutting down...")
+        // TODO(1.8): use http.Server and call close here
         os.Exit(0)
     }()
 
@@ -52,6 +52,6 @@ func main() {
     })
 
     log.Print("Starting server...")
-    log.Fatal(http.ListenAndServe(
-        ":" + strconv.Itoa(int(lease.AssignedPort)), nil))
+    // TODO(1.8): check for err == ErrServerClosed
+    log.Fatal(http.ListenAndServe(":" + strconv.Itoa(int(lease.Port)), nil))
 }
