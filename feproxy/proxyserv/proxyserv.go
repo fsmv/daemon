@@ -45,11 +45,33 @@ func (s *ProxyServ) GetNumLeases() int {
     return ret
 }
 
-func (s *ProxyServ) getHandler(url string) (HandlerTTL, bool) {
+func patternMatch(pattern, url string) bool{
+    if len(pattern) == 0 {
+        return false
+    }
+    n := len(pattern)
+    if pattern[n-1] != '/' {
+        return pattern == url
+    }
+    return len(url) >= n && url[0:n] == pattern
+}
+
+func (s *ProxyServ) getHandler(url string) (ret HandlerTTL, found bool) {
     s.handlersMut.RLock()
     defer s.handlersMut.RUnlock()
-    ret, ok := s.handlers[url]
-    return ret, ok
+    var longestMatch = 0
+    found = false
+    for k, h := range s.handlers {
+        if !patternMatch(k, url) {
+            continue
+        }
+        if !found || len(k) > longestMatch {
+            found = true
+            longestMatch = len(k)
+            ret = h
+        }
+    }
+    return ret, found
 }
 
 func (s *ProxyServ) addHandler(url string, handler HandlerTTL) {
