@@ -3,12 +3,15 @@ package main
 import (
     "errors"
     "strings"
+    "strconv"
     "fmt"
     "log"
     "sync"
     "time"
+    "io"
     "os"
     "os/signal"
+    "os/user"
     "syscall"
     "path/filepath"
 )
@@ -19,8 +22,7 @@ type Command struct {
     // Paths starting with go/ are Go packages
     Path        string
     Args        []string
-    Uid         uint32
-    Gid         uint32
+    User        string
     WaitTime    time.Duration
 }
 
@@ -80,18 +82,48 @@ func StartPrograms(programs []*Command) (map[int]*Child, int) {
     var errCnt int = 0
     ret := make(map[int]*Child)
     for _, cmd := range programs {
-        attr := &os.ProcAttr{ Env: []string{""} }
-        if cmd.Uid != 0 || cmd.Gid != 0 {
+        // Set up stdout and stderr piping
+        r, w, err := os.Pipe()
+        if err != nil {
+            log.Printf("%v: Error creating pipe: %v", cmd.Path, err)
+            continue
+        }
+        go io.Copy(os.Stdout, r)
+        attr := &os.ProcAttr{
+            Env: []string{""},
+            Files: []*os.File{nil, w, w},
+        }
+        // Set the user, group and home dir if there's a user
+        if cmd.User != "" {
+            u, err := user.Lookup(cmd.User)
+            if err != nil {
+                log.Printf("%v: Error looking up user %v, message: %v",
+                    cmd.Path, cmd.User, err)
+                continue
+            }
+            uid, err := strconv.Atoi(u.Uid)
+            if err != nil {
+                log.Printf("%v: Uid string not an integer, this is not linux." +
+                    " Uid string: %v", cmd.Path, u.Uid)
+            }
+            gid, err := strconv.Atoi(u.Gid)
+            if err != nil {
+                log.Printf("%v: Gid string not an integer, this is not linux." +
+                    " Gid string: %v", cmd.Path, u.Gid)
+            }
+            attr.Dir = u.HomeDir
             attr.Sys = &syscall.SysProcAttr{
                 Credential: &syscall.Credential{
-                    Uid: cmd.Uid,
-                    Gid: cmd.Gid,
+                    Uid: uint32(uid),
+                    Gid: uint32(gid),
                 },
             }
         }
-        proc, err := os.StartProcess(cmd.Path, cmd.Args, attr)
+        // Start the process
+        argv := append([]string{cmd.Path}, cmd.Args...)
+        proc, err := os.StartProcess(cmd.Path, argv, attr)
         if err != nil {
-            log.Printf("Error starting process: %v", err)
+            log.Printf("%v: Error starting process: %v", cmd.Path, err)
             errCnt++
             if proc != nil && proc.Pid > 0 {
                 ret[proc.Pid] = &Child{
@@ -108,7 +140,7 @@ func StartPrograms(programs []*Command) (map[int]*Child, int) {
             Cmd: cmd,
             Proc: proc,
         }
-        log.Printf("Started process: %v; pid: %v", cmd.Path, proc.Pid) 
+        log.Printf("Started process: %v; pid: %v", cmd.Path, proc.Pid)
         if cmd.WaitTime != 0 {
             log.Printf("Waiting %v for process startup...", cmd.WaitTime)
             time.Sleep(cmd.WaitTime)
@@ -136,10 +168,11 @@ func main() {
     Programs := []*Command{
         &Command{
             Path: "go/feproxy",
-            WaitTime: 2 * time.Second,
+            WaitTime: time.Second,
         },
         &Command{
             Path: "go/moneyserv",
+            User: "moneyserv",
         },
     }
     err := ResolveGoPaths(Programs)
