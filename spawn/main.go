@@ -16,10 +16,8 @@ import (
     "path/filepath"
 )
 
-const goPrefix = "go/"
-
 type Command struct {
-    // Paths starting with go/ are Go packages
+    // Paths that don't start with '/' are Go packages
     Path        string
     Args        []string
     User        string
@@ -82,34 +80,40 @@ func StartPrograms(programs []*Command) (map[int]*Child, int) {
     var errCnt int = 0
     ret := make(map[int]*Child)
     for _, cmd := range programs {
+        name := filepath.Base(cmd.Path)
         // Set up stdout and stderr piping
         r, w, err := os.Pipe()
         if err != nil {
-            log.Printf("%v: Error creating pipe: %v", cmd.Path, err)
+            log.Printf("%v: Warning, failed to create pipe: %v", name, err)
             continue
         }
+        // TODO: not a permanant solution, could have race condition issues.
         go io.Copy(os.Stdout, r)
         attr := &os.ProcAttr{
             Env: []string{""},
             Files: []*os.File{nil, w, w},
         }
-        // Set the user, group and home dir if there's a user
-        if cmd.User != "" {
+        if len(cmd.User) == 0 {
+            log.Print("%v: Error, you must specify a user to run as", name)
+            errCnt++
+            continue
+        }
+        // Set the user, group, and home dir if we're switching users
+        if cmd.User != "root" {
             u, err := user.Lookup(cmd.User)
             if err != nil {
                 log.Printf("%v: Error looking up user %v, message: %v",
-                    cmd.Path, cmd.User, err)
+                    name, cmd.User, err)
+                errCnt++
                 continue
             }
             uid, err := strconv.Atoi(u.Uid)
             if err != nil {
-                log.Printf("%v: Uid string not an integer, this is not linux." +
-                    " Uid string: %v", cmd.Path, u.Uid)
+                log.Fatal("Uid string not an integer. Uid string: %v", u.Uid)
             }
             gid, err := strconv.Atoi(u.Gid)
             if err != nil {
-                log.Printf("%v: Gid string not an integer, this is not linux." +
-                    " Gid string: %v", cmd.Path, u.Gid)
+                log.Fatal("Gid string not an integer. Gid string: %v", u.Gid)
             }
             attr.Dir = u.HomeDir
             attr.Sys = &syscall.SysProcAttr{
@@ -140,7 +144,7 @@ func StartPrograms(programs []*Command) (map[int]*Child, int) {
             Cmd: cmd,
             Proc: proc,
         }
-        log.Printf("Started process: %v; pid: %v", cmd.Path, proc.Pid)
+        log.Printf("Started process: %v; pid: %v", name, proc.Pid)
         if cmd.WaitTime != 0 {
             log.Printf("Waiting %v for process startup...", cmd.WaitTime)
             time.Sleep(cmd.WaitTime)
@@ -151,15 +155,15 @@ func StartPrograms(programs []*Command) (map[int]*Child, int) {
 
 func ResolveGoPaths(commands []*Command) error {
     gopath := os.Getenv("GOPATH")
-    if gopath == "" {
-        return errors.New("GOPATH environment variable not set")
-    }
     binpath := filepath.Join(gopath, "bin")
     for _, cmd := range commands {
-        if !strings.HasPrefix(cmd.Path, goPrefix) {
+        if len(cmd.Path) == 0 || cmd.Path[0] == '/' {
             continue
         }
-        cmd.Path = filepath.Join(binpath, cmd.Path[len(goPrefix):])
+        if len(gopath) == 0 { // Don't error unless there's actually a go path
+            return errors.New("GOPATH environment variable not set")
+        }
+        cmd.Path = filepath.Join(binpath, cmd.Path)
     }
     return nil
 }
@@ -167,11 +171,12 @@ func ResolveGoPaths(commands []*Command) error {
 func main() {
     Programs := []*Command{
         &Command{
-            Path: "go/feproxy",
+            Path: "feproxy",
             WaitTime: time.Second,
+            User: "root",
         },
         &Command{
-            Path: "go/moneyserv",
+            Path: "moneyserv",
             User: "moneyserv",
         },
     }
