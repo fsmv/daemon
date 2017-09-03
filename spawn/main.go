@@ -2,9 +2,9 @@ package main
 
 import (
     "errors"
-    "strings"
     "strconv"
     "fmt"
+    "net"
     "log"
     "sync"
     "time"
@@ -22,6 +22,11 @@ type Command struct {
     Args        []string
     User        string
     WaitTime    time.Duration
+    // Ports to listen on (with tcp) and pass to the process as files
+    // Useful for accessing the privelaged ports (<1024)
+    Ports       []uint16
+    // Files to open and pass to the process
+    Files       []string
 }
 
 type Child struct {
@@ -76,6 +81,37 @@ func MonitorChildren(quit chan struct{},
     }
 }
 
+func listenPortsTCP(ports []uint16) ([]*os.File, error) {
+    var ret []*os.File
+    for _, port := range ports {
+        l, err := net.ListenTCP("tcp", &net.TCPAddr{Port:int(port)})
+        if err != nil {
+            return nil, fmt.Errorf("error listening on port (%v): %v",
+                port, err)
+        }
+        f, err := l.File()
+        if err != nil {
+            return nil, fmt.Errorf("error listening on port (%v): %v",
+                port, err)
+        }
+        ret = append(ret, f)
+    }
+    return ret, nil
+}
+
+func openFiles(files []string) ([]*os.File, error) {
+    var ret []*os.File
+    for _, fileName := range files {
+        f, err := os.Open(fileName)
+        if err != nil {
+            return nil, fmt.Errorf("error opening file (%v): %v",
+                fileName, err)
+        }
+        ret = append(ret, f)
+    }
+    return ret, nil
+}
+
 func StartPrograms(programs []*Command) (map[int]*Child, int) {
     var errCnt int = 0
     ret := make(map[int]*Child)
@@ -84,45 +120,68 @@ func StartPrograms(programs []*Command) (map[int]*Child, int) {
         // Set up stdout and stderr piping
         r, w, err := os.Pipe()
         if err != nil {
-            log.Printf("%v: Warning, failed to create pipe: %v", name, err)
+            log.Printf("%v: Error, failed to create pipe: %v", name, err)
+            errCnt++
             continue
+        }
+        files := []*os.File{nil, w, w}
+        if len(cmd.Ports) != 0 {
+            pfiles, err := listenPortsTCP(cmd.Ports)
+            if err != nil {
+                log.Printf("%v: %v", name, err)
+                continue
+            }
+            files = append(files, pfiles...)
+        }
+        if len(cmd.Files) != 0 {
+            ffiles, err := openFiles(cmd.Files)
+            if err != nil {
+                log.Printf("%v: %v", name, err)
+                continue
+            }
+            files = append(files, ffiles...)
         }
         // TODO: not a permanant solution, could have race condition issues.
         go io.Copy(os.Stdout, r)
         attr := &os.ProcAttr{
             Env: []string{""},
-            Files: []*os.File{nil, w, w},
+            Files: files,
         }
+
         if len(cmd.User) == 0 {
-            log.Print("%v: Error, you must specify a user to run as", name)
+            log.Printf("%v: Error, you must specify a user to run as", name)
+            errCnt++
+            continue
+        }
+        if cmd.User == "root" {
+            log.Printf("%v: Error, root is not allowed", name)
             errCnt++
             continue
         }
         // Set the user, group, and home dir if we're switching users
-        if cmd.User != "root" {
-            u, err := user.Lookup(cmd.User)
-            if err != nil {
-                log.Printf("%v: Error looking up user %v, message: %v",
-                    name, cmd.User, err)
-                errCnt++
-                continue
-            }
-            uid, err := strconv.Atoi(u.Uid)
-            if err != nil {
-                log.Fatal("Uid string not an integer. Uid string: %v", u.Uid)
-            }
-            gid, err := strconv.Atoi(u.Gid)
-            if err != nil {
-                log.Fatal("Gid string not an integer. Gid string: %v", u.Gid)
-            }
-            attr.Dir = u.HomeDir
-            attr.Sys = &syscall.SysProcAttr{
-                Credential: &syscall.Credential{
-                    Uid: uint32(uid),
-                    Gid: uint32(gid),
-                },
-            }
+        u, err := user.Lookup(cmd.User)
+        if err != nil {
+            log.Printf("%v: Error looking up user %v, message: %v",
+                name, cmd.User, err)
+            errCnt++
+            continue
         }
+        uid, err := strconv.Atoi(u.Uid)
+        if err != nil {
+            log.Fatal("Uid string not an integer. Uid string: %v", u.Uid)
+        }
+        gid, err := strconv.Atoi(u.Gid)
+        if err != nil {
+            log.Fatal("Gid string not an integer. Gid string: %v", u.Gid)
+        }
+        attr.Dir = u.HomeDir
+        attr.Sys = &syscall.SysProcAttr{
+            Credential: &syscall.Credential{
+                Uid: uint32(uid),
+                Gid: uint32(gid),
+            },
+        }
+
         // Start the process
         argv := append([]string{cmd.Path}, cmd.Args...)
         proc, err := os.StartProcess(cmd.Path, argv, attr)
@@ -173,7 +232,12 @@ func main() {
         &Command{
             Path: "feproxy",
             WaitTime: time.Second,
-            User: "root",
+            User: "feproxy",
+            Ports: []uint16{80, 443},
+            Files: []string{
+                "/etc/letsencrypt/live/serv.sapium.net/fullchain.pem",
+                "/etc/letsencrypt/live/serv.sapium.net/privkey.pem",
+            },
         },
         &Command{
             Path: "moneyserv",
