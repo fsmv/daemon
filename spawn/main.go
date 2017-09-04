@@ -2,26 +2,31 @@ package main
 
 import (
     "errors"
-    "strings"
+    "strconv"
     "fmt"
+    "net"
     "log"
     "sync"
     "time"
+    "io"
     "os"
     "os/signal"
+    "os/user"
     "syscall"
     "path/filepath"
 )
 
-const goPrefix = "go/"
-
 type Command struct {
-    // Paths starting with go/ are Go packages
+    // Paths that don't start with '/' are Go packages
     Path        string
     Args        []string
-    Uid         uint32
-    Gid         uint32
+    User        string
     WaitTime    time.Duration
+    // Ports to listen on (with tcp) and pass to the process as files
+    // Useful for accessing the privelaged ports (<1024)
+    Ports       []uint16
+    // Files to open and pass to the process
+    Files       []string
 }
 
 type Child struct {
@@ -76,22 +81,112 @@ func MonitorChildren(quit chan struct{},
     }
 }
 
+func listenPortsTCP(ports []uint16) ([]*os.File, error) {
+    var ret []*os.File
+    for _, port := range ports {
+        l, err := net.ListenTCP("tcp", &net.TCPAddr{Port:int(port)})
+        if err != nil {
+            return nil, fmt.Errorf("error listening on port (%v): %v",
+                port, err)
+        }
+        f, err := l.File()
+        if err != nil {
+            return nil, fmt.Errorf("error listening on port (%v): %v",
+                port, err)
+        }
+        ret = append(ret, f)
+    }
+    return ret, nil
+}
+
+func openFiles(files []string) ([]*os.File, error) {
+    var ret []*os.File
+    for _, fileName := range files {
+        f, err := os.Open(fileName)
+        if err != nil {
+            return nil, fmt.Errorf("error opening file (%v): %v",
+                fileName, err)
+        }
+        ret = append(ret, f)
+    }
+    return ret, nil
+}
+
 func StartPrograms(programs []*Command) (map[int]*Child, int) {
     var errCnt int = 0
     ret := make(map[int]*Child)
     for _, cmd := range programs {
-        attr := &os.ProcAttr{ Env: []string{""} }
-        if cmd.Uid != 0 || cmd.Gid != 0 {
-            attr.Sys = &syscall.SysProcAttr{
-                Credential: &syscall.Credential{
-                    Uid: cmd.Uid,
-                    Gid: cmd.Gid,
-                },
-            }
-        }
-        proc, err := os.StartProcess(cmd.Path, cmd.Args, attr)
+        name := filepath.Base(cmd.Path)
+        // Set up stdout and stderr piping
+        r, w, err := os.Pipe()
         if err != nil {
-            log.Printf("Error starting process: %v", err)
+            log.Printf("%v: Error, failed to create pipe: %v", name, err)
+            errCnt++
+            continue
+        }
+        files := []*os.File{nil, w, w}
+        if len(cmd.Ports) != 0 {
+            pfiles, err := listenPortsTCP(cmd.Ports)
+            if err != nil {
+                log.Printf("%v: %v", name, err)
+                continue
+            }
+            files = append(files, pfiles...)
+        }
+        if len(cmd.Files) != 0 {
+            ffiles, err := openFiles(cmd.Files)
+            if err != nil {
+                log.Printf("%v: %v", name, err)
+                continue
+            }
+            files = append(files, ffiles...)
+        }
+        // TODO: not a permanant solution, could have race condition issues.
+        go io.Copy(os.Stdout, r)
+        attr := &os.ProcAttr{
+            Env: []string{""},
+            Files: files,
+        }
+
+        if len(cmd.User) == 0 {
+            log.Printf("%v: Error, you must specify a user to run as", name)
+            errCnt++
+            continue
+        }
+        if cmd.User == "root" {
+            log.Printf("%v: Error, root is not allowed", name)
+            errCnt++
+            continue
+        }
+        // Set the user, group, and home dir if we're switching users
+        u, err := user.Lookup(cmd.User)
+        if err != nil {
+            log.Printf("%v: Error looking up user %v, message: %v",
+                name, cmd.User, err)
+            errCnt++
+            continue
+        }
+        uid, err := strconv.Atoi(u.Uid)
+        if err != nil {
+            log.Fatal("Uid string not an integer. Uid string: %v", u.Uid)
+        }
+        gid, err := strconv.Atoi(u.Gid)
+        if err != nil {
+            log.Fatal("Gid string not an integer. Gid string: %v", u.Gid)
+        }
+        attr.Dir = u.HomeDir
+        attr.Sys = &syscall.SysProcAttr{
+            Credential: &syscall.Credential{
+                Uid: uint32(uid),
+                Gid: uint32(gid),
+            },
+        }
+
+        // Start the process
+        argv := append([]string{cmd.Path}, cmd.Args...)
+        proc, err := os.StartProcess(cmd.Path, argv, attr)
+        if err != nil {
+            log.Printf("%v: Error starting process: %v", cmd.Path, err)
             errCnt++
             if proc != nil && proc.Pid > 0 {
                 ret[proc.Pid] = &Child{
@@ -108,7 +203,7 @@ func StartPrograms(programs []*Command) (map[int]*Child, int) {
             Cmd: cmd,
             Proc: proc,
         }
-        log.Printf("Started process: %v; pid: %v", cmd.Path, proc.Pid) 
+        log.Printf("Started process: %v; pid: %v", name, proc.Pid)
         if cmd.WaitTime != 0 {
             log.Printf("Waiting %v for process startup...", cmd.WaitTime)
             time.Sleep(cmd.WaitTime)
@@ -119,15 +214,15 @@ func StartPrograms(programs []*Command) (map[int]*Child, int) {
 
 func ResolveGoPaths(commands []*Command) error {
     gopath := os.Getenv("GOPATH")
-    if gopath == "" {
-        return errors.New("GOPATH environment variable not set")
-    }
     binpath := filepath.Join(gopath, "bin")
     for _, cmd := range commands {
-        if !strings.HasPrefix(cmd.Path, goPrefix) {
+        if len(cmd.Path) == 0 || cmd.Path[0] == '/' {
             continue
         }
-        cmd.Path = filepath.Join(binpath, cmd.Path[len(goPrefix):])
+        if len(gopath) == 0 { // Don't error unless there's actually a go path
+            return errors.New("GOPATH environment variable not set")
+        }
+        cmd.Path = filepath.Join(binpath, cmd.Path)
     }
     return nil
 }
@@ -135,11 +230,18 @@ func ResolveGoPaths(commands []*Command) error {
 func main() {
     Programs := []*Command{
         &Command{
-            Path: "go/feproxy",
-            WaitTime: 2 * time.Second,
+            Path: "feproxy",
+            WaitTime: time.Second,
+            User: "feproxy",
+            Ports: []uint16{80, 443},
+            Files: []string{
+                "/etc/letsencrypt/live/serv.sapium.net/fullchain.pem",
+                "/etc/letsencrypt/live/serv.sapium.net/privkey.pem",
+            },
         },
         &Command{
-            Path: "go/moneyserv",
+            Path: "moneyserv",
+            User: "moneyserv",
         },
     }
     err := ResolveGoPaths(Programs)
