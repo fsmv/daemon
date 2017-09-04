@@ -5,6 +5,7 @@ import (
     "os"
     "os/signal"
     "fmt"
+    "flag"
     "daemon/feproxy/proxyserv"
     "log"
     "time"
@@ -13,12 +14,18 @@ import (
     "strings"
     "strconv"
     "sync"
+    "daemon/moneyserv/csvserv"
 )
 
 var (
     csvbuf  bytes.Buffer
     counter int
     mut     sync.Mutex
+
+    oauthClientId = flag.String("client_id", "",
+        "The OAuth2 Client ID")
+    oauthClientSecret = flag.String("client_secret", "",
+        "The OAuth2 Client Secret")
 )
 
 func addNRows(n int) error {
@@ -43,6 +50,7 @@ func getCSV() []byte {
 const register = "/"
 
 func main() {
+    flag.Parse()
     sigs := make(chan os.Signal, 2)
     signal.Notify(sigs, os.Interrupt, os.Kill)
 
@@ -67,6 +75,8 @@ func main() {
         // TODO(1.8): use http.Server and call close here
         os.Exit(0)
     }()
+
+    csvserv.New(*oauthClientId, *oauthClientSecret)
 
     http.HandleFunc("/data.csv", func(w http.ResponseWriter, r *http.Request) {
         w.Header().Set("Content-Type", "text/csv")
