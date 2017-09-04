@@ -36,7 +36,7 @@ func (s *RPCServ) Deregister(path string, _ *struct{}) error {
 
 func (s *RPCServ) Quit(_, _ *struct{}) error {
     log.Print("Shutting down")
-    s.quit <- struct{}{}
+    close(s.quit)
     return nil
 }
 
@@ -55,7 +55,7 @@ func StartNew(proxyServ *proxyserv.ProxyServ, port uint16,
     go func () {
         server.Accept(l)
         log.Print("RPC server died, quitting")
-        quit <- struct{}{}
+        close(quit)
     }()
     go func() {
         <-quit
