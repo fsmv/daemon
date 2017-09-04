@@ -1,10 +1,11 @@
 package rpcserv
 
 import (
-    "strconv"
+    "fmt"
     "log"
     "net"
     "net/rpc"
+    "strconv"
 
     "daemon/feproxy/proxyserv"
 )
@@ -15,33 +16,36 @@ type RPCServ struct {
     quit      chan struct{}
 }
 
-// Registers a new forwarding rule in the proxy server.
+// Register registers a new forwarding rule in the proxy server.
 // Randomly assigns port for the client to listen on
-func (s *RPCServ) Register(path string, ret *proxyserv.Lease) error {
-    lease, err := s.proxyServ.Register(path)
+func (s *RPCServ) Register(pattern string, ret *proxyserv.Lease) error {
+    lease, err := s.proxyServ.Register(pattern)
     if err != nil {
         return err
     }
-    log.Printf("Registered lease: localhost:%v%v, TTL: %v",
-               lease.AssignedPort, path, lease.TTL)
+    log.Printf("Registered forwarder to localhost:%v, Pattern: %v, TTL: %v",
+               lease.Port, pattern, lease.TTL)
     *ret = lease
     return nil
 }
 
-func (s *RPCServ) Deregister(path string, _ *struct{}) error {
-    s.proxyServ.DeleteHandler(path)
-    log.Print("Unregistered path: ", path)
+// Unregister unregisters the forwarding rule with the given pattern
+func (s *RPCServ) Unregister(pattern string, _ *struct{}) error {
+    s.proxyServ.Unregister(pattern)
+    log.Printf("Unregistered rule with pattern: %v", pattern)
     return nil
 }
 
+// Quit quits stops this binary
 func (s *RPCServ) Quit(_, _ *struct{}) error {
     log.Print("Shutting down")
     close(s.quit)
     return nil
 }
 
+// StartNew creates a new RPCServ and starts it
 func StartNew(proxyServ *proxyserv.ProxyServ, port uint16,
-              quit chan struct{}) *RPCServ {
+              quit chan struct{}) (*RPCServ, error) {
     s := &RPCServ{
         proxyServ: proxyServ,
         quit:      quit,
@@ -50,10 +54,10 @@ func StartNew(proxyServ *proxyserv.ProxyServ, port uint16,
     server.RegisterName("feproxy", s)
     l, err := net.Listen("tcp", ":" + strconv.Itoa(int(port)))
     if err != nil {
-        log.Fatal("Failed to start listener:", err)
+        return nil, fmt.Errorf("Failed to start listener: %v", err)
     }
     go func () {
-        server.Accept(l)
+        server.Accept(l) // logs any errors itself instead of returning
         log.Print("RPC server died, quitting")
         close(quit)
     }()
@@ -61,5 +65,5 @@ func StartNew(proxyServ *proxyserv.ProxyServ, port uint16,
         <-quit
         l.Close()
     }()
-    return s
+    return s, nil
 }
