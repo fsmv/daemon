@@ -1,9 +1,10 @@
 package main
 
 import (
-    "errors"
+    "encoding/json"
     "strconv"
     "fmt"
+    "flag"
     "net"
     "log"
     "sync"
@@ -16,14 +17,28 @@ import (
     "path/filepath"
 )
 
+var (
+    configFilename = flag.String("config", "config",
+        "The path to the config file")
+    path = flag.String("path", "",
+        "A single path to use for relative paths")
+)
+
+// Command is one executable to run with options
 type Command struct {
-    // Paths that don't start with '/' are Go packages
-    Path        string
-    Args        []string
+    // Filepath is the absolute path to the executable file or the relative
+    // path within the directory provided in the --path flag.
+    //
+    // Required.
+    Filepath    string
+    // User to run the process as. Cannot be root.
+    //
+    // Required.
     User        string
-    WaitTime    time.Duration
-    // Ports to listen on (with tcp) and pass to the process as files
-    // Useful for accessing the privelaged ports (<1024)
+    // Args is the arguments to pass to the executable
+    Args        []string
+    // Ports to listen on (with tcp) and pass to the process as files.
+    // Useful for accessing the privelaged ports (<1024).
     Ports       []uint16
     // Files to open and pass to the process
     Files       []string
@@ -112,11 +127,16 @@ func openFiles(files []string) ([]*os.File, error) {
     return ret, nil
 }
 
-func StartPrograms(programs []*Command) (map[int]*Child, int) {
+func StartPrograms(programs []Command) (map[int]*Child, int) {
     var errCnt int = 0
     ret := make(map[int]*Child)
-    for _, cmd := range programs {
-        name := filepath.Base(cmd.Path)
+    for i, cmd := range programs {
+        if len(cmd.Filepath) == 0 {
+            log.Printf("Error in Command #%v, Filepath is required", i)
+            errCnt++
+            continue
+        }
+        name := filepath.Base(cmd.Filepath)
         // Set up stdout and stderr piping
         r, w, err := os.Pipe()
         if err != nil {
@@ -183,15 +203,15 @@ func StartPrograms(programs []*Command) (map[int]*Child, int) {
         }
 
         // Start the process
-        argv := append([]string{cmd.Path}, cmd.Args...)
-        proc, err := os.StartProcess(cmd.Path, argv, attr)
+        argv := append([]string{cmd.Filepath}, cmd.Args...)
+        proc, err := os.StartProcess(cmd.Filepath, argv, attr)
         if err != nil {
-            log.Printf("%v: Error starting process: %v", cmd.Path, err)
+            log.Printf("%v: Error starting process: %v", cmd.Filepath, err)
             errCnt++
             if proc != nil && proc.Pid > 0 {
                 ret[proc.Pid] = &Child{
                     Up: false,
-                    Cmd: cmd,
+                    Cmd: &cmd,
                     Proc: proc,
                     Message: err.Error(),
                 }
@@ -200,51 +220,65 @@ func StartPrograms(programs []*Command) (map[int]*Child, int) {
         }
         ret[proc.Pid] = &Child{
             Up: true,
-            Cmd: cmd,
+            Cmd: &cmd,
             Proc: proc,
         }
         log.Printf("Started process: %v; pid: %v", name, proc.Pid)
-        if cmd.WaitTime != 0 {
-            log.Printf("Waiting %v for process startup...", cmd.WaitTime)
-            time.Sleep(cmd.WaitTime)
-        }
+        log.Printf("Waiting 1 second...")
+        time.Sleep(time.Second)
     }
     return ret, errCnt
 }
 
-func ResolveGoPaths(commands []*Command) error {
-    gopath := os.Getenv("GOPATH")
-    binpath := filepath.Join(gopath, "bin")
-    for _, cmd := range commands {
-        if len(cmd.Path) == 0 || cmd.Path[0] == '/' {
+func ResolveRelativePaths(path string, commands []Command) error {
+    for i, _ := range commands {
+        cmd := &commands[i]
+        if len(cmd.Filepath) == 0 || cmd.Filepath[0] == '/' {
             continue
         }
-        if len(gopath) == 0 { // Don't error unless there's actually a go path
-            return errors.New("GOPATH environment variable not set")
+        if len(path) == 0 { // Don't error unless there's actually a go path
+            return fmt.Errorf(
+                "--path flag not set which is required by Command #%v, " +
+                "filepath: %v", i, cmd.Filepath)
         }
-        cmd.Path = filepath.Join(binpath, cmd.Path)
+        cmd.Filepath = filepath.Join(path, cmd.Filepath)
     }
     return nil
 }
 
-func main() {
-    Programs := []*Command{
-        &Command{
-            Path: "feproxy",
-            WaitTime: time.Second,
-            User: "feproxy",
-            Ports: []uint16{80, 443},
-            Files: []string{
-                "/etc/letsencrypt/live/serv.sapium.net/fullchain.pem",
-                "/etc/letsencrypt/live/serv.sapium.net/privkey.pem",
-            },
-        },
-        &Command{
-            Path: "moneyserv",
-            User: "moneyserv",
-        },
+func readConfig(filename string) ([]Command, error) {
+    f, err := os.Open(filename)
+    if err != nil {
+        return nil, err
     }
-    err := ResolveGoPaths(Programs)
+    var ret []Command
+    dec := json.NewDecoder(f)
+    for dec.More() {
+        var cmd Command
+        err = dec.Decode(&cmd)
+        if err != nil {
+            return nil, fmt.Errorf(
+                "parsing error. filepath: %v, command #%v, error: \"%v\"",
+                filename, len(ret)+1, err)
+        }
+        ret = append(ret, cmd)
+    }
+    if len(ret) == 0 {
+        return nil, fmt.Errorf(
+            "no commands found in config file. filepath: %v", filename)
+    }
+    return ret, nil
+}
+
+func main() {
+    flag.Parse()
+
+    commands, err := readConfig(*configFilename)
+    if err != nil {
+        log.Fatalf("Failed to read config file. error: \"%v\"", err)
+    }
+
+    err = ResolveRelativePaths(*path, commands)
     if err != nil {
         log.Fatal(err)
     }
@@ -257,13 +291,13 @@ func main() {
         close(quit)
     }()
 
-    children, _ := StartPrograms(Programs)
+    children, _ := StartPrograms(commands)
     childrenMut := &sync.RWMutex{}
     go MonitorChildren(quit, func (pid int, message string) {
         childrenMut.Lock()
         defer childrenMut.Unlock()
         children[pid].Message = message
-        log.Printf("%v\n\n%v", children[pid].Cmd.Path, message)
+        log.Printf("%v\n\n%v", children[pid].Cmd.Filepath, message)
     })
 
     <-quit
