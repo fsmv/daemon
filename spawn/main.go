@@ -39,8 +39,14 @@ type Command struct {
     Args        []string
     // Ports to listen on (with tcp) and pass to the process as files.
     // Useful for accessing the privelaged ports (<1024).
+    //
+    // In the child process, the sockets will have fd = 3 + i, where Ports[i] is
+    // the port to bind
     Ports       []uint16
     // Files to open and pass to the process
+    //
+    // In the child process, the files will have fd = 3 + len(Ports) + i, where
+    // Files[i] is the file
     Files       []string
 }
 
@@ -65,8 +71,9 @@ func makeDeadChildMessage(status syscall.WaitStatus,
         resUsage.Nvcsw, resUsage.Nivcsw)
 }
 
-func MonitorChildren(quit chan struct{},
-                     reportDown func (pid int, message string)) {
+func MonitorChildrenDeaths(quit chan struct{},
+    reportDown func (pid int, message string)) {
+
     child := make(chan os.Signal)
     signal.Notify(child, syscall.SIGCHLD)
     for {
@@ -76,11 +83,13 @@ func MonitorChildren(quit chan struct{},
             var resUsage syscall.Rusage
             for {
                 pid, err := syscall.Wait4(-1, &status, syscall.WNOHANG, &resUsage)
-                if pid == 0 {
+                if pid == 0 || err == syscall.ECHILD {
                     break
                 }
                 if err != nil {
-                    log.Printf("Error checking child status: %v", err)
+                    log.Printf("Error checking child status: " +
+                        "pid = %v; error = %v",
+                        pid, err)
                     break
                 }
                 if !status.Exited() {
@@ -138,6 +147,7 @@ func StartPrograms(programs []Command) (map[int]*Child, int) {
         }
         name := filepath.Base(cmd.Filepath)
         // Set up stdout and stderr piping
+        // TODO: don't do pipes at all, just read the child's logfile
         r, w, err := os.Pipe()
         if err != nil {
             log.Printf("%v: Error, failed to create pipe: %v", name, err)
@@ -146,20 +156,20 @@ func StartPrograms(programs []Command) (map[int]*Child, int) {
         }
         files := []*os.File{nil, w, w}
         if len(cmd.Ports) != 0 {
-            pfiles, err := listenPortsTCP(cmd.Ports)
+            socketFiles, err := listenPortsTCP(cmd.Ports)
             if err != nil {
                 log.Printf("%v: %v", name, err)
                 continue
             }
-            files = append(files, pfiles...)
+            files = append(files, socketFiles...)
         }
         if len(cmd.Files) != 0 {
-            ffiles, err := openFiles(cmd.Files)
+            openedFiles, err := openFiles(cmd.Files)
             if err != nil {
                 log.Printf("%v: %v", name, err)
                 continue
             }
-            files = append(files, ffiles...)
+            files = append(files, openedFiles...)
         }
         // TODO: not a permanant solution, could have race condition issues.
         go io.Copy(os.Stdout, r)
@@ -201,28 +211,24 @@ func StartPrograms(programs []Command) (map[int]*Child, int) {
                 Gid: uint32(gid),
             },
         }
-
         // Start the process
         argv := append([]string{cmd.Filepath}, cmd.Args...)
         proc, err := os.StartProcess(cmd.Filepath, argv, attr)
+        c := &Child{
+            Cmd: &cmd,
+            Proc: proc,
+        }
+        ret[proc.Pid] = c
         if err != nil {
             log.Printf("%v: Error starting process: %v", cmd.Filepath, err)
             errCnt++
             if proc != nil && proc.Pid > 0 {
-                ret[proc.Pid] = &Child{
-                    Up: false,
-                    Cmd: &cmd,
-                    Proc: proc,
-                    Message: err.Error(),
-                }
+                c.Up = false
+                c.Message = fmt.Sprintf("Error starting process: %v", err)
             }
             continue
         }
-        ret[proc.Pid] = &Child{
-            Up: true,
-            Cmd: &cmd,
-            Proc: proc,
-        }
+        c.Up = true
         log.Printf("Started process: %v; pid: %v", name, proc.Pid)
         log.Printf("Waiting 1 second...")
         time.Sleep(time.Second)
@@ -272,7 +278,6 @@ func readConfig(filename string) ([]Command, error) {
 
 func main() {
     flag.Parse()
-
     commands, err := readConfig(*configFilename)
     if err != nil {
         log.Fatalf("Failed to read config file. error: \"%v\"", err)
@@ -291,14 +296,28 @@ func main() {
         close(quit)
     }()
 
-    children, _ := StartPrograms(commands)
+    var children map[int]*Child
     childrenMut := &sync.RWMutex{}
-    go MonitorChildren(quit, func (pid int, message string) {
+    go MonitorChildrenDeaths(quit, func (pid int, message string) {
         childrenMut.Lock()
         defer childrenMut.Unlock()
-        children[pid].Message = message
-        log.Printf("%v\n\n%v", children[pid].Cmd.Filepath, message)
+        child, ok := children[pid]
+        if !ok {
+            log.Printf("Got death message for unregistered child: %v", message)
+            return
+        }
+        child.Up = false
+        child.Message = message
+        log.Printf("%v (pid: %v)\n\n%v",
+            children[pid].Cmd.Filepath, pid, message)
     })
+    // Mutex to make the death message handler wait for data about the children
+    childrenMut.Lock()
+    children, errcnt := StartPrograms(commands)
+    childrenMut.Unlock()
+    if errcnt != 0 {
+        log.Printf("%v errors occurred in spawning", errcnt)
+    }
 
     <-quit
 }
