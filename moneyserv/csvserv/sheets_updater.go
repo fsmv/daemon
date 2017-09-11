@@ -2,9 +2,8 @@ package csvserv
 
 import (
     "os"
-    "io"
+    "io/ioutil"
     "log"
-    "bufio"
     "fmt"
     "time"
     "sync"
@@ -41,12 +40,11 @@ type SheetsUpdater struct {
 }
 
 func New(oauthClientId, oauthClientSecret string) *SheetsUpdater{
-    log.Print(oauthClientId, " ", oauthClientSecret)
     s := &SheetsUpdater{
         client: oauthClient{
             ID: oauthClientId,
             Secret: oauthClientSecret,
-            RedirectURI: url.QueryEscape(baseURL + callbackPath),
+            RedirectURI: baseURL + callbackPath,
         },
         tokensMut: &sync.RWMutex{},
     }
@@ -59,18 +57,15 @@ func (s *SheetsUpdater) maybeLoadToken() {
     f, err := os.Open(tokenFile)
     defer f.Close()
     if err != nil {
-        if err == os.ErrNotExist {
-            return
-        }
-        log.Printf("Error loading token file: %v", err)
         return
     }
-    d := gob.NewDecoder(bufio.NewReader(f))
+    d := gob.NewDecoder(f)
     s.tokensMut.Lock()
     err = d.Decode(&s.token)
     s.tokensMut.Unlock()
     if err != nil {
         log.Printf("Failed to decode token file: %v", err)
+        return
     }
     log.Printf("Loaded auth token from file")
     s.hasToken = true
@@ -88,7 +83,7 @@ func (s *SheetsUpdater) saveToken(token oauthToken) {
         log.Printf("Failed to create token file: %v", err)
         return
     }
-    e := gob.NewEncoder(bufio.NewWriter(f))
+    e := gob.NewEncoder(f)
     err = e.Encode(token)
     if err != nil {
         log.Printf("Failed to encode token struct: %v", err)
@@ -108,7 +103,8 @@ func (s *SheetsUpdater) registerHandlers() {
         scope := url.QueryEscape("https://www.googleapis.com/auth/spreadsheets")
         url := fmt.Sprintf("https://accounts.google.com/o/oauth2/v2/auth?" +
             "access_type=offline&response_type=code&client_id=%v&" +
-            "redirect_uri=%v&scope=%v", s.client.ID, s.client.RedirectURI, scope)
+            "redirect_uri=%v&scope=%v",
+            s.client.ID, url.QueryEscape(s.client.RedirectURI), scope)
         http.Redirect(w, r, url, http.StatusSeeOther)
     })
     http.HandleFunc(callbackPath, func(w http.ResponseWriter, r *http.Request) {
@@ -130,13 +126,15 @@ func (s *SheetsUpdater) registerHandlers() {
             v.Add("redirect_uri", s.client.RedirectURI)
             v.Add("grant_type", "authorization_code")
             resp, err := http.PostForm("https://www.googleapis.com/oauth2/v4/token", v)
+            defer resp.Body.Close()
             if err != nil || resp.StatusCode != http.StatusOK {
                 if err != nil {
-                    log.Printf("Failed request OAuth token: %v", err)
+                    log.Printf("Failed to request OAuth token: %v", err)
                 } else {
                     var errorMsgBytes []byte
-                    io.ReadFull(resp.Body, errorMsgBytes)
-                    log.Printf("Could not get OAuth token. HTTP error: %v, %v",
+                    errorMsgBytes, _ = ioutil.ReadAll(resp.Body)
+                    log.Printf("Could not get OAuth token.\nRequest: %v\n" +
+                        "HTTP error: %v\n%v", v.Encode(),
                         resp.Status, string(errorMsgBytes))
                 }
                 http.Error(w, "Failed to contact oauth server",
@@ -147,7 +145,7 @@ func (s *SheetsUpdater) registerHandlers() {
             var oauthResp struct {
                 access_token  string
                 expires_in    int
-                taken_type    string
+                token_type    string
                 refresh_token string
             }
             err = json.NewDecoder(resp.Body).Decode(&oauthResp)
