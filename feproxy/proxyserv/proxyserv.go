@@ -8,12 +8,16 @@
 package proxyserv
 
 import (
+    "crypto/tls"
     "fmt"
+    "io/ioutil"
     "log"
     "math/rand"
+    "net"
     "net/http"
     "net/http/httputil"
     "net/url"
+    "os"
     "strconv"
     "sync"
     "time"
@@ -172,7 +176,6 @@ func (p *ProxyServ) selectForwarder(url string) *forwarder {
     return ret
 }
 
-
 // ServeHTTP is the ProxyServ net/http handler func which selects a registered
 // forwarder to handle the request based on the forwarder's pattern
 func (p *ProxyServ) ServeHTTP(w http.ResponseWriter, req *http.Request) {
@@ -192,15 +195,64 @@ func (p *ProxyServ) ServeHTTP(w http.ResponseWriter, req *http.Request) {
     fwd.Handler.ServeHTTP(w, req)
 }
 
+// RedirectToHTTPS is an http Handler function which redirects any requests to
+// the same url but with https instead of http
+func RedirectToHTTPS(w http.ResponseWriter, req *http.Request) {
+    var url url.URL = *req.URL // make a copy
+    url.Scheme = "https"
+    url.Host = req.Host
+    url.Host = url.Hostname() // strip the port if one exists
+    http.Redirect(w, req, url.String(), http.StatusSeeOther)
+}
+
+// loadTLSConfig loads the data from the tls files then closes them
+func loadTLSConfig(tlsCert, tlsKey *os.File) (*tls.Config, error) {
+    defer tlsCert.Close()
+    defer tlsKey.Close()
+    certBytes, err := ioutil.ReadAll(tlsCert)
+    if err != nil {
+        return nil, fmt.Errorf("failed to read tls cert file: %v", err)
+    }
+    keyBytes, err := ioutil.ReadAll(tlsKey)
+    if err != nil {
+        return nil, fmt.Errorf("failed to read tls key file: %v", err)
+    }
+    cert, err := tls.X509KeyPair(certBytes, keyBytes)
+    if err != nil {
+        return nil, fmt.Errorf("invalid tls file format: %v", err)
+    }
+    ret := &tls.Config{
+        Certificates: make([]tls.Certificate, 1),
+    }
+    ret.Certificates[0] = cert
+    return ret, nil
+}
+
+// runServer calls serv.Serv(list) and prints and error and closes the quit
+// channel if the server dies
+func runServer(quit chan struct{}, name string,
+    serv *http.Server, list net.Listener) {
+
+    err := serv.Serve(list)
+    if err != http.ErrServerClosed {
+        log.Printf("Proxy %v server error: %v", name, err)
+        log.Printf("Proxy %v server died, shutting down", name)
+        close(quit)
+    }
+}
+
 // StartNew creates a new ProxyServ and starts the server.
 //
 // Arguments:
-//  - tlsCert and tlsKey are the path to the TLS certificate and key files
+//  - tlsCert and tlsKey are file handles for the TLS certificate and key files
+//  - httpList and httpsList are listeners for the http and https ports
 //  - startPort and endPort set the range of ports this server offer for lease
 //  - leaseTTL is the duration of the life of a lease
 //  - quit is a channel that will be closed when the server should quit
-func StartNew(tlsCert, tlsKey string, startPort, endPort uint16,
-              leaseTTL string, quit chan struct{}) (*ProxyServ, error) {
+func StartNew(tlsCert, tlsKey *os.File, httpList, httpsList net.Listener,
+    startPort, endPort uint16,
+    leaseTTL string, quit chan struct{}) (*ProxyServ, error) {
+
     if !(startPort < endPort) {
         return nil, fmt.Errorf("startPort (%v) must be less than endPort (%v)",
             startPort, endPort)
@@ -210,6 +262,11 @@ func StartNew(tlsCert, tlsKey string, startPort, endPort uint16,
     if err != nil {
         return nil, fmt.Errorf("bad leaseTTL string format: %v", leaseTTL)
     }
+    tlsConfig, err := loadTLSConfig(tlsCert, tlsKey)
+    if err != nil {
+        return nil, fmt.Errorf("failed to load TLS config: %v", err)
+    }
+    // Start the TLS server
     p := &ProxyServ{
         mut:              &sync.RWMutex{},
         forwarders:       make(map[string]forwarder),
@@ -218,25 +275,24 @@ func StartNew(tlsCert, tlsKey string, startPort, endPort uint16,
         ttlString:        leaseTTL,
         ttlDuration:      ttlDuration,
     }
-    server := &http.Server{
+    tlsServer := &http.Server{
         Handler: p,
+        TLSConfig: tlsConfig.Clone(),
     }
-    // Start the TTL monitoring thread
+    // also start the TTL monitoring thread
     go p.monitorTTLs(time.NewTicker(ttlDuration), quit)
-    // Start the server
-    go func () {
-        err := server.ListenAndServeTLS(tlsCert, tlsKey)
-        if err != nil { // TODO(1.8): err != ErrServerClosed
-            log.Print("Proxy server error: ", err)
-            log.Print("Proxy server died, shutting down")
-        }
-        close(quit)
-    }()
-    // Close the server on quit signal
+    go runServer(quit, "TLS", tlsServer, tls.NewListener(httpsList, tlsConfig))
+    // Start the HTTP server to redirect to HTTPS
+    httpServer := &http.Server{
+        Handler: http.HandlerFunc(RedirectToHTTPS),
+    }
+    go runServer(quit, "HTTP redirect", httpServer, httpList)
+    // Close the servers on quit signal
     go func () {
         <-quit
-        // TODO(1.8): server.Close()
-        log.Fatal("Killing process. Go 1.3 doesn't support http.Server.Close()")
+        httpServer.Close()
+        tlsServer.Close()
+        fmt.Print("Got quit signal, killed servers")
     }()
     return p, nil
 }
