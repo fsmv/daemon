@@ -20,33 +20,22 @@ const (
     tokenFile = "oauth_tokens"
 )
 
-type oauthClient struct {
-    ID           string
-    Secret       string
-    RedirectURI  string
-}
-
-type oauthToken struct {
-    Access  string
-    Refresh string
-    Timeout time.Time
-}
 
 type SheetsUpdater struct {
-    client    oauthClient
-    tokensMut *sync.RWMutex
-    token     oauthToken
+    client    OAuthClient
+    tokenMut  *sync.RWMutex
+    token     OAuthToken
     hasToken  bool
 }
 
-func New(oauthClientId, oauthClientSecret string) *SheetsUpdater{
+func New(oauthClientId, oauthClientSecret string) *SheetsUpdater {
     s := &SheetsUpdater{
-        client: oauthClient{
+        client: {
             ID: oauthClientId,
             Secret: oauthClientSecret,
             RedirectURI: baseURL + callbackPath,
         },
-        tokensMut: &sync.RWMutex{},
+        tokenMut: &sync.RWMutex{},
     }
     s.maybeLoadToken()
     s.registerHandlers()
@@ -71,7 +60,7 @@ func (s *SheetsUpdater) maybeLoadToken() {
     s.hasToken = true
 }
 
-func (s *SheetsUpdater) saveToken(token oauthToken) {
+func (s *SheetsUpdater) saveToken(token OAuthToken) {
     // Store in memory
     s.tokensMut.Lock()
     s.token = token
@@ -91,6 +80,10 @@ func (s *SheetsUpdater) saveToken(token oauthToken) {
     }
 }
 
+func (s *SheetsUpdater) genXSRFToken() string {
+    // TODO
+}
+
 func (s *SheetsUpdater) registerHandlers() {
     if s.hasToken {
         return
@@ -100,71 +93,30 @@ func (s *SheetsUpdater) registerHandlers() {
             fmt.Fprint(w, "<html><body><h2>Already authed!</h2></body></html>")
             return
         }
-        scope := url.QueryEscape("https://www.googleapis.com/auth/spreadsheets")
-        url := fmt.Sprintf("https://accounts.google.com/o/oauth2/v2/auth?" +
-            "access_type=offline&response_type=code&client_id=%v&" +
-            "redirect_uri=%v&scope=%v",
-            s.client.ID, url.QueryEscape(s.client.RedirectURI), scope)
-        http.Redirect(w, r, url, http.StatusSeeOther)
+        redirectURL := s.client.GetRedirectURL(
+            "https://accounts.google.com/o/oauth2/v2/",
+            "https://www.googleapis.com/auth/spreadsheets",
+            s.genXSRFToken())
+        http.Redirect(w, r, redirectURL, http.StatusSeeOther)
     })
+    callbackHandler := s.client.NewCallbackHandler(
+        "https://www.googleapis.com/oauth2/v4/token",
+        // TODO: interface for these functions
+        func (token string) bool {
+            return s.checkXSRFToken(token)
+        },
+        func (token OAuthToken) {
+            s.saveToken(token)
+        })
     http.HandleFunc(callbackPath, func(w http.ResponseWriter, r *http.Request) {
         if s.hasToken {
             http.NotFound(w, r)
         }
-        // OAuth Auth Callback
-        resp := r.URL.Query()
-        if errStr, ok := resp["error"]; ok { // Got error
-            fmt.Fprintf(w, errStr[0])
+        callbackHandler.ServeHTTP(w, r)
+        // Success!
+        if w /* TODO: check closed */ {
             return
         }
-        if code, ok := resp["code"]; ok { // Got authorization code
-            // Ask OAuth server for refresh and access tokens
-            v := url.Values{}
-            v.Add("code", code[0])
-            v.Add("client_id", s.client.ID)
-            v.Add("client_secret", s.client.Secret)
-            v.Add("redirect_uri", s.client.RedirectURI)
-            v.Add("grant_type", "authorization_code")
-            resp, err := http.PostForm("https://www.googleapis.com/oauth2/v4/token", v)
-            defer resp.Body.Close()
-            if err != nil || resp.StatusCode != http.StatusOK {
-                if err != nil {
-                    log.Printf("Failed to request OAuth token: %v", err)
-                } else {
-                    var errorMsgBytes []byte
-                    errorMsgBytes, _ = ioutil.ReadAll(resp.Body)
-                    log.Printf("Could not get OAuth token.\nRequest: %v\n" +
-                        "HTTP error: %v\n%v", v.Encode(),
-                        resp.Status, string(errorMsgBytes))
-                }
-                http.Error(w, "Failed to contact oauth server",
-                           http.StatusInternalServerError)
-                return
-            }
-            // Got refresh and access token response, parse it
-            var oauthResp struct {
-                access_token  string
-                expires_in    int
-                token_type    string
-                refresh_token string
-            }
-            err = json.NewDecoder(resp.Body).Decode(&oauthResp)
-            if err != nil {
-                log.Printf("Response from auth server invalid. err: %v", err)
-                http.Error(w, "Invalid response from oauth server",
-                           http.StatusInternalServerError)
-                return
-            }
-            // Store the access and refresh token in our struct
-            s.saveToken(oauthToken{
-                Access:  oauthResp.access_token,
-                Refresh: oauthResp.refresh_token,
-                Timeout: time.Now().Add(time.Second * time.Duration(oauthResp.expires_in)),
-            })
-            // Success!
-            fmt.Fprint(w, "<html><body><h2>Login sucessful!</h2></body></html>")
-            return
-        }
-        http.NotFound(w, r)
+        fmt.Fprint(w, "<html><body><h2>Login sucessful!</h2></body></html>")
     })
 }
