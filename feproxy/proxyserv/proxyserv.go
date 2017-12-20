@@ -21,6 +21,7 @@ import (
     "strconv"
     "sync"
     "time"
+    "errors"
 )
 
 // How often to look through the Leases and unregister those past TTL
@@ -63,14 +64,18 @@ func (p *ProxyServ) GetNumLeases() int {
     return ret
 }
 
-// Unregister deletes the forwarder and associated lease with the given pattern
-func (p *ProxyServ) Unregister(pattern string) {
+// Unregister deletes the forwarder and associated lease with the given pattern.
+// Returns an error if the pattern is not registered
+func (p *ProxyServ) Unregister(pattern string) error {
     p.mut.Lock()
     defer p.mut.Unlock()
-    if fwd, ok := p.forwarders[pattern]; ok {
-        p.unusedPorts = append(p.unusedPorts, int(fwd.Port))
-        delete(p.forwarders, pattern)
+    fwd, ok := p.forwarders[pattern]
+    if !ok {
+        return errors.New("pattern not registered")
     }
+    p.unusedPorts = append(p.unusedPorts, int(fwd.Port))
+    delete(p.forwarders, pattern)
+    return nil
 }
 
 // reservePort retuns a random unused port and marks it as used.
@@ -110,6 +115,22 @@ func (p *ProxyServ) Register(pattern string) (lease Lease, err error) {
     }
     return Lease{
         Port: port,
+        TTL:  p.ttlString,
+    }, nil
+}
+
+// Renew renews an existing lease. Returns an error if the pattern is not
+// registered.
+func (p *ProxyServ) Renew(pattern string) (lease Lease, err error) {
+    p.mut.Lock()
+    defer p.mut.Unlock()
+    fwd, ok := p.forwarders[pattern]
+    if !ok {
+        return Lease{}, errors.New("pattern not registered")
+    }
+    fwd.Timeout = time.Now().Add(p.ttlDuration)
+    return Lease{
+        Port: fwd.Port,
         TTL:  p.ttlString,
     }, nil
 }

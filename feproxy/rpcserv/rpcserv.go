@@ -21,6 +21,7 @@ type RPCServ struct {
 func (s *RPCServ) Register(pattern string, ret *proxyserv.Lease) error {
     lease, err := s.proxyServ.Register(pattern)
     if err != nil {
+        log.Print(err)
         return err
     }
     log.Printf("Registered forwarder to localhost:%v, Pattern: %v, TTL: %v",
@@ -31,8 +32,24 @@ func (s *RPCServ) Register(pattern string, ret *proxyserv.Lease) error {
 
 // Unregister unregisters the forwarding rule with the given pattern
 func (s *RPCServ) Unregister(pattern string, _ *struct{}) error {
-    s.proxyServ.Unregister(pattern)
+    err := s.proxyServ.Unregister(pattern)
+    if err != nil {
+        log.Print(err)
+        return err
+    }
     log.Printf("Unregistered rule with pattern: %v", pattern)
+    return nil
+}
+
+// Renew renews the lease on a currently registered pattern
+func (s *RPCServ) Renew(pattern string, ret *proxyserv.Lease) error {
+    lease, err := s.proxyServ.Renew(pattern)
+    if err != nil {
+        log.Print(err)
+        return err
+    }
+    log.Printf("Renewed lease on pattern: %v. Port: %v, TTL: %v",
+        pattern, lease.Port, lease.TTL)
     return nil
 }
 
