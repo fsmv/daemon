@@ -1,16 +1,12 @@
-package csvserv
+package main
 
 import (
     "os"
-    "io/ioutil"
     "log"
     "fmt"
-    "time"
     "sync"
-    "encoding/json"
     "encoding/gob"
     "net/http"
-    "net/url"
 )
 
 const (
@@ -20,7 +16,6 @@ const (
     tokenFile = "oauth_tokens"
 )
 
-
 type SheetsUpdater struct {
     client    OAuthClient
     tokenMut  *sync.RWMutex
@@ -28,11 +23,11 @@ type SheetsUpdater struct {
     hasToken  bool
 }
 
-func New(oauthClientId, oauthClientSecret string) *SheetsUpdater {
+func InitSheetsUpdater(oauthClientId, oauthClientSecret string) *SheetsUpdater {
     s := &SheetsUpdater{
-        client: {
-            ID: oauthClientId,
-            Secret: oauthClientSecret,
+        client: OAuthClient{
+            ID:          oauthClientId,
+            Secret:      oauthClientSecret,
             RedirectURI: baseURL + callbackPath,
         },
         tokenMut: &sync.RWMutex{},
@@ -49,9 +44,9 @@ func (s *SheetsUpdater) maybeLoadToken() {
         return
     }
     d := gob.NewDecoder(f)
-    s.tokensMut.Lock()
+    s.tokenMut.Lock()
     err = d.Decode(&s.token)
-    s.tokensMut.Unlock()
+    s.tokenMut.Unlock()
     if err != nil {
         log.Printf("Failed to decode token file: %v", err)
         return
@@ -62,9 +57,9 @@ func (s *SheetsUpdater) maybeLoadToken() {
 
 func (s *SheetsUpdater) saveToken(token OAuthToken) {
     // Store in memory
-    s.tokensMut.Lock()
+    s.tokenMut.Lock()
     s.token = token
-    s.tokensMut.Unlock()
+    s.tokenMut.Unlock()
     // Write to file
     f, err := os.Create(tokenFile)
     defer f.Close()

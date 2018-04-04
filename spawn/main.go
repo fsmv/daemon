@@ -21,7 +21,7 @@ var (
     configFilename = flag.String("config", "config",
         "The path to the config file")
     path = flag.String("path", "",
-        "A single path to use for relative paths")
+        "A single path to use for relative paths in the config file")
 )
 
 // Command is one executable to run with options

@@ -18,6 +18,7 @@ import (
     "net/http/httputil"
     "net/url"
     "os"
+    "path"
     "strconv"
     "sync"
     "time"
@@ -32,7 +33,7 @@ const ttlCheckFreq = "15m"
 type ProxyServ struct {
     mut              *sync.RWMutex
     // Map from pattern to forwarder. Protected by mut.
-    forwarders       map[string]forwarder
+    forwarders       map[string]*forwarder
     // List of ports to be leased out, in a random order. Protected by mut.
     // Always has values between 0 and n, see unusedPortOffset.
     unusedPorts      []int
@@ -48,7 +49,7 @@ type forwarder struct {
     Timeout time.Time
     Pattern string
     Port    uint16
-}
+} 
 
 // Lease contains the terms of the lease granted by ProxyServ
 type Lease struct {
@@ -107,8 +108,28 @@ func (p *ProxyServ) Register(pattern string) (lease Lease, err error) {
         return Lease{}, err
     }
     // Store the forwarder
-    p.forwarders[pattern] = forwarder{
-        Handler: httputil.NewSingleHostReverseProxy(backend),
+    backendQuery := backend.RawQuery
+    proxy := &httputil.ReverseProxy{
+        Director: func (req *http.Request) {
+            // Copied from https://golang.org/src/net/http/httputil/reverseproxy.go?s=2588:2649#L80
+            req.URL.Scheme = backend.Scheme
+            req.URL.Host = backend.Host
+            req.URL.Path = path.Join(backend.Path, req.URL.Path)
+            if backendQuery == "" || req.URL.RawQuery == "" {
+                req.URL.RawQuery = backendQuery + req.URL.RawQuery
+            } else {
+                req.URL.RawQuery = backendQuery + "&" + req.URL.RawQuery
+            }
+            if _, ok := req.Header["User-Agent"]; !ok {
+                // explicitly disable User-Agent so it's not set to default value
+                req.Header.Set("User-Agent", "")
+            }
+            // My addition
+            req.Header.Add("Orig-Address", req.RemoteAddr)
+        },
+    }
+    p.forwarders[pattern] = &forwarder{
+        Handler: proxy,
         Timeout: time.Now().Add(p.ttlDuration),
         Pattern: pattern,
         Port:    port,
@@ -191,7 +212,7 @@ func (p *ProxyServ) selectForwarder(url string) *forwarder {
         }
         if ret == nil || len(pattern) > maxPatternLen {
             maxPatternLen = len(pattern)
-            ret = &fwd
+            ret = fwd
         }
     }
     return ret
@@ -290,7 +311,7 @@ func StartNew(tlsCert, tlsKey *os.File, httpList, httpsList net.Listener,
     // Start the TLS server
     p := &ProxyServ{
         mut:              &sync.RWMutex{},
-        forwarders:       make(map[string]forwarder),
+        forwarders:       make(map[string]*forwarder),
         unusedPorts:      r.Perm(int(endPort - startPort)),
         unusedPortOffset: startPort,
         ttlString:        leaseTTL,

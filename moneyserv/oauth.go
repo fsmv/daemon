@@ -1,5 +1,17 @@
 // TODO: comments
-package moneyserv
+package main
+
+import (
+    "bytes"
+    "encoding/json"
+    "fmt"
+    "io"
+    "io/ioutil"
+    "log"
+    "net/http"
+    "net/url"
+    "time"
+)
 
 type OAuthClient struct {
     ID           string
@@ -13,7 +25,7 @@ type OAuthToken struct {
     Timeout time.Time
 }
 
-func (OAuthClient *c) GetRedirectURL(authURL, scope, xsrfToken string) string {
+func (c *OAuthClient) GetRedirectURL(authURL, scope, xsrfToken string) string {
     v := url.Values{
         "access_type": {"offline"},
         "response_type": {"code"},
@@ -32,7 +44,7 @@ type OAuthCallbackHandler struct {
     successfulAuth func(OAuthToken)
 }
 
-func (OAuthClient *c) NewCallbackHandler(tokenReqURL string,
+func (c *OAuthClient) NewCallbackHandler(tokenReqURL string,
     checkXSRFToken func(string) bool,
     successfulAuth func(OAuthToken)) *OAuthCallbackHandler {
 
@@ -45,16 +57,16 @@ func (OAuthClient *c) NewCallbackHandler(tokenReqURL string,
 }
 
 // Ask OAuth server for refresh and access tokens
-func (OAuthClient *c) requestToken(host, authorizationCode string,
+func (c *OAuthClient) requestToken(host, authorizationCode string,
     token *OAuthToken) error {
 
     // Send Request
     v := url.Values{
-        "grant_type":    "authorization_code",
-        "client_id":     c.ID,
-        "client_secret": c.Secret,
-        "redirect_uri":  c.RedirectURI,
-        "code":          authorizationCode,
+        "grant_type":    []string{"authorization_code"},
+        "client_id":     []string{c.ID},
+        "client_secret": []string{c.Secret},
+        "redirect_uri":  []string{c.RedirectURI},
+        "code":          []string{authorizationCode},
     }
     resp, err := http.PostForm(host, v)
     defer resp.Body.Close()
@@ -75,12 +87,17 @@ func (OAuthClient *c) requestToken(host, authorizationCode string,
         token_type    string
         refresh_token string
     }
-    err = json.NewDecoder(resp.Body).Decode(&tokenResp)
+    var bodyBuff bytes.Buffer
+    tee := io.TeeReader(resp.Body, &bodyBuff)
+    err = json.NewDecoder(tee).Decode(&tokenResp)
     if err != nil {
-        log.Printf("Response from auth server invalid. err: %v", err)
-        http.Error(w, "Invalid response from oauth server",
-            http.StatusInternalServerError)
-        return
+        // Finish reading the tee to copy everything to the buffer
+        for b, err := make([]byte, 512), error(nil); err == nil; {
+            _, err = tee.Read(b)
+        }
+        return fmt.Errorf("Response from auth server could not be decoded.\n"+
+            "Sent: %v\nDecode Error: %v\nResponse:\n%v",
+            host + v.Encode(), err, bodyBuff)
     }
     // Return result
     token.Access = tokenResp.access_token
@@ -89,7 +106,7 @@ func (OAuthClient *c) requestToken(host, authorizationCode string,
     return nil
 }
 
-func (OAuthCallbackHandler *h) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (h *OAuthCallbackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
     // TODO: log requests on error
     q := r.URL.Query()
     if errStr := q.Get("error"); errStr != "" {
@@ -110,7 +127,7 @@ func (OAuthCallbackHandler *h) ServeHTTP(w http.ResponseWriter, r *http.Request)
         return
     }
     var token OAuthToken
-    err := h.Client.requestToken(h.TokenReqURL, code, &token)
+    err := h.Client.requestToken(h.tokenReqURL, code, &token)
     if err != nil {
         log.Print(err)
         http.Error(w, "Recieved error from OAuth server in token request",

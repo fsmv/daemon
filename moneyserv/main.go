@@ -6,7 +6,6 @@ import (
     "os/signal"
     "fmt"
     "flag"
-    "daemon/feproxy/proxyserv"
     "log"
     "time"
     "net/http"
@@ -14,7 +13,8 @@ import (
     "strings"
     "strconv"
     "sync"
-    "daemon/moneyserv/csvserv"
+
+    "daemon/feproxy/proxyserv"
 )
 
 var (
@@ -76,7 +76,7 @@ func main() {
         os.Exit(0)
     }()
 
-    csvserv.New(*oauthClientId, *oauthClientSecret)
+    InitSheetsUpdater(*oauthClientId, *oauthClientSecret)
 
     http.HandleFunc("/data.csv", func(w http.ResponseWriter, r *http.Request) {
         w.Header().Set("Content-Type", "text/csv")
