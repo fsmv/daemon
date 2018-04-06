@@ -1,0 +1,30 @@
+Requires `sudo modprobe [module]` for w1-gpio and w1-therm. I'm sure there's
+some config file I can put these in to make it automatic.
+
+The data pin must be connected to gpio pin 4 of the Pi.
+
+ls /sys/bus/w1/devices/ to find the folders for each device. There's also a
+w1_bus_masterN folder which we can ignore.
+
+Inside the device folder there is a w1_slave file which when read, gets a
+temperature reading from the device. It looks like this:
+
+8a 01 4b 46 7f ff 06 10 2c : crc=2c YES
+8a 01 4b 46 7f ff 06 10 2c t=24625
+
+The YES means the checksum passed, the t=##### is the temperature in celsius
+multiplied by 1000.
+
+Or you can take the first two bytes (lsb first then msb) and multiply by 0.0625.
+This multiplier works only in 12 bit accuracy mode. Check the datasheet on page
+6 for the multiplier values for different accuracy modes.
+
+datasheet: https://datasheets.maximintegrated.com/en/ds/MAX31820.pdf
+
+On Page 9 of the datasheet (figure 4) there's a listing for what each byte of
+the message means. In particular there is a config byte which tells you what the
+current accuracy mode is.
+
+I'm not sure that the w1 (one-wire) kernel module supports changing the accuracy
+mode, but it seems to default to 12 bits, that's what the temp sensor defaults
+to on boot.
