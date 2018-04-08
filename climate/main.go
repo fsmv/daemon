@@ -11,10 +11,10 @@ import (
     "path/filepath"
     "time"
     "net/http"
-    //"net/rpc"
+    "net/rpc"
     "strconv"
 
-    //"daemon/feproxy/proxyserv"
+    "daemon/feproxy/proxyserv"
 )
 
 var (
@@ -113,7 +113,7 @@ func logTemperature() {
                 return
             }
         }
-        currFile.WriteString(fmt.Sprintf("%2d:%2d:%2d, %v\n",
+        currFile.WriteString(fmt.Sprintf("%02d:%02d:%02d, %v\n",
             now.Hour(), now.Minute(), now.Second(), currTemp))
         if !once {
             once = true
@@ -159,8 +159,7 @@ func main() {
     sigs := make(chan os.Signal, 2)
     signal.Notify(sigs, os.Interrupt, os.Kill)
 
-    // TODO feproxy needs my IP to allow registering from not localhost
-    /*client, err := rpc.Dial("tcp", *feproxyAddr)
+    client, err := rpc.Dial("tcp", *feproxyAddr)
     if err != nil {
         log.Fatalf("Failed to connect to frontend proxy RPC server: %v", err)
     }
@@ -173,7 +172,7 @@ func main() {
     }
     log.Printf("Obtained lease, port: %v, ttl: %v", lease.Port, lease.TTL)
 
-    defer client.Call("feproxy.Deregister", register, &lease)*/
+    defer client.Call("feproxy.Deregister", register, &lease)
     go func() {
         <-sigs
         //client.Call("feproxy.Deregister", register, &lease)
@@ -182,18 +181,16 @@ func main() {
         os.Exit(0)
     }()
 
-    logTemperature()
+    go logTemperature()
 
-    http.Handle("/climate", http.FileServer(http.Dir(*dataDir)))
-
-    /*http.HandleFunc("/climate", func(w http.ResponseWriter, r *http.Request) {
+    http.HandleFunc("/climate", func(w http.ResponseWriter, r *http.Request) {
         w.Header().Set("Content-Type", "text/html")
         fmt.Fprint(w, "<!doctype html>\n<html><body>")
 
         fmt.Fprint(w, "<h1>Hello</h1>")
         //writeSVGGraph(w)
         fmt.Fprint(w, "</body></html>")
-    })*/
+    })
     http.HandleFunc("/quit", func(w http.ResponseWriter, r *http.Request) {
         fmt.Fprint(w, "<body><h3>Shutting down!</h3></body>")
         time.AfterFunc(time.Second, func () {
@@ -202,7 +199,7 @@ func main() {
         })
     })
 
-    //log.Print("Starting server...")
+    log.Print("Starting server...")
     // TODO(1.8): check for err == ErrServerClosed
-    //log.Fatal(http.ListenAndServe(":" + strconv.Itoa(int(lease.Port)), nil))
+    log.Fatal(http.ListenAndServe(":" + strconv.Itoa(int(lease.Port)), nil))
 }

@@ -95,14 +95,14 @@ func (p *ProxyServ) reservePortUnsafe() (uint16, error) {
 
 // Register leases a new forwarder for the given pattern.
 // Returns an error if the server has no more ports to lease.
-func (p *ProxyServ) Register(pattern string) (lease Lease, err error) {
+func (p *ProxyServ) Register(clientAddr string, pattern string) (lease Lease, err error) {
     p.mut.Lock()
     defer p.mut.Unlock()
     port, err := p.reservePortUnsafe()
     if err != nil {
         return Lease{}, err
     }
-    backend, err := url.Parse("http://127.0.0.1:" + strconv.Itoa(int(port)))
+    backend, err := url.Parse("http://" + clientAddr + ":" + strconv.Itoa(int(port)))
     if err != nil {
         log.Fatal(err)
         return Lease{}, err

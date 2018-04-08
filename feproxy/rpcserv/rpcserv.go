@@ -4,7 +4,7 @@ import (
     "fmt"
     "log"
     "net"
-    "net/rpc"
+    "strings"
     "strconv"
 
     "daemon/feproxy/proxyserv"
@@ -18,20 +18,23 @@ type RPCServ struct {
 
 // Register registers a new forwarding rule in the proxy server.
 // Randomly assigns port for the client to listen on
-func (s *RPCServ) Register(pattern string, ret *proxyserv.Lease) error {
-    lease, err := s.proxyServ.Register(pattern)
+func (s *RPCServ) Register(clientAddr net.Addr, pattern string, ret *proxyserv.Lease) error {
+    addrRaw := clientAddr.String()
+    portIdx := strings.Index(addrRaw, ":")
+    addrNoPort := addrRaw[:portIdx]
+    lease, err := s.proxyServ.Register(addrNoPort, pattern)
     if err != nil {
         log.Print(err)
         return err
     }
-    log.Printf("Registered forwarder to localhost:%v, Pattern: %v, TTL: %v",
-               lease.Port, pattern, lease.TTL)
+    log.Printf("Registered forwarder to %v:%v, Pattern: %v, TTL: %v",
+               addrNoPort, lease.Port, pattern, lease.TTL)
     *ret = lease
     return nil
 }
 
 // Unregister unregisters the forwarding rule with the given pattern
-func (s *RPCServ) Unregister(pattern string, _ *struct{}) error {
+func (s *RPCServ) Unregister(clientAddr net.Addr, pattern string, _ *struct{}) error {
     err := s.proxyServ.Unregister(pattern)
     if err != nil {
         log.Print(err)
@@ -42,7 +45,7 @@ func (s *RPCServ) Unregister(pattern string, _ *struct{}) error {
 }
 
 // Renew renews the lease on a currently registered pattern
-func (s *RPCServ) Renew(pattern string, ret *proxyserv.Lease) error {
+func (s *RPCServ) Renew(clientAddr net.Addr, pattern string, ret *proxyserv.Lease) error {
     lease, err := s.proxyServ.Renew(pattern)
     if err != nil {
         log.Print(err)
@@ -54,7 +57,7 @@ func (s *RPCServ) Renew(pattern string, ret *proxyserv.Lease) error {
 }
 
 // Quit quits stops this binary
-func (s *RPCServ) Quit(_, _ *struct{}) error {
+func (s *RPCServ) Quit(clientAddr net.Addr, _, _ *struct{}) error {
     log.Print("Shutting down")
     close(s.quit)
     return nil
@@ -67,7 +70,7 @@ func StartNew(proxyServ *proxyserv.ProxyServ, port uint16,
         proxyServ: proxyServ,
         quit:      quit,
     }
-    server := rpc.NewServer()
+    server := NewServerWithIP()
     server.RegisterName("feproxy", s)
     l, err := net.Listen("tcp", ":" + strconv.Itoa(int(port)))
     if err != nil {
