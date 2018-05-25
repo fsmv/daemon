@@ -1,6 +1,7 @@
 package main
 
 import (
+    "bufio"
     "io"
     "os"
     "os/signal"
@@ -27,7 +28,7 @@ var (
 )
 
 const (
-    register = "/climate"
+    register = "/climate-test"
 
     w1Dir = "/sys/bus/w1/devices/"
     w1MasterFilename = "w1_bus_master"
@@ -86,11 +87,11 @@ func readTemperature(sensorFile *os.File) (float32, error) {
 func logTemperature() {
     sensorFile, err := openSensorFile()
     if err != nil {
-        log.Printf("Failed to open sensor file")
+        log.Printf("Failed to open sensor file: %v", err)
         return
     }
     if err := os.MkdirAll(*dataDir, os.FileMode(0775)); err != nil {
-        log.Printf("Failed to make data directory %#v", *dataDir)
+        log.Printf("Failed to make data directory %#v: %v", *dataDir, err)
         return
     }
     var once bool
@@ -100,7 +101,7 @@ func logTemperature() {
         now := time.Now()
         currTemp, err := readTemperature(sensorFile)
         if err != nil {
-            log.Printf("Failed to read temperature")
+            log.Printf("Failed to read temperature: %v", err)
         }
         if currDay != now.Day() {
             currDay = now.Day()
@@ -109,7 +110,7 @@ func logTemperature() {
             currFile, err = os.OpenFile(filepath.Join(*dataDir, currDate),
                 os.O_RDWR|os.O_APPEND|os.O_CREATE, os.FileMode(0644))
             if err != nil {
-                log.Printf("Failed to open data log file for today")
+                log.Printf("Failed to open data log file for today: %v", err)
                 return
             }
         }
@@ -125,32 +126,99 @@ func logTemperature() {
 }
 
 type Point struct {
-    x, y float32
+    X, Y float32
 }
-type Polyline []Point
 
-func (l Polyline) Format(f fmt.State, c rune) {
+type SVGPolyline []Point
+
+func (l SVGPolyline) Format(f fmt.State, c rune) {
     if len(l) < 2 {
         fmt.Fprint(f, "<!-- error, not enough points -->\n")
         return
     }
     firstPoint := l[0]
     fmt.Fprintf(f, "<polyline fill=\"none\" stroke=\"black\" points=\"%f %f",
-        firstPoint.x, firstPoint.y)
+        firstPoint.X, firstPoint.Y)
     for _, point := range l[1:] {
-        fmt.Fprintf(f, ", %f %f", point.x, point.y)
+        fmt.Fprintf(f, ", %f %f", point.X, point.Y)
     }
     fmt.Fprint(f, "\"/>\n")
 }
 
-func writeSVGGraph(w io.Writer) {
-    const indent = "    "
-    const line = "<line x1=\"%f\" y1=\"%f\" x2=\"%f\" y2=\"%f\"/>\n"
-    Data := []Point{
-        {0,0},{100,500},{200,0},{300,500},{400,0},{500,500},
+type TemperatureReading struct {
+    Time    time.Time
+    Celsius float32
+}
+
+func parseTempLine(line string) (TemperatureReading, error) {
+    var ret TemperatureReading
+    var timeStr, tempStr string
+    for i := 0; i < len(line); i++ {
+        if line[i] != ',' {
+            if i == len(line)-1 {
+                return ret, fmt.Errorf("expected comma")
+            }
+            continue
+        }
+        timeStr = line[:i]
+        tempStr = line[i+2:]
+        break
     }
-    fmt.Fprintf(w, "<svg width=\"1280\" height=\"720\">\n")
-    fmt.Fprintf(w, "%v\n", Polyline(Data))
+    var err error
+    ret.Time, err = time.Parse("15:04:05", timeStr)
+    if err != nil {
+        return ret, fmt.Errorf("failed to parse time: %v", err)
+    }
+    temp64, err := strconv.ParseFloat(tempStr, 32)
+    ret.Celsius = float32(temp64)
+    if err != nil {
+        return ret, fmt.Errorf("failed to parse temperature: %v", err)
+    }
+    return ret, nil
+}
+
+func readTempLog(filename string) ([]TemperatureReading, error) {
+    f, err := os.Open(filename)
+    if err != nil {
+        return nil, err
+    }
+    defer f.Close()
+    sc := bufio.NewScanner(f)
+    var ret []TemperatureReading
+    for sc.Scan() {
+        temp, err := parseTempLine(sc.Text())
+        if err != nil {
+            return nil, err
+        }
+        ret = append(ret, temp)
+    }
+    if err := sc.Err(); err != nil {
+        return nil, err
+    }
+    return ret, nil
+}
+
+func plotTempSVG(data []TemperatureReading, w io.Writer) {
+    const (
+        width = 1280
+        height = 720
+        outerPadding = 0.04
+        tickLength = 0.01
+    )
+
+    const line = "<line stroke-width=\"0.002\" stroke=\"black\" x1=\"%f\" y1=\"%f\" x2=\"%f\" y2=\"%f\"/>\n"
+    const text = "<text x=\"%f\" y=\"%f\">%s</text>"
+
+    fmt.Fprintf(w, "<svg width=\"1280\" height=\"720\" viewbox=\"0 0 1 1\" preserveAspectRatio=\"xMinYMin\">\n")
+    { // Axes
+        // Vertical
+        fmt.Fprintf(w, line, outerPadding, outerPadding, outerPadding, 1.0 - outerPadding)
+
+        // Horizonal
+        fmt.Fprintf(w, line, outerPadding, 1.0 - outerPadding, 1.0 - outerPadding, 1.0 - outerPadding)
+    }
+    fmt.Printf("First temp reading: %v\n", data[0])
+    //fmt.Fprintf(w, "%v\n", SVGPolyline(Data))
     fmt.Fprintf(w, "</svg>")
 }
 
@@ -170,7 +238,8 @@ func main() {
     if err != nil {
         log.Fatal("Failed to obtain lease from feproxy:", err)
     }
-    log.Printf("Obtained lease, port: %v, ttl: %v", lease.Port, lease.TTL)
+    log.Printf("Obtained lease for %#v, port: %v, ttl: %v",
+        register, lease.Port, lease.TTL)
 
     defer client.Call("feproxy.Deregister", register, &lease)
     go func() {
@@ -181,15 +250,21 @@ func main() {
         os.Exit(0)
     }()
 
-    go logTemperature()
+    //go logTemperature()
 
-    http.HandleFunc("/climate", func(w http.ResponseWriter, r *http.Request) {
+    http.HandleFunc(register, func(w http.ResponseWriter, r *http.Request) {
         w.Header().Set("Content-Type", "text/html")
-        fmt.Fprint(w, "<!doctype html>\n<html><body>")
+        fmt.Fprint(w, "<!doctype html>\n<html><body>\n")
+        defer fmt.Fprint(w, "\n</body></html>")
 
-        fmt.Fprint(w, "<h1>Hello</h1>")
-        //writeSVGGraph(w)
-        fmt.Fprint(w, "</body></html>")
+        const filename = "data/2018-05-21"
+        data, err := readTempLog(filename)
+        if err != nil {
+            fmt.Fprint(w, "<h2>Error reading file: %v</h2>", err)
+            return
+        }
+        //fmt.Fprint(w, "<h1>Hello</h1>\n")
+        plotTempSVG(data, w)
     })
     http.HandleFunc("/quit", func(w http.ResponseWriter, r *http.Request) {
         fmt.Fprint(w, "<body><h3>Shutting down!</h3></body>")
