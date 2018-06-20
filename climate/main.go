@@ -13,6 +13,7 @@ import (
     "time"
     "net/http"
     "net/rpc"
+    "net/smtp"
     "strconv"
 
     "daemon/feproxy/proxyserv"
@@ -25,10 +26,17 @@ var (
         "Directory to save the daily temperature log files in")
     sensorReadInterval = flag.Duration("sensor_read_interval", 1 * time.Minute,
         "How often to read temperature from the sensor")
+
+    alertEmailAddr = flag.String("alert_email_addr", "",
+        "Email address to send alerts to (from itself)")
+    alertEmailPassword = flag.String("alert_email_password", "",
+        "SMTP password for the alert email address")
+    alertServerAddr = flag.String("alert_server_addr", "",
+        "SMTP server address for sending alerts")
 )
 
 const (
-    register = "/climate-test"
+    register = "/climate"
 
     w1Dir = "/sys/bus/w1/devices/"
     w1MasterFilename = "w1_bus_master"
@@ -36,6 +44,8 @@ const (
     // This is used for 12 bit output mode. I could check the whole message from
     // the sensor to check the mode, but I think the kernel always uses 12 bit.
     w1BitMultiplier = 0.0625
+
+    alertDuplicateDelay = 15 * time.Minute
 )
 
 func openSensorFile() (*os.File, error) {
@@ -63,25 +73,47 @@ func openSensorFile() (*os.File, error) {
     return os.Open(sensorFilename)
 }
 
-// returns the temperature read from the w1 file in Celsius
+// One degree (0.85 actually) below absolute zero
+const TemperatureErrVal = -274.0
+
+// Returns the temperature read from the w1 file in Celsius
+// On error, returns TemperatureErrVal
 func readTemperature(sensorFile *os.File) (float32, error) {
     // Read the data
     sensorFile.Sync()
     data := make([]byte, 5)
-    _, err := sensorFile.ReadAt(data, 0)
+    _, err := sensorFile.ReadAt(data, /*offset=*/0)
     if err != nil {
-        return 0, err
+        return TemperatureErrVal,
+            fmt.Errorf("Failed to read file: %v", err)
     }
     // Parse the data
     if data[2] != ' ' {
-        return 0, fmt.Errorf("Invalid file format: %#v", string(data))
+        return TemperatureErrVal,
+            fmt.Errorf("Invalid file format: %#v", string(data))
     }
     hexStr := string(append(data[3:5], data[0], data[1]))
-    reading, err := strconv.ParseInt(hexStr, 16, 16)
+    reading, err := strconv.ParseInt(hexStr, /*base=*/16, /*bits=*/16)
     if err != nil {
-        return 0, fmt.Errorf("Invalid file format: %#v", string(data))
+        return TemperatureErrVal,
+            fmt.Errorf("Invalid file format: %#v", string(data))
     }
     return float32(reading) * w1BitMultiplier, nil;
+}
+
+func alert(subject, message string) error {
+    log.Printf("Alert! %v: %v", subject, message)
+    if *alertServerAddr == "" || *alertEmailAddr == "" || *alertEmailPassword == "" {
+        log.Print("Alert emails disabled (the flags must be set)")
+        return nil
+    }
+    headers := fmt.Sprintf("From: %v\nTo: %v\nSubject: %v\n\n",
+        *alertEmailAddr, *alertEmailAddr, subject)
+    // Strip the port, might only work with gmail
+    authHost := (*alertServerAddr)[:strings.Index(*alertServerAddr, ":")]
+    return smtp.SendMail(*alertServerAddr,
+        smtp.PlainAuth("", *alertEmailAddr, *alertEmailPassword, authHost),
+        *alertEmailAddr, []string{*alertEmailAddr}, []byte(headers + message))
 }
 
 func logTemperature() {
@@ -94,14 +126,28 @@ func logTemperature() {
         log.Printf("Failed to make data directory %#v: %v", *dataDir, err)
         return
     }
-    var once bool
-    var currDay int
-    var currFile *os.File
+    var (
+        once bool
+
+        currDay int
+        currFile *os.File
+
+        lastAlert error
+        lastAlertTime time.Time
+    )
     for {
         now := time.Now()
         currTemp, err := readTemperature(sensorFile)
         if err != nil {
-            log.Printf("Failed to read temperature: %v", err)
+            now = time.Now()
+            if lastAlert != nil && lastAlert.Error() == err.Error() &&
+               now.Sub(lastAlertTime) < alertDuplicateDelay {
+                log.Printf("(Repeat Alert) Error reading temperature: %v", err)
+            } else {
+                alert("Error reading temperature", err.Error())
+            }
+            lastAlert = err
+            lastAlertTime = now
         }
         if currDay != now.Day() {
             currDay = now.Day()
@@ -250,7 +296,7 @@ func main() {
         os.Exit(0)
     }()
 
-    //go logTemperature()
+    go logTemperature()
 
     http.HandleFunc(register, func(w http.ResponseWriter, r *http.Request) {
         w.Header().Set("Content-Type", "text/html")
