@@ -11,6 +11,7 @@ import (
     "strings"
     "path/filepath"
     "time"
+    "math"
     "net/http"
     "net/rpc"
     "net/smtp"
@@ -33,10 +34,14 @@ var (
         "SMTP password for the alert email address")
     alertServerAddr = flag.String("alert_server_addr", "",
         "SMTP server address for sending alerts")
+
+    testWebsiteOnly = flag.Bool("test_website_only", false,
+        "If true, register under /climate-test and don't run the temperature logging code.")
 )
 
 const (
-    register = "/climate"
+    registerProd = "/climate"
+    registerTest = "/climate-test"
 
     w1Dir = "/sys/bus/w1/devices/"
     w1MasterFilename = "w1_bus_master"
@@ -183,7 +188,8 @@ func (l SVGPolyline) Format(f fmt.State, c rune) {
         return
     }
     firstPoint := l[0]
-    fmt.Fprintf(f, "<polyline fill=\"none\" stroke=\"black\" points=\"%f %f",
+    // TODO: make stroke-width configurable
+    fmt.Fprintf(f, "<polyline fill=\"none\" stroke-width=\"1\" stroke=\"black\" points=\"%f %f",
         firstPoint.X, firstPoint.Y)
     for _, point := range l[1:] {
         fmt.Fprintf(f, ", %f %f", point.X, point.Y)
@@ -244,27 +250,86 @@ func readTempLog(filename string) ([]TemperatureReading, error) {
     return ret, nil
 }
 
+func findTempRange(data []TemperatureReading) (min float32, max float32) {
+    min, max = math.MaxFloat32, -math.MaxFloat32
+    for _, r := range data {
+        if r.Celsius < min {
+            min = r.Celsius
+        }
+        if r.Celsius > max {
+            max = r.Celsius
+        }
+    }
+    return
+}
+
 func plotTempSVG(data []TemperatureReading, w io.Writer) {
     const (
-        width = 1280
+        width = 720
         height = 720
-        outerPadding = 0.04
-        tickLength = 0.01
+        outerPadding = 45.0
+        tickLength = 5.0
+
+        tempAxisPaddingCelsius = 1.0
     )
+    startOfDay, err := time.Parse("15:04:05", "00:00:00")
+    if err != nil {
+        log.Fatal("Failed to parse time constant:", err)
+    }
 
-    const line = "<line stroke-width=\"0.002\" stroke=\"black\" x1=\"%f\" y1=\"%f\" x2=\"%f\" y2=\"%f\"/>\n"
-    const text = "<text x=\"%f\" y=\"%f\">%s</text>"
+    const lineTmpl = "<line stroke-width=\"2\" stroke=\"black\" x1=\"%f\" y1=\"%f\" x2=\"%f\" y2=\"%f\"/>\n"
+    const textTmpl = "<text font-size=\"12px\" text-anchor=\"middle\" x=\"%f\" y=\"%f\">%s</text>\n"
 
-    fmt.Fprintf(w, "<svg width=\"1280\" height=\"720\" viewbox=\"0 0 1 1\" preserveAspectRatio=\"xMinYMin\">\n")
+    fmt.Fprintf(w, "<svg width=\"%v\" height=\"%v\" viewport=\"0 0 %v %v\" preserveAspectRatio=\"xMinYMin\">\n",
+        width, height, width, height)
     { // Axes
         // Vertical
-        fmt.Fprintf(w, line, outerPadding, outerPadding, outerPadding, 1.0 - outerPadding)
+        fmt.Fprintf(w, lineTmpl,
+            outerPadding, outerPadding,
+            outerPadding, height - outerPadding)
 
         // Horizonal
-        fmt.Fprintf(w, line, outerPadding, 1.0 - outerPadding, 1.0 - outerPadding, 1.0 - outerPadding)
+        fmt.Fprintf(w, lineTmpl,
+            outerPadding, height - outerPadding,
+            width - outerPadding, height - outerPadding)
     }
-    fmt.Printf("First temp reading: %v\n", data[0])
-    //fmt.Fprintf(w, "%v\n", SVGPolyline(Data))
+
+    minTempAxis, maxTempAxis := findTempRange(data)
+    minTempAxis -= tempAxisPaddingCelsius
+    maxTempAxis += tempAxisPaddingCelsius
+
+    { // Axis labels
+        const (
+            textYAxisOffset = 15.0
+            textXAxisOffset = 25.0
+        )
+        // Vertical
+        fmt.Fprintf(w, textTmpl, outerPadding - textXAxisOffset, height - outerPadding,
+            fmt.Sprintf("%.2f C", minTempAxis))
+        fmt.Fprintf(w, textTmpl, outerPadding - textXAxisOffset, outerPadding,
+            fmt.Sprintf("%.2f C", maxTempAxis))
+        // Horizonal
+        fmt.Fprintf(w, textTmpl, outerPadding, height - outerPadding + textYAxisOffset,
+            "00:00")
+        fmt.Fprintf(w, textTmpl, width - outerPadding, height - outerPadding + textYAxisOffset,
+            "23:59")
+    }
+
+    var line SVGPolyline
+    for _, t := range data {
+        durationIntoDay := t.Time.Sub(startOfDay)
+        percentIntoDay := durationIntoDay.Seconds() / (24 * time.Hour).Seconds()
+        // The data where X and Y are between 0 and 1
+        plotPoint := Point{
+            X: float32(percentIntoDay),
+            Y: (t.Celsius - minTempAxis) / (maxTempAxis - minTempAxis),
+        }
+        // Add the padding for the margin before the axes
+        plotPoint.X = (plotPoint.X * (width - 2*outerPadding)) + outerPadding
+        plotPoint.Y = ((1.0 - plotPoint.Y) * (height - 2*outerPadding)) + outerPadding
+        line = append(line, plotPoint)
+    }
+    fmt.Fprintf(w, "%v\n", line)
     fmt.Fprintf(w, "</svg>")
 }
 
@@ -279,6 +344,10 @@ func main() {
     }
     defer client.Close()
 
+    register := registerProd
+    if *testWebsiteOnly {
+        register = registerTest
+    }
     var lease proxyserv.Lease
     err = client.Call("feproxy.Register", register, &lease)
     if err != nil {
@@ -296,7 +365,9 @@ func main() {
         os.Exit(0)
     }()
 
-    go logTemperature()
+    if !*testWebsiteOnly {
+        go logTemperature()
+    }
 
     http.HandleFunc(register, func(w http.ResponseWriter, r *http.Request) {
         w.Header().Set("Content-Type", "text/html")
