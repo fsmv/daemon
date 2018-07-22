@@ -273,8 +273,12 @@ func plotTempSVG(data []TemperatureReading, w io.Writer) {
     const (
         width = 720
         height = 720
-        outerPadding = 45.0
-        tickLength = 5.0
+        outerMargin = 65.0
+
+        numTempTicks = 15
+        minutesBetweenTicks = 120
+        tickLineLength = 8.0
+        labelOffset = 10.0
 
         tempAxisPaddingCelsius = 1.0
     )
@@ -283,22 +287,16 @@ func plotTempSVG(data []TemperatureReading, w io.Writer) {
         log.Fatal("Failed to parse time constant:", err)
     }
 
-    const lineTmpl = "<line stroke-width=\"2\" stroke=\"black\" x1=\"%f\" y1=\"%f\" x2=\"%f\" y2=\"%f\"/>\n"
-    const textTmpl = "<text font-size=\"12px\" text-anchor=\"middle\" x=\"%f\" y=\"%f\">%s</text>\n"
+    const (
+        axisLineTmpl = "<line stroke-width=\"2\" stroke=\"black\" x1=\"%f\" y1=\"%f\" x2=\"%f\" y2=\"%f\"/>\n"
+        tickLineTmpl = "<line stroke-width=\"1\" stroke=\"black\" x1=\"%f\" y1=\"%f\" x2=\"%f\" y2=\"%f\"/>\n"
+        gridLineTmpl = "<line stroke-width=\"1\" stroke=\"lightgrey\" x1=\"%f\" y1=\"%f\" x2=\"%f\" y2=\"%f\"/>\n"
+        xAxisLabelTmpl = "<text font-size=\"16px\" dy=\"12\" text-anchor=\"middle\" x=\"%f\" y=\"%f\">%s</text>\n"
+        yAxisLabelTmpl = "<text font-size=\"16px\" dy=\"5\" text-anchor=\"end\" x=\"%f\" y=\"%f\">%s</text>\n"
+    )
 
-    fmt.Fprintf(w, "<svg width=\"%v\" height=\"%v\" viewport=\"0 0 %v %v\" preserveAspectRatio=\"xMinYMin\">\n",
-        width, height, width, height)
-    { // Axes
-        // Vertical
-        fmt.Fprintf(w, lineTmpl,
-            outerPadding, outerPadding,
-            outerPadding, height - outerPadding)
-
-        // Horizonal
-        fmt.Fprintf(w, lineTmpl,
-            outerPadding, height - outerPadding,
-            width - outerPadding, height - outerPadding)
-    }
+    fmt.Fprintf(w, "<svg viewport=\"0 0 %v %v\" preserveAspectRatio=\"xMinYMin\">\n",
+        width, height)
 
     minTempAxis, maxTempAxis := findTempRange(data)
     minTempAxis -= tempAxisPaddingCelsius
@@ -306,19 +304,59 @@ func plotTempSVG(data []TemperatureReading, w io.Writer) {
 
     { // Axis labels
         const (
-            textYAxisOffset = 15.0
-            textXAxisOffset = 25.0
         )
         // Vertical
-        fmt.Fprintf(w, textTmpl, outerPadding - textXAxisOffset, height - outerPadding,
-            fmt.Sprintf("%.2f C", minTempAxis))
-        fmt.Fprintf(w, textTmpl, outerPadding - textXAxisOffset, outerPadding,
-            fmt.Sprintf("%.2f C", maxTempAxis))
+        for i := 0; i < numTempTicks; i++ {
+            axisPosition := 1.0 - (float32(i) / float32(numTempTicks - 1))
+            temp := (axisPosition * (maxTempAxis - minTempAxis)) + minTempAxis
+            yPos := (axisPosition * (height - 2 * outerMargin)) + outerMargin
+
+            fmt.Fprintf(w, yAxisLabelTmpl,
+                outerMargin - labelOffset, yPos,
+                fmt.Sprintf("%.2f C", temp))
+            fmt.Fprintf(w, tickLineTmpl,
+                outerMargin, yPos,
+                outerMargin - tickLineLength, yPos)
+            fmt.Fprintf(w, gridLineTmpl,
+                outerMargin, yPos,
+                width - outerMargin, yPos)
+        }
         // Horizonal
-        fmt.Fprintf(w, textTmpl, outerPadding, height - outerPadding + textYAxisOffset,
-            "00:00")
-        fmt.Fprintf(w, textTmpl, width - outerPadding, height - outerPadding + textYAxisOffset,
-            "23:59")
+        const maxTimeMinutes = 60 * 24 - 1
+        for timeMinutes := 0 ; true ; {
+            timeStr := fmt.Sprintf("%02d:%02d", timeMinutes/60, timeMinutes%60)
+            axisPosition := float32(timeMinutes) / float32(maxTimeMinutes)
+            xPos := (axisPosition * (width - 2 * outerMargin)) + outerMargin
+
+            fmt.Fprintf(w, xAxisLabelTmpl,
+                xPos, height - outerMargin + labelOffset,
+                timeStr)
+            fmt.Fprintf(w, tickLineTmpl,
+                xPos, height - outerMargin,
+                xPos, height - outerMargin + tickLineLength)
+            fmt.Fprintf(w, gridLineTmpl,
+                xPos, height - outerMargin,
+                xPos, outerMargin)
+
+            // Always make sure we have a tick at maxTimeMinutes
+            if timeMinutes == maxTimeMinutes {
+                break
+            }
+            timeMinutes += minutesBetweenTicks
+            if timeMinutes > maxTimeMinutes {
+                timeMinutes = maxTimeMinutes
+            }
+        }
+    }
+    { // Axes
+        // Vertical
+        fmt.Fprintf(w, axisLineTmpl,
+            outerMargin, outerMargin,
+            outerMargin, height - outerMargin)
+        // Horizonal
+        fmt.Fprintf(w, axisLineTmpl,
+            outerMargin, height - outerMargin,
+            width - outerMargin, height - outerMargin)
     }
 
     var line SVGPolyline
@@ -331,11 +369,11 @@ func plotTempSVG(data []TemperatureReading, w io.Writer) {
             Y: (t.Celsius - minTempAxis) / (maxTempAxis - minTempAxis),
         }
         // Add the padding for the margin before the axes
-        plotPoint.X = (plotPoint.X * (width - 2*outerPadding)) + outerPadding
-        plotPoint.Y = ((1.0 - plotPoint.Y) * (height - 2*outerPadding)) + outerPadding
+        plotPoint.X = (plotPoint.X * (width - 2*outerMargin)) + outerMargin
+        plotPoint.Y = ((1.0 - plotPoint.Y) * (height - 2*outerMargin)) + outerMargin
         line = append(line, plotPoint)
     }
-    fmt.Fprintf(w, "%v\n", line)
+    fmt.Fprintf(w, "%v", line)
     fmt.Fprintf(w, "</svg>")
 }
 
