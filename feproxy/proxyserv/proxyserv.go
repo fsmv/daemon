@@ -18,7 +18,6 @@ import (
     "net/http/httputil"
     "net/url"
     "os"
-    "path"
     "strconv"
     "sync"
     "time"
@@ -49,7 +48,7 @@ type forwarder struct {
     Timeout time.Time
     Pattern string
     Port    uint16
-} 
+}
 
 // Lease contains the terms of the lease granted by ProxyServ
 type Lease struct {
@@ -114,7 +113,15 @@ func (p *ProxyServ) Register(clientAddr string, pattern string) (lease Lease, er
             // Copied from https://golang.org/src/net/http/httputil/reverseproxy.go?s=2588:2649#L80
             req.URL.Scheme = backend.Scheme
             req.URL.Host = backend.Host
-            req.URL.Path = path.Join(backend.Path, req.URL.Path)
+            // Can't use path.Join(., .) because it calls path.Clean which
+            // causes a redirect loop if the pattern has a trailing / because
+            // this will remove it and the DefaultServMux will redirect no
+            // trailing slash to trailing slash.
+            if req.URL.Path[0] == '/' {
+                req.URL.Path = backend.Path + req.URL.Path
+            } else {
+                req.URL.Path = backend.Path + "/" + req.URL.Path
+            }
             if backendQuery == "" || req.URL.RawQuery == "" {
                 req.URL.RawQuery = backendQuery + req.URL.RawQuery
             } else {

@@ -9,9 +9,11 @@ import (
     "flag"
     "log"
     "strings"
+    "sort"
     "path/filepath"
     "time"
     "math"
+    "regexp"
     "net/http"
     "net/rpc"
     "net/smtp"
@@ -40,8 +42,8 @@ var (
 )
 
 const (
-    registerProd = "/climate"
-    registerTest = "/climate-test"
+    registerProd = "/climate/"
+    registerTest = "/climate-test/"
 
     w1Dir = "/sys/bus/w1/devices/"
     w1MasterFilename = "w1_bus_master"
@@ -51,6 +53,10 @@ const (
     w1BitMultiplier = 0.0625
 
     alertDuplicateDelay = 15 * time.Minute
+)
+
+var (
+    dateRegex = regexp.MustCompile(`\d{4}-\d{2}-\d{2}`)
 )
 
 func openSensorFile() (*os.File, error) {
@@ -333,6 +339,74 @@ func plotTempSVG(data []TemperatureReading, w io.Writer) {
     fmt.Fprintf(w, "</svg>")
 }
 
+// Returns a list of the data filenames (if the data dir is listable).
+// All names are in the form yyyy-mm-dd and are sorted newest first.
+func listDataFiles() ([]string, error) {
+    f, err := os.Open(*dataDir)
+    if err != nil {
+        return nil, err
+    }
+    dataFiles, err := f.Readdir(-1)
+    if err != nil {
+        return nil, err
+    }
+    var ret []string
+    for _, dataFile := range dataFiles {
+        filename := dataFile.Name()
+        if !dateRegex.MatchString(filename) {
+            continue
+        }
+        ret = append(ret, filename)
+    }
+    // sort.Strings sorts oldest first :(
+    sort.Slice(ret, func(i, j int) bool {
+        return ret[i] > ret[j]
+    })
+    return ret, nil
+}
+
+// Finds the newest data file and the one immediately before it.
+//
+//   - If err != nil then the data directory was not listable.
+//   - If there are no data files, then both prev and newest will be the empty
+//     string.
+//   - If there is only one data file, then prev will be the empty string.
+func findNewestDataFile() (prev, newest string, err error) {
+    dates, err := listDataFiles()
+    if err != nil {
+        return
+    }
+    newest = dates[0]
+    if len(dates) >= 2 {
+        prev = dates[1]
+    }
+    return
+}
+
+// Finds the two data files immediately before and after the mid date.
+//
+//   - If there are no adjacent files in a direction, the empty string is
+//     returned.
+//   - If err != nil then the data directory was not listable.
+//   - If mid does not exist then ("", "", nil) is returned.
+func findAdjacentDataFiles(mid string) (prev, next string, err error) {
+    dates, err := listDataFiles()
+    if err != nil {
+        return
+    }
+    var lastDate string
+    for _, date := range dates {
+        if date == mid {
+            next = lastDate
+        } else if lastDate == mid {
+            prev = date
+            break
+        }
+        lastDate = date
+    }
+    return
+}
+
 func main() {
     flag.Parse()
     sigs := make(chan os.Signal, 2)
@@ -369,18 +443,98 @@ func main() {
         go logTemperature()
     }
 
+    // Assumes register has a leading slash, which it trims
+    datePathRegex := regexp.MustCompile(
+        fmt.Sprintf(`/?%v(\d{4}-\d{2}-\d{2})?`, register[1:]))
     http.HandleFunc(register, func(w http.ResponseWriter, r *http.Request) {
         w.Header().Set("Content-Type", "text/html")
-        fmt.Fprint(w, "<!doctype html>\n<html><body>\n")
+        fmt.Fprint(w,
+`<!doctype html>
+<html>
+<head>
+<style>
+h2 {
+    text-align: center;
+}
+nav {
+    width: 720px;
+    margin: 0 auto;
+    display: table;
+    table-layout: fixed;
+}
+nav * {
+    display: table-cell;
+    vertical-align: middle;
+    width: 0; /* equal widths with table-layout: fixed */
+}
+nav a#prev {
+    text-align: left;
+}
+nav a#next {
+    text-align: right;
+}
+svg {
+    width: 720px;
+    height: 720px;
+    display: block;
+    margin: 0 auto;
+}
+</style>
+</head>
+<body>`)
         defer fmt.Fprint(w, "\n</body></html>")
 
-        const filename = "data/2018-05-21"
-        data, err := readTempLog(filename)
-        if err != nil {
-            fmt.Fprint(w, "<h2>Error reading file: %v</h2>", err)
+        // Parse the url for the date argument
+        dateMatches := datePathRegex.FindStringSubmatch(r.URL.Path)
+        if dateMatches == nil {
+            w.WriteHeader(http.StatusNotFound)
+            // Don't print the url here so unless you escape it
+            fmt.Fprint(w, "<h2>Invalid URL</h2>", err)
             return
         }
-        //fmt.Fprint(w, "<h1>Hello</h1>\n")
+        date := dateMatches[1] // First submatch
+        // Find the file to display, and the prev and next for navigation
+        var err error
+        var prev, next string
+        if date == "" {
+            prev, date, err = findNewestDataFile()
+        } else {
+            prev, next, err = findAdjacentDataFiles(date)
+        }
+        if err != nil {
+            w.WriteHeader(http.StatusInternalServerError)
+            log.Printf("HTTP 500 Error; Invalid data directory: %v", err)
+            fmt.Fprint(w, "<h2>Internal Server Error: Invalid data directory</h2>")
+            return
+        }
+        if date == "" {
+            w.WriteHeader(http.StatusNotFound)
+            fmt.Fprint(w, "<h2>No data for %v</h2>", err)
+            return
+        }
+        // Read the file to display
+        filename := filepath.Join(*dataDir, date)
+        data, err := readTempLog(filename)
+        if err != nil {
+            w.WriteHeader(http.StatusNotFound)
+            fmt.Fprint(w, "<h2>No data for %v</h2>", err)
+            return
+        }
+        // Output the navigation bar
+        fmt.Fprintf(w, "<nav>")
+        if prev != "" {
+            fmt.Fprintf(w, `    <a id="prev" href="%s">%s</a>`, prev, prev)
+        } else {
+            fmt.Fprintf(w, "    <div></div>")
+        }
+        fmt.Fprintf(w, "    <h2>%s</h2>", date)
+        if next != "" {
+            fmt.Fprintf(w, `    <a id="next" href="%s">%s</a>`, next, next)
+        } else {
+            fmt.Fprintf(w, "    <div></div>")
+        }
+        fmt.Fprintf(w, "</nav>")
+
         plotTempSVG(data, w)
     })
     http.HandleFunc("/quit", func(w http.ResponseWriter, r *http.Request) {
