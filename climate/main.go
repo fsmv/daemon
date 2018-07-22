@@ -273,12 +273,15 @@ func plotTempSVG(data []TemperatureReading, w io.Writer) {
     const (
         width = 720
         height = 720
-        outerMargin = 65.0
+
+        topAndRightMargin = 25
+        leftMargin = 65
+        bottomMargin = 30
 
         numTempTicks = 15
         minutesBetweenTicks = 120
-        tickLineLength = 8.0
-        labelOffset = 10.0
+        tickLineLength = 8
+        labelOffset = 10
 
         tempAxisPaddingCelsius = 1.0
     )
@@ -302,41 +305,46 @@ func plotTempSVG(data []TemperatureReading, w io.Writer) {
     minTempAxis -= tempAxisPaddingCelsius
     maxTempAxis += tempAxisPaddingCelsius
 
+    gridLeft   := float32(leftMargin)
+    gridRight  := float32(width - topAndRightMargin)
+    gridBottom := float32(height - bottomMargin)
+    gridTop    := float32(topAndRightMargin)
+
     { // Axis labels
         const (
         )
         // Vertical
         for i := 0; i < numTempTicks; i++ {
-            axisPosition := 1.0 - (float32(i) / float32(numTempTicks - 1))
+            axisPosition := float32(i) / float32(numTempTicks - 1)
             temp := (axisPosition * (maxTempAxis - minTempAxis)) + minTempAxis
-            yPos := (axisPosition * (height - 2 * outerMargin)) + outerMargin
+            yPos := ((1.0 - axisPosition) * (gridBottom - gridTop)) + gridTop
 
             fmt.Fprintf(w, yAxisLabelTmpl,
-                outerMargin - labelOffset, yPos,
+                gridLeft - labelOffset, yPos,
                 fmt.Sprintf("%.2f C", temp))
             fmt.Fprintf(w, tickLineTmpl,
-                outerMargin, yPos,
-                outerMargin - tickLineLength, yPos)
+                gridLeft, yPos,
+                gridLeft - tickLineLength, yPos)
             fmt.Fprintf(w, gridLineTmpl,
-                outerMargin, yPos,
-                width - outerMargin, yPos)
+                gridLeft, yPos,
+                gridRight, yPos)
         }
         // Horizonal
         const maxTimeMinutes = 60 * 24 - 1
         for timeMinutes := 0 ; true ; {
             timeStr := fmt.Sprintf("%02d:%02d", timeMinutes/60, timeMinutes%60)
             axisPosition := float32(timeMinutes) / float32(maxTimeMinutes)
-            xPos := (axisPosition * (width - 2 * outerMargin)) + outerMargin
+            xPos := (axisPosition * (gridRight - gridLeft)) + gridLeft
 
             fmt.Fprintf(w, xAxisLabelTmpl,
-                xPos, height - outerMargin + labelOffset,
+                xPos, gridBottom + labelOffset,
                 timeStr)
             fmt.Fprintf(w, tickLineTmpl,
-                xPos, height - outerMargin,
-                xPos, height - outerMargin + tickLineLength)
+                xPos, gridBottom,
+                xPos, gridBottom + tickLineLength)
             fmt.Fprintf(w, gridLineTmpl,
-                xPos, height - outerMargin,
-                xPos, outerMargin)
+                xPos, gridTop,
+                xPos, gridBottom)
 
             // Always make sure we have a tick at maxTimeMinutes
             if timeMinutes == maxTimeMinutes {
@@ -351,12 +359,12 @@ func plotTempSVG(data []TemperatureReading, w io.Writer) {
     { // Axes
         // Vertical
         fmt.Fprintf(w, axisLineTmpl,
-            outerMargin, outerMargin,
-            outerMargin, height - outerMargin)
+            gridLeft, gridTop,
+            gridLeft, gridBottom)
         // Horizonal
         fmt.Fprintf(w, axisLineTmpl,
-            outerMargin, height - outerMargin,
-            width - outerMargin, height - outerMargin)
+            gridLeft, gridBottom,
+            gridRight, gridBottom)
     }
 
     var line SVGPolyline
@@ -369,8 +377,8 @@ func plotTempSVG(data []TemperatureReading, w io.Writer) {
             Y: (t.Celsius - minTempAxis) / (maxTempAxis - minTempAxis),
         }
         // Add the padding for the margin before the axes
-        plotPoint.X = (plotPoint.X * (width - 2*outerMargin)) + outerMargin
-        plotPoint.Y = ((1.0 - plotPoint.Y) * (height - 2*outerMargin)) + outerMargin
+        plotPoint.X = (plotPoint.X * (gridRight - gridLeft)) + gridLeft
+        plotPoint.Y = ((1.0 - plotPoint.Y) * (gridBottom - gridTop)) + gridTop
         line = append(line, plotPoint)
     }
     fmt.Fprintf(w, "%v", line)
