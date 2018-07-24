@@ -274,16 +274,10 @@ func plotTempSVG(data []TemperatureReading, w io.Writer) {
         width = 720
         height = 720
 
-        topAndRightMargin = 25
-        leftMargin = 65
+        topMargin = 25
+        rightMargin = 55
+        leftMargin = 55
         bottomMargin = 30
-
-        numTempTicks = 15
-        minutesBetweenTicks = 120
-        tickLineLength = 8
-        labelOffset = 10
-
-        tempAxisPaddingCelsius = 1.0
     )
     startOfDay, err := time.Parse("15:04:05", "00:00:00")
     if err != nil {
@@ -293,22 +287,35 @@ func plotTempSVG(data []TemperatureReading, w io.Writer) {
     const (
         axisLineTmpl = "<line stroke-width=\"2\" stroke=\"black\" x1=\"%f\" y1=\"%f\" x2=\"%f\" y2=\"%f\"/>\n"
         tickLineTmpl = "<line stroke-width=\"1\" stroke=\"black\" x1=\"%f\" y1=\"%f\" x2=\"%f\" y2=\"%f\"/>\n"
-        gridLineTmpl = "<line stroke-width=\"1\" stroke=\"lightgrey\" x1=\"%f\" y1=\"%f\" x2=\"%f\" y2=\"%f\"/>\n"
-        xAxisLabelTmpl = "<text font-size=\"16px\" dy=\"12\" text-anchor=\"middle\" x=\"%f\" y=\"%f\">%s</text>\n"
-        yAxisLabelTmpl = "<text font-size=\"16px\" dy=\"5\" text-anchor=\"end\" x=\"%f\" y=\"%f\">%s</text>\n"
+        gridLineTmpl = "<line stroke-width=\"1\" stroke=\"%s\" x1=\"%f\" y1=\"%f\" x2=\"%f\" y2=\"%f\"/>\n"
+        xAxisLabelTmpl = "<text fill=\"black\" font-size=\"16px\" dy=\"12\" text-anchor=\"middle\" x=\"%f\" y=\"%f\">%s</text>\n"
+        yAxisLeftLabelTmpl = "<text fill=\"black\" font-size=\"16px\" dy=\"5\" text-anchor=\"end\" x=\"%f\" y=\"%f\">%s</text>\n"
+        yAxisRightLabelTmpl = "<text fill=\"darkgrey\" font-size=\"16px\" dy=\"5\" text-anchor=\"start\" x=\"%f\" y=\"%f\">%s</text>\n"
     )
 
     fmt.Fprintf(w, "<svg viewport=\"0 0 %v %v\" preserveAspectRatio=\"xMinYMin\">\n",
         width, height)
 
-    minTempAxis, maxTempAxis := findTempRange(data)
-    minTempAxis -= tempAxisPaddingCelsius
-    maxTempAxis += tempAxisPaddingCelsius
+    const (
+        tempAxisPaddingCelsius = 1.0
+        maxTempAxis = 35.0
+        minTempAxis = 20.0
+        numTempTicks = 16
+        cToF = 9.0/5.0
+
+        minutesBetweenTicks = 120
+
+        tickLineLength = 8
+        labelOffset = 10
+    )
+    //minTempAxis, maxTempAxis := findTempRange(data)
+    //minTempAxis -= tempAxisPaddingCelsius
+    //maxTempAxis += tempAxisPaddingCelsius
 
     gridLeft   := float32(leftMargin)
-    gridRight  := float32(width - topAndRightMargin)
+    gridRight  := float32(width - rightMargin)
     gridBottom := float32(height - bottomMargin)
-    gridTop    := float32(topAndRightMargin)
+    gridTop    := float32(topMargin)
 
     { // Axis labels
         const (
@@ -319,13 +326,16 @@ func plotTempSVG(data []TemperatureReading, w io.Writer) {
             temp := (axisPosition * (maxTempAxis - minTempAxis)) + minTempAxis
             yPos := ((1.0 - axisPosition) * (gridBottom - gridTop)) + gridTop
 
-            fmt.Fprintf(w, yAxisLabelTmpl,
+            fmt.Fprintf(w, yAxisLeftLabelTmpl,
                 gridLeft - labelOffset, yPos,
-                fmt.Sprintf("%.2f C", temp))
+                fmt.Sprintf("%.1f C", temp))
+            fmt.Fprintf(w, yAxisRightLabelTmpl,
+                gridRight + labelOffset, yPos,
+                fmt.Sprintf("%.1f F", temp * (9.0 /5.0) + 32.0))
             fmt.Fprintf(w, tickLineTmpl,
                 gridLeft, yPos,
                 gridLeft - tickLineLength, yPos)
-            fmt.Fprintf(w, gridLineTmpl,
+            fmt.Fprintf(w, gridLineTmpl, "lightgrey",
                 gridLeft, yPos,
                 gridRight, yPos)
         }
@@ -342,9 +352,18 @@ func plotTempSVG(data []TemperatureReading, w io.Writer) {
             fmt.Fprintf(w, tickLineTmpl,
                 xPos, gridBottom,
                 xPos, gridBottom + tickLineLength)
-            fmt.Fprintf(w, gridLineTmpl,
+            fmt.Fprintf(w, gridLineTmpl, "darkgrey",
                 xPos, gridTop,
                 xPos, gridBottom)
+
+            if timeMinutes != maxTimeMinutes {
+                subTimeMinutes := timeMinutes + minutesBetweenTicks / 2
+                subAxisPosition := float32(subTimeMinutes) / float32(maxTimeMinutes)
+                subXPos := (subAxisPosition * (gridRight - gridLeft)) + gridLeft
+                fmt.Fprintf(w, gridLineTmpl, "lightgrey",
+                    subXPos, gridTop,
+                    subXPos, gridBottom)
+            }
 
             // Always make sure we have a tick at maxTimeMinutes
             if timeMinutes == maxTimeMinutes {
@@ -535,7 +554,7 @@ svg {
         if dateMatches == nil {
             w.WriteHeader(http.StatusNotFound)
             // Don't print the url here so unless you escape it
-            fmt.Fprint(w, "<h2>Invalid URL</h2>", err)
+            fmt.Fprint(w, "<h2>Invalid URL</h2>")
             return
         }
         date := dateMatches[1] // First submatch
