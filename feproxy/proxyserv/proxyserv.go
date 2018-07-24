@@ -24,6 +24,10 @@ import (
     "errors"
 )
 
+var (
+    NotRegisteredError = errors.New("pattern not registered")
+)
+
 // How often to look through the Leases and unregister those past TTL
 const ttlCheckFreq = "15m"
 
@@ -50,12 +54,6 @@ type forwarder struct {
     Port    uint16
 }
 
-// Lease contains the terms of the lease granted by ProxyServ
-type Lease struct {
-    Port uint16
-    TTL  string
-}
-
 // GetNumLeases returns the number of Registered Leases
 func (p *ProxyServ) GetNumLeases() int {
     p.mut.RLock()
@@ -71,7 +69,7 @@ func (p *ProxyServ) Unregister(pattern string) error {
     defer p.mut.Unlock()
     fwd, ok := p.forwarders[pattern]
     if !ok {
-        return errors.New("pattern not registered")
+        return NotRegisteredError
     }
     p.unusedPorts = append(p.unusedPorts, int(fwd.Port))
     delete(p.forwarders, pattern)
@@ -142,8 +140,9 @@ func (p *ProxyServ) Register(clientAddr string, pattern string) (lease Lease, er
         Port:    port,
     }
     return Lease{
-        Port: port,
-        TTL:  p.ttlString,
+        Pattern: pattern,
+        Port:    port,
+        TTL:     p.ttlString,
     }, nil
 }
 
@@ -154,7 +153,7 @@ func (p *ProxyServ) Renew(pattern string) (lease Lease, err error) {
     defer p.mut.Unlock()
     fwd, ok := p.forwarders[pattern]
     if !ok {
-        return Lease{}, errors.New("pattern not registered")
+        return Lease{}, NotRegisteredError
     }
     fwd.Timeout = time.Now().Add(p.ttlDuration)
     return Lease{

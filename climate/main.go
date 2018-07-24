@@ -15,7 +15,6 @@ import (
     "math"
     "regexp"
     "net/http"
-    "net/rpc"
     "net/smtp"
     "strconv"
 
@@ -477,28 +476,17 @@ func main() {
     sigs := make(chan os.Signal, 2)
     signal.Notify(sigs, os.Interrupt, os.Kill)
 
-    client, err := rpc.Dial("tcp", *feproxyAddr)
-    if err != nil {
-        log.Fatalf("Failed to connect to frontend proxy RPC server: %v", err)
-    }
-    defer client.Close()
-
     register := registerProd
     if *testWebsiteOnly {
         register = registerTest
     }
-    var lease proxyserv.Lease
-    err = client.Call("feproxy.Register", register, &lease)
-    if err != nil {
-        log.Fatal("Failed to obtain lease from feproxy:", err)
-    }
-    log.Printf("Obtained lease for %#v, port: %v, ttl: %v",
-        register, lease.Port, lease.TTL)
+    fe, lease := proxyserv.MustConnectAndRegister(*feproxyAddr, register)
+    defer fe.Unregister(lease.Pattern)
+    defer fe.Close()
+    go fe.MustKeepLeaseRenewedForever(lease)
 
-    defer client.Call("feproxy.Deregister", register, &lease)
     go func() {
         <-sigs
-        //client.Call("feproxy.Deregister", register, &lease)
         log.Print("Shutting down...")
         // TODO(1.8): use http.Server and call close here
         os.Exit(0)
