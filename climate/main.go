@@ -2,6 +2,7 @@ package main
 
 import (
     "bufio"
+    "errors"
     "io"
     "os"
     "os/signal"
@@ -24,7 +25,7 @@ import (
 var (
     feproxyAddr = flag.String("feproxy_addr", "127.0.0.1:2048",
         "Address and port for the feproxy server")
-    dataDir = flag.String("data_dir", "data",
+    rootDataDir = flag.String("data_dir", "data",
         "Directory to save the daily temperature log files in")
     sensorReadInterval = flag.Duration("sensor_read_interval", 1 * time.Minute,
         "How often to read temperature from the sensor")
@@ -44,6 +45,9 @@ const (
     registerProd = "/climate/"
     registerTest = "/climate-test/"
 
+    indoorDataDir = "indoor"
+    outdoorDataDir = "outdoor"
+
     w1Dir = "/sys/bus/w1/devices/"
     w1MasterFilename = "w1_bus_master"
     w1SensorFilename = "w1_slave"
@@ -56,31 +60,45 @@ const (
 
 var (
     dateRegex = regexp.MustCompile(`\d{4}-\d{2}-\d{2}`)
+    datePathRegex = regexp.MustCompile(`/?.*/(\d{4}-\d{2}-\d{2})?`)
 )
 
-func openSensorFile() (*os.File, error) {
-    devicesDir, err := os.Open(w1Dir)
+func alertEmail(subject, message string) error {
+    if *alertServerAddr == "" || *alertEmailAddr == "" || *alertEmailPassword == "" {
+        log.Print("Alert emails disabled (the flags must be set)")
+        return nil
+    }
+    headers := fmt.Sprintf("From: %v\nTo: %v\nSubject: %v\n\n",
+        *alertEmailAddr, *alertEmailAddr, subject)
+    // Strip the port, might only work with gmail
+    authHost := (*alertServerAddr)[:strings.Index(*alertServerAddr, ":")]
+    return smtp.SendMail(*alertServerAddr,
+        smtp.PlainAuth("", *alertEmailAddr, *alertEmailPassword, authHost),
+        *alertEmailAddr, []string{*alertEmailAddr}, []byte(headers + message))
+}
+
+func alert(message string, err error) {
+    log.Printf("Alert! %v: %v", message, err)
+    err = alertEmail(message, err.Error())
     if err != nil {
-        return nil, err
+        log.Printf("Failed to send alert email: %v", err)
     }
-    names, err := devicesDir.Readdirnames(-1)
-    devicesDir.Close()
-    if err != nil {
-        return nil, err
+}
+
+var (
+    lastAlert error
+    lastAlertTime time.Time
+)
+
+func maybeAlert(message string, err error, now time.Time) {
+    if lastAlert != nil && lastAlert.Error() == err.Error() &&
+       now.Sub(lastAlertTime) < alertDuplicateDelay {
+        log.Printf("(Repeat Alert) %v: %v", message, err)
+    } else {
+        alert(message, err)
     }
-    var deviceName string
-    for _, name := range names {
-        if strings.HasPrefix(name, w1MasterFilename) {
-            continue
-        }
-        deviceName = name
-    }
-    if deviceName == "" {
-        return nil, fmt.Errorf("failed to find a temperature device (looked in %v)",
-            w1Dir)
-    }
-    sensorFilename := filepath.Join(w1Dir, deviceName, w1SensorFilename)
-    return os.Open(sensorFilename)
+    lastAlert = err
+    lastAlertTime = now
 }
 
 // One degree (0.85 actually) below absolute zero
@@ -111,74 +129,49 @@ func readTemperature(sensorFile *os.File) (float32, error) {
     return float32(reading) * w1BitMultiplier, nil;
 }
 
-func alert(subject, message string) error {
-    log.Printf("Alert! %v: %v", subject, message)
-    if *alertServerAddr == "" || *alertEmailAddr == "" || *alertEmailPassword == "" {
-        log.Print("Alert emails disabled (the flags must be set)")
-        return nil
-    }
-    headers := fmt.Sprintf("From: %v\nTo: %v\nSubject: %v\n\n",
-        *alertEmailAddr, *alertEmailAddr, subject)
-    // Strip the port, might only work with gmail
-    authHost := (*alertServerAddr)[:strings.Index(*alertServerAddr, ":")]
-    return smtp.SendMail(*alertServerAddr,
-        smtp.PlainAuth("", *alertEmailAddr, *alertEmailPassword, authHost),
-        *alertEmailAddr, []string{*alertEmailAddr}, []byte(headers + message))
-}
-
-func logTemperature() {
-    sensorFile, err := openSensorFile()
-    if err != nil {
-        log.Printf("Failed to open sensor file: %v", err)
-        return
-    }
-    if err := os.MkdirAll(*dataDir, os.FileMode(0775)); err != nil {
-        log.Printf("Failed to make data directory %#v: %v", *dataDir, err)
-        return
+func logTemperature(sensor *os.File, dataDir string) {
+    if err := os.MkdirAll(dataDir, os.FileMode(0775)); err != nil {
+        // TODO: indoor / outdoor strings?
+        log.Printf("Failed to make data directory %#v: %v", dataDir, err)
+        return // TODO safe shutdown
     }
     var (
-        once bool
-
-        currDay int
-        currFile *os.File
-
-        lastAlert error
-        lastAlertTime time.Time
+        dataFileDay int
+        dataFile *os.File
+        err error
     )
     for {
         now := time.Now()
-        currTemp, err := readTemperature(sensorFile)
-        if err != nil {
-            now = time.Now()
-            if lastAlert != nil && lastAlert.Error() == err.Error() &&
-               now.Sub(lastAlertTime) < alertDuplicateDelay {
-                log.Printf("(Repeat Alert) Error reading temperature: %v", err)
-            } else {
-                alert("Error reading temperature", err.Error())
+        if dataFileDay != now.Day() { // Day is never 0, which is the default value
+            dataFileDay = now.Day()
+            currDateStr := fmt.Sprintf("%04d-%02d-%02d", now.Year(), now.Month(), now.Day())
+            if dataFile != nil { // nil the first time
+                err = dataFile.Close()
+                if err != nil { // could be a write error on flush
+                    alert("Failed to close data file", err)
+                    // Still try to open the next file
+                }
             }
-            lastAlert = err
-            lastAlertTime = now
-        }
-        if currDay != now.Day() {
-            currDay = now.Day()
-            currDate := fmt.Sprintf("%04d-%02d-%02d", now.Year(), now.Month(), now.Day())
-            currFile.Close()
-            currFile, err = os.OpenFile(filepath.Join(*dataDir, currDate),
+            dataFile, err = os.OpenFile(filepath.Join(dataDir, currDateStr),
                 os.O_RDWR|os.O_APPEND|os.O_CREATE, os.FileMode(0644))
             if err != nil {
-                log.Printf("Failed to open data log file for today: %v", err)
+                alert("Failed to open data log file for today", err)
                 return
             }
         }
-        currFile.WriteString(fmt.Sprintf("%02d:%02d:%02d, %v\n",
-            now.Hour(), now.Minute(), now.Second(), currTemp))
-        if !once {
-            once = true
-            log.Printf("First temperature reading: %v C", currTemp)
+        temperature, err := readTemperature(sensor)
+        if err != nil {
+            maybeAlert("Error reading temperature", err, now)
         }
+        dataFile.WriteString(fmt.Sprintf("%02d:%02d:%02d, %v\n",
+            now.Hour(), now.Minute(), now.Second(), temperature))
+
         time.Sleep(*sensorReadInterval)
     }
-    currFile.Close()
+    err = dataFile.Close()
+    if err != nil {
+        log.Printf("Failed to close final data file: %v", err)
+    }
 }
 
 type Point struct {
@@ -269,6 +262,7 @@ func findTempRange(data []TemperatureReading) (min float32, max float32) {
 }
 
 func plotTempSVG(data []TemperatureReading, w io.Writer) {
+    // TODO: indoor/outdoor, need two lines in the svg
     const (
         width = 720
         height = 720
@@ -406,7 +400,8 @@ func plotTempSVG(data []TemperatureReading, w io.Writer) {
 // Returns a list of the data filenames (if the data dir is listable).
 // All names are in the form yyyy-mm-dd and are sorted newest first.
 func listDataFiles() ([]string, error) {
-    f, err := os.Open(*dataDir)
+    // TODO: fix for indoor/outdoor, should find the max
+    f, err := os.Open(filepath.Join(*rootDataDir, indoorDataDir))
     if err != nil {
         return nil, err
     }
@@ -436,6 +431,7 @@ func listDataFiles() ([]string, error) {
 //     string.
 //   - If there is only one data file, then prev will be the empty string.
 func findNewestDataFile() (prev, newest string, err error) {
+    // TODO: indoor/outdoor
     dates, err := listDataFiles()
     if err != nil {
         return
@@ -454,6 +450,7 @@ func findNewestDataFile() (prev, newest string, err error) {
 //   - If err != nil then the data directory was not listable.
 //   - If mid does not exist then ("", "", nil) is returned.
 func findAdjacentDataFiles(mid string) (prev, next string, err error) {
+    // TODO: indoor/outdoor
     dates, err := listDataFiles()
     if err != nil {
         return
@@ -471,37 +468,10 @@ func findAdjacentDataFiles(mid string) (prev, next string, err error) {
     return
 }
 
-func main() {
-    flag.Parse()
-    sigs := make(chan os.Signal, 2)
-    signal.Notify(sigs, os.Interrupt, os.Kill)
-
-    register := registerProd
-    if *testWebsiteOnly {
-        register = registerTest
-    }
-    fe, lease := proxyserv.MustConnectAndRegister(*feproxyAddr, register)
-    defer fe.Unregister(lease.Pattern)
-    defer fe.Close()
-    go fe.MustKeepLeaseRenewedForever(lease)
-
-    go func() {
-        <-sigs
-        log.Print("Shutting down...")
-        // TODO(1.8): use http.Server and call close here
-        os.Exit(0)
-    }()
-
-    if !*testWebsiteOnly {
-        go logTemperature()
-    }
-
-    // Assumes register has a leading slash, which it trims
-    datePathRegex := regexp.MustCompile(
-        fmt.Sprintf(`/?%v(\d{4}-\d{2}-\d{2})?`, register[1:]))
-    http.HandleFunc(register, func(w http.ResponseWriter, r *http.Request) {
-        w.Header().Set("Content-Type", "text/html")
-        fmt.Fprint(w,
+func HandleGraphPage(w http.ResponseWriter, r *http.Request) {
+    // TODO: indoor/outdoor
+    w.Header().Set("Content-Type", "text/html")
+    fmt.Fprint(w,
 `<!doctype html>
 <html>
 <head>
@@ -535,61 +505,161 @@ svg {
 </style>
 </head>
 <body>`)
-        defer fmt.Fprint(w, "\n</body></html>")
+    defer fmt.Fprint(w, "\n</body></html>")
 
-        // Parse the url for the date argument
-        dateMatches := datePathRegex.FindStringSubmatch(r.URL.Path)
-        if dateMatches == nil {
-            w.WriteHeader(http.StatusNotFound)
-            // Don't print the url here so unless you escape it
-            fmt.Fprint(w, "<h2>Invalid URL</h2>")
-            return
-        }
-        date := dateMatches[1] // First submatch
-        // Find the file to display, and the prev and next for navigation
-        var err error
-        var prev, next string
-        if date == "" {
-            prev, date, err = findNewestDataFile()
-        } else {
-            prev, next, err = findAdjacentDataFiles(date)
-        }
-        if err != nil {
-            w.WriteHeader(http.StatusInternalServerError)
-            log.Printf("HTTP 500 Error; Invalid data directory: %v", err)
-            fmt.Fprint(w, "<h2>Internal Server Error: Invalid data directory</h2>")
-            return
-        }
-        if date == "" {
-            w.WriteHeader(http.StatusNotFound)
-            fmt.Fprint(w, "<h2>No data for %v</h2>", err)
-            return
-        }
-        // Read the file to display
-        filename := filepath.Join(*dataDir, date)
-        data, err := readTempLog(filename)
-        if err != nil {
-            w.WriteHeader(http.StatusNotFound)
-            fmt.Fprint(w, "<h2>No data for %v</h2>", err)
-            return
-        }
-        // Output the navigation bar
-        fmt.Fprintf(w, "<nav>")
-        if prev != "" {
-            fmt.Fprintf(w, `    <a id="prev" href="%s">%s</a>`, prev, prev)
-        } else {
-            fmt.Fprintf(w, "    <div></div>")
-        }
-        fmt.Fprintf(w, "    <h2>%s</h2>", date)
-        if next != "" {
-            fmt.Fprintf(w, `    <a id="next" href="%s">%s</a>`, next, next)
-        } else {
-            fmt.Fprintf(w, "    <div></div>")
-        }
-        fmt.Fprintf(w, "</nav>")
+    // Parse the url for the date argument
+    dateMatches := datePathRegex.FindStringSubmatch(r.URL.Path)
+    if dateMatches == nil {
+        w.WriteHeader(http.StatusNotFound)
+        // Don't print the url here so unless you escape it
+        fmt.Fprint(w, "<h2>Invalid URL</h2>")
+        return
+    }
+    date := dateMatches[1] // First submatch
+    // Find the file to display, and the prev and next for navigation
+    var err error
+    var prev, next string
+    if date == "" {
+        prev, date, err = findNewestDataFile()
+    } else {
+        prev, next, err = findAdjacentDataFiles(date)
+    }
+    if err != nil {
+        w.WriteHeader(http.StatusInternalServerError)
+        log.Printf("HTTP 500 Error; Invalid data directory: %v", err)
+        fmt.Fprint(w, "<h2>Internal Server Error: Invalid data directory</h2>")
+        return
+    }
+    if date == "" {
+        w.WriteHeader(http.StatusNotFound)
+        fmt.Fprint(w, "<h2>No data for %v</h2>", err)
+        return
+    }
+    // Read the file to display
+    filename := filepath.Join(*rootDataDir, date)
+    data, err := readTempLog(filename)
+    if err != nil {
+        w.WriteHeader(http.StatusNotFound)
+        fmt.Fprint(w, "<h2>No data for %v</h2>", err)
+        return
+    }
+    // Output the navigation bar
+    fmt.Fprintf(w, "<nav>")
+    if prev != "" {
+        fmt.Fprintf(w, `    <a id="prev" href="%s">%s</a>`, prev, prev)
+    } else {
+        fmt.Fprintf(w, "    <div></div>")
+    }
+    fmt.Fprintf(w, "    <h2>%s</h2>", date)
+    if next != "" {
+        fmt.Fprintf(w, `    <a id="next" href="%s">%s</a>`, next, next)
+    } else {
+        fmt.Fprintf(w, "    <div></div>")
+    }
+    fmt.Fprintf(w, "</nav>")
 
-        plotTempSVG(data, w)
-    })
+    plotTempSVG(data, w)
+}
+
+func promptForIntLessThan(max int) int {
+    var ret int
+    fmt.Scanln(&ret)
+    for ret >= max {
+        fmt.Println("Out of range, try again (-1 to stop): ")
+        fmt.Scanln(&ret)
+    }
+    return ret
+}
+
+func promptForSensorFiles() (indoor, outdoor *os.File, err error) {
+    // List the device files
+    devicesDir, err := os.Open(w1Dir)
+    if err != nil {
+        return nil, nil, err
+    }
+    names, err := devicesDir.Readdirnames(-1)
+    devicesDir.Close()
+    if err != nil {
+        return nil, nil, err
+    }
+    // Open each sensor file and read the temperature
+    type Device struct{
+        file *os.File
+        temperature float32
+    }
+    var devices []Device
+    for _, name := range names {
+        if strings.HasPrefix(name, w1MasterFilename) {
+            continue
+        }
+        sensorFilename := filepath.Join(w1Dir, name, w1SensorFilename)
+        sensorFile, err := os.Open(sensorFilename)
+        if err != nil {
+            return nil, nil, err
+        }
+        temperature, err := readTemperature(sensorFile)
+        if err != nil {
+            return nil, nil, fmt.Errorf(
+                "Failed to read sensor file %#v: %v", sensorFilename, err)
+        }
+        devices = append(devices, Device{
+            file:        sensorFile,
+            temperature: temperature,
+        })
+    }
+    // Prompt the user for the indoor and outdoor sensor indexes
+    for i, d := range devices {
+        fmt.Printf("%v. temperature reading: %v C\n", i, d.temperature)
+    }
+    fmt.Printf("Enter index of indoor sensor: ")
+    indoorIdx := promptForIntLessThan(len(devices))
+    fmt.Printf("Enter index of outdoor sensor: ")
+    outdoorIdx := promptForIntLessThan(len(devices))
+    // Close any un-used opened files (the gc would do it, but I can't help it)
+    for i, d := range devices {
+        if i == indoorIdx || i == outdoorIdx {
+            continue
+        }
+        d.file.Close()
+    }
+    if indoorIdx == -1 || outdoorIdx == -1 {
+        return nil, nil, errors.New(
+            "Failed to select indoor and outdoor sensor files")
+    }
+    return devices[indoorIdx].file, devices[outdoorIdx].file, nil
+}
+
+func main() {
+    flag.Parse()
+    sigs := make(chan os.Signal, 2)
+    signal.Notify(sigs, os.Interrupt, os.Kill)
+
+    register := registerProd
+    if *testWebsiteOnly {
+        register = registerTest
+    }
+    fe, lease := proxyserv.MustConnectAndRegister(*feproxyAddr, register)
+    defer fe.Unregister(lease.Pattern)
+    defer fe.Close()
+    go fe.MustKeepLeaseRenewedForever(lease)
+
+    go func() {
+        <-sigs
+        log.Print("Shutting down...")
+        // TODO(1.8): use http.Server and call close here
+        os.Exit(0)
+    }()
+
+    if !*testWebsiteOnly {
+        indoorFile, outdoorFile, err := promptForSensorFiles()
+        if err != nil {
+            log.Fatal(err)
+        }
+        go logTemperature(indoorFile, filepath.Join(*rootDataDir, indoorDataDir))
+        go logTemperature(outdoorFile, filepath.Join(*rootDataDir, outdoorDataDir))
+    }
+
+    http.HandleFunc(register, HandleGraphPage)
     http.HandleFunc("/quit", func(w http.ResponseWriter, r *http.Request) {
         fmt.Fprint(w, "<body><h3>Shutting down!</h3></body>")
         time.AfterFunc(time.Second, func () {
