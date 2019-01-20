@@ -43,7 +43,7 @@ type TemperatureLine struct {
     Data []TemperatureReading
 }
 
-func plotTemperatureGraphSVG(w io.Writer, data []TemperatureLine) {
+func plotTemperatureGraphSVG(w io.Writer, lines []TemperatureLine) {
     const (
         width = 720
         height = 720
@@ -53,10 +53,6 @@ func plotTemperatureGraphSVG(w io.Writer, data []TemperatureLine) {
         leftMargin = 55
         bottomMargin = 30
     )
-    startOfDay, err := time.Parse("15:04:05", "00:00:00")
-    if err != nil {
-        log.Fatal("Failed to parse time constant:", err)
-    }
 
     const (
         lineTmpl = "<line stroke-width=\"%d\" stroke=\"%s\" x1=\"%f\" y1=\"%f\" x2=\"%f\" y2=\"%f\"/>\n"
@@ -82,7 +78,7 @@ func plotTemperatureGraphSVG(w io.Writer, data []TemperatureLine) {
         tickLineLength = 8
         labelOffset = 10
     )
-    //minTempAxis, maxTempAxis := findTempRange(data)
+    //minTempAxis, maxTempAxis := findTempRange(lines[0])
     //minTempAxis -= tempAxisPaddingCelsius
     //maxTempAxis += tempAxisPaddingCelsius
 
@@ -154,6 +150,8 @@ func plotTemperatureGraphSVG(w io.Writer, data []TemperatureLine) {
             gridRight, gridBottom)
     }
     { // Plot the data lines + legend more than one line
+        // Same as time.Parse("15:04:05", "00:00:00") but with no error
+        startOfDay := time.Date(0,time.January,1,0,0,0,0,time.UTC)
         tempsToPoints := func (temps []TemperatureReading) []Point {
             var ret []Point
             for _, t := range temps {
@@ -171,8 +169,8 @@ func plotTemperatureGraphSVG(w io.Writer, data []TemperatureLine) {
             }
             return ret
         }
-        if len(data) == 1 { // Only one line, no legend
-            plotPolylineSVG(w, tempsToPoints(data[0].Data), "black", 1)
+        if len(lines) == 1 { // Only one line, no legend
+            plotPolylineSVG(w, tempsToPoints(lines[0].Data), "black", 1)
             fmt.Fprintf(w, "</svg>")
             return
         }
@@ -184,7 +182,7 @@ func plotTemperatureGraphSVG(w io.Writer, data []TemperatureLine) {
             return colors[index]
         }
         // Plot the data lines
-        for i, line := range data {
+        for i, line := range lines {
             plotPolylineSVG(w, tempsToPoints(line.Data), getColor(i), 1)
         }
         // Plot the legend
@@ -196,9 +194,9 @@ func plotTemperatureGraphSVG(w io.Writer, data []TemperatureLine) {
             legendCharWidth = 12.0
             legendCharHeight = 16.0
         )
-        legendHeight := float32(len(data)) * (legendLineSpacing + legendCharHeight) + legendPadding
+        legendHeight := float32(len(lines)) * (legendLineSpacing + legendCharHeight) + legendPadding
         var legendTextWidth float32
-        for _, line := range data {
+        for _, line := range lines {
             folderWidth := float32(len(line.Folder) * legendCharWidth + legendPadding) 
             if folderWidth > legendTextWidth {
                 legendTextWidth = folderWidth
@@ -209,7 +207,7 @@ func plotTemperatureGraphSVG(w io.Writer, data []TemperatureLine) {
         legendTop := gridTop + legendMargin
         fmt.Fprintf(w, rectTmpl,
             legendLeft, legendTop, legendWidth, legendHeight)
-        for i, line := range data {
+        for i, line := range lines {
             lineY := legendTop + legendPadding + legendLineSpacing + float32(i) * (legendCharHeight + legendLineSpacing)
             fmt.Fprintf(w, legendLabelTmpl, // legend label
                 legendLeft + legendPadding, lineY,
@@ -237,8 +235,9 @@ func (h *GraphPageHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 * {
     font-family: 'Roboto', sans-serif;
 }
-h2 {
+nav h2, nav h3, nav div {
     text-align: center;
+    margin: 0;
 }
 nav {
     width: 720px;
@@ -246,7 +245,7 @@ nav {
     display: table;
     table-layout: fixed;
 }
-nav * {
+nav > * {
     display: table-cell;
     vertical-align: middle;
     width: 0; /* equal widths with table-layout: fixed */
@@ -325,7 +324,7 @@ svg {
     var lines []TemperatureLine
     for _, folder := range folders {
         if optionalDataFolder != "" && optionalDataFolder != folder {
-            continue // Only output the one folder if specified
+            continue // Only show the one folder if specified
         }
         filename := filepath.Join(h.RootDataDir, folder, date)
         data, err := readTempLog(filename)
@@ -348,23 +347,30 @@ svg {
     // No errors, print the header section (200 OK)
     fmt.Fprint(w, head)
     // Output the navigation bar
-    fmt.Fprintf(w, "<nav>")
+    fmt.Fprintf(w, "<nav>\n")
     if prev != "" {
-        fmt.Fprintf(w, `    <a id="prev" href="%s">%s</a>`, prev, prev)
+        fmt.Fprintf(w, "  <a id=\"prev\" href=\"%s\">%s</a>\n", prev, prev)
     } else {
-        fmt.Fprintf(w, "    <div></div>")
+        fmt.Fprintf(w, "  <div></div>\n")
     }
-    if optionalDataFolder == "" {
-        fmt.Fprintf(w, "    <h2>%s</h2>", date)
-    }else {
-        fmt.Fprintf(w, "    <h2>%s/%s</h2>", optionalDataFolder, date)
+
+    fmt.Fprintf(w, "  <div>\n")
+    if dateTime, err := time.Parse("2006-01-02", date); err != nil {
+        log.Printf("Failed to parse date %#v: %v", date, err)
+    } else {
+        if optionalDataFolder == "" {
+            fmt.Fprintf(w, "    <h3>%s</h3>\n", dateTime.Weekday())
+        } else {
+            fmt.Fprintf(w, "    <h3>%s, %s</h3>\n", dateTime.Weekday(), optionalDataFolder)
+        }
     }
+    fmt.Fprintf(w, "    <h2>%s</h2>\n  </div>\n", date)
     if next != "" {
-        fmt.Fprintf(w, `    <a id="next" href="%s">%s</a>`, next, next)
+        fmt.Fprintf(w, "    <a id=\"next\" href=\"%s\">%s</a>\n", next, next)
     } else {
-        fmt.Fprintf(w, "    <div></div>")
+        fmt.Fprintf(w, "    <div></div>\n")
     }
-    fmt.Fprintf(w, "</nav>")
+    fmt.Fprintf(w, "</nav>\n")
 
     plotTemperatureGraphSVG(w, lines)
 }

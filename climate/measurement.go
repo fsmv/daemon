@@ -45,12 +45,25 @@ func readTemperature(sensorFile *os.File) (float32, error) {
     return float32(reading) * w1BitMultiplier, nil;
 }
 
-func logTemperature(sensor *os.File, dataDir string) {
+func logTemperature(quit <-chan struct{}, sensor *os.File, dataDir string, readInterval time.Duration) {
     file := TemperatureFile{
         DataDir: dataDir,
     }
+    defer func() {
+        if err := file.Handle.Close(); err != nil {
+            log.Printf("Failed to close final data file: %v", err)
+        } else {
+            log.Printf("Temperature logging for %#v safely stopped.", dataDir)
+        }
+    }()
+    timer := time.NewTimer(readInterval)
     for {
-        time.Sleep(*sensorReadInterval)
+        select {
+        case <-quit:
+            return
+        case <-timer.C:
+            timer.Reset(readInterval)
+        }
         now := time.Now()
         temperature, err := readTemperature(sensor)
         if err != nil {
@@ -60,8 +73,5 @@ func logTemperature(sensor *os.File, dataDir string) {
         if err := logTempMeasurement(&file, now, temperature); err != nil {
             maybeAlert("Error writing temperature", err, now)
         }
-    }
-    if err := file.Handle.Close(); err != nil {
-        log.Printf("Failed to close final data file: %v", err)
     }
 }

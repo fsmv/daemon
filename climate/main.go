@@ -1,17 +1,19 @@
 package main
 
 import (
-    "errors"
-    "os"
-    "os/signal"
     "fmt"
-    "flag"
     "log"
+    "flag"
+    "context"
+    "errors"
     "strings"
     "path/filepath"
     "time"
+    "sync"
     "net/http"
-    "strconv"
+    "os"
+    "os/signal"
+    "syscall"
 
     "daemon/feproxy/proxyserv"
 )
@@ -106,47 +108,69 @@ func promptForSensorFiles() (indoor, outdoor *os.File, err error) {
 
 func main() {
     flag.Parse()
-    sigs := make(chan os.Signal, 2)
-    signal.Notify(sigs, os.Interrupt, os.Kill)
+    var wg sync.WaitGroup
+    quit := make(chan struct{})
 
     register := registerProd
     if *testWebsiteOnly {
         register = registerTest
     }
-    fe, lease := proxyserv.MustConnectAndRegister(*feproxyAddr, register)
-    defer fe.Unregister(lease.Pattern)
-    defer fe.Close()
-    go fe.MustKeepLeaseRenewedForever(lease)
-
-    go func() {
-        <-sigs
-        log.Print("Shutting down...")
-        // TODO(1.8): use http.Server and call close here
-        os.Exit(0)
-    }()
 
     if !*testWebsiteOnly {
-        indoorFile, outdoorFile, err := promptForSensorFiles()
+        indoorSensor, outdoorSensor, err := promptForSensorFiles()
         if err != nil {
-            log.Fatal(err)
+            log.Fatal(err) // Before the server has started, so Fatal is fine
         }
-        go logTemperature(indoorFile, filepath.Join(*rootDataDir, indoorDataDir))
-        go logTemperature(outdoorFile, filepath.Join(*rootDataDir, outdoorDataDir))
+        logData := func(sensor *os.File, subdir string) {
+            wg.Add(1)
+            logTemperature(quit, sensor,
+                filepath.Join(*rootDataDir, subdir), *sensorReadInterval)
+            wg.Done()
+        }
+        go logData(indoorSensor, indoorDataDir)
+        go logData(outdoorSensor, outdoorDataDir)
     }
 
-    graphPage := GraphPageHandler{
-        RootDataDir: *rootDataDir,
+    fe, lease, err := proxyserv.ConnectAndRegister(*feproxyAddr, register)
+    if err != nil {
+        close(quit) // Safe shutdown of temperature logging
+        wg.Wait()
+        log.Fatal(err)
     }
-    http.Handle(register, &graphPage)
-    http.HandleFunc("/quit", func(w http.ResponseWriter, r *http.Request) {
+    go func() {
+        wg.Add(1)
+        fe.KeepLeaseRenewed(quit, lease)
+        wg.Done()
+    }()
+
+    server := &http.Server{
+        Addr: fmt.Sprintf(":%v", lease.Port),
+    }
+
+    shutdown := make(chan os.Signal, 1)
+    signal.Notify(shutdown, syscall.SIGINT, syscall.SIGHUP,
+        syscall.SIGABRT, syscall.SIGTERM, syscall.SIGSEGV)
+    go func() {
+        wg.Add(1)
+        sig := <-shutdown
+        if sig != nil {
+            log.Printf("Got signal: %v", sig)
+        }
+
+        log.Print("Shutting down...")
+        server.Shutdown(context.Background())
+        close(quit) // After shutdown so we keep the feproxy lease
+        wg.Done()
+    }()
+
+    http.Handle(register, &GraphPageHandler{*rootDataDir})
+    /*http.HandleFunc("/quit", func(w http.ResponseWriter, r *http.Request) {
         fmt.Fprint(w, "<body><h3>Shutting down!</h3></body>")
-        time.AfterFunc(time.Second, func () {
-            //client.Call("feproxy.Quit", struct{}{}, struct{}{})
-            sigs <- os.Kill
-        })
-    })
+        close(shutdown)
+    })*/
 
     log.Print("Starting server...")
-    // TODO(1.8): check for err == ErrServerClosed
-    log.Fatal(http.ListenAndServe(":" + strconv.Itoa(int(lease.Port)), nil))
+    err = server.ListenAndServe()
+    alert("Climate server is down!", err)
+    wg.Wait()
 }
