@@ -23,25 +23,27 @@ type Point struct {
     X, Y float32
 }
 
-type SVGPolyline []Point
-
-func (l SVGPolyline) Format(f fmt.State, c rune) {
+// color string must be sanitized for output to HTML
+func plotPolylineSVG(w io.Writer, l []Point, color string, strokeWidth int) {
     if len(l) < 2 {
-        fmt.Fprint(f, "<!-- error, not enough points -->\n")
+        fmt.Fprint(w, "<!-- error, not enough points -->\n")
         return
     }
     firstPoint := l[0]
-    // TODO: make stroke-width configurable
-    fmt.Fprintf(f, "<polyline fill=\"none\" stroke-width=\"1\" stroke=\"black\" points=\"%f %f",
-        firstPoint.X, firstPoint.Y)
+    fmt.Fprintf(w, "<polyline fill=\"none\" stroke=\"%v\" stroke-width=\"%v\" points=\"%f %f",
+        color, strokeWidth, firstPoint.X, firstPoint.Y)
     for _, point := range l[1:] {
-        fmt.Fprintf(f, ", %f %f", point.X, point.Y)
+        fmt.Fprintf(w, ", %f %f", point.X, point.Y)
     }
-    fmt.Fprint(f, "\"/>\n")
+    fmt.Fprint(w, "\"/>\n")
 }
 
-func plotTempSVG(data []TemperatureReading, w io.Writer) {
-    // TODO: indoor/outdoor, need two lines in the svg
+type TemperatureLine struct {
+    Folder string
+    Data []TemperatureReading
+}
+
+func plotTemperatureGraphSVG(w io.Writer, data []TemperatureLine) {
     const (
         width = 720
         height = 720
@@ -57,12 +59,12 @@ func plotTempSVG(data []TemperatureReading, w io.Writer) {
     }
 
     const (
-        axisLineTmpl = "<line stroke-width=\"2\" stroke=\"black\" x1=\"%f\" y1=\"%f\" x2=\"%f\" y2=\"%f\"/>\n"
-        tickLineTmpl = "<line stroke-width=\"1\" stroke=\"black\" x1=\"%f\" y1=\"%f\" x2=\"%f\" y2=\"%f\"/>\n"
-        gridLineTmpl = "<line stroke-width=\"1\" stroke=\"%s\" x1=\"%f\" y1=\"%f\" x2=\"%f\" y2=\"%f\"/>\n"
+        lineTmpl = "<line stroke-width=\"%d\" stroke=\"%s\" x1=\"%f\" y1=\"%f\" x2=\"%f\" y2=\"%f\"/>\n"
         xAxisLabelTmpl = "<text fill=\"black\" font-size=\"16px\" dy=\"12\" text-anchor=\"middle\" x=\"%f\" y=\"%f\">%s</text>\n"
         yAxisLeftLabelTmpl = "<text fill=\"black\" font-size=\"16px\" dy=\"5\" text-anchor=\"end\" x=\"%f\" y=\"%f\">%s</text>\n"
         yAxisRightLabelTmpl = "<text fill=\"darkgrey\" font-size=\"16px\" dy=\"5\" text-anchor=\"start\" x=\"%f\" y=\"%f\">%s</text>\n"
+        legendLabelTmpl = "<text fill=\"black\" font-size=\"16px\" dy=\"7\" text-anchor=\"start\" x=\"%f\" y=\"%f\">%s</text>\n"
+        rectTmpl = "<rect fill=\"white\" stroke=\"black\" x=\"%f\" y=\"%f\" width=\"%f\" height=\"%f\" />\n"
     )
 
     fmt.Fprintf(w, "<svg viewport=\"0 0 %v %v\" preserveAspectRatio=\"xMinYMin\">\n",
@@ -70,9 +72,9 @@ func plotTempSVG(data []TemperatureReading, w io.Writer) {
 
     const (
         tempAxisPaddingCelsius = 1.0
-        maxTempAxis = 35.0
-        minTempAxis = 20.0
-        numTempTicks = 16
+        maxTempAxis = 30.0
+        minTempAxis = 6.0
+        numTempTicks = 13
         cToF = 9.0/5.0
 
         minutesBetweenTicks = 120
@@ -89,40 +91,43 @@ func plotTempSVG(data []TemperatureReading, w io.Writer) {
     gridBottom := float32(height - bottomMargin)
     gridTop    := float32(topMargin)
 
-    { // Axis labels
-        // Vertical
+    { // Plot the axes
+        // Vertical ticks and labels
         for i := 0; i < numTempTicks; i++ {
             axisPosition := float32(i) / float32(numTempTicks - 1)
             temp := (axisPosition * (maxTempAxis - minTempAxis)) + minTempAxis
             yPos := ((1.0 - axisPosition) * (gridBottom - gridTop)) + gridTop
 
-            fmt.Fprintf(w, yAxisLeftLabelTmpl,
+            fmt.Fprintf(w, yAxisLeftLabelTmpl, // left axis label
                 gridLeft - labelOffset, yPos,
                 fmt.Sprintf("%.1f C", temp))
-            fmt.Fprintf(w, yAxisRightLabelTmpl,
+            fmt.Fprintf(w, yAxisRightLabelTmpl, // right axis label
                 gridRight + labelOffset, yPos,
                 fmt.Sprintf("%.1f F", temp * (9.0 /5.0) + 32.0))
-            fmt.Fprintf(w, tickLineTmpl,
+            fmt.Fprintf(w, lineTmpl, 1, "black", // left axis tick
                 gridLeft, yPos,
                 gridLeft - tickLineLength, yPos)
-            fmt.Fprintf(w, gridLineTmpl, "lightgrey",
+            fmt.Fprintf(w, lineTmpl, 1, "darkgrey", // grid line
                 gridLeft, yPos,
                 gridRight, yPos)
         }
-        // Horizonal
+        fmt.Fprintf(w, lineTmpl, 2, "black", // Vertical axis line
+            gridLeft, gridTop,
+            gridLeft, gridBottom)
+        // Horizonal axis ticks and labels
         const maxTimeMinutes = 60 * 24 - 1
         for timeMinutes := 0 ; true ; {
             timeStr := fmt.Sprintf("%02d:%02d", timeMinutes/60, timeMinutes%60)
             axisPosition := float32(timeMinutes) / float32(maxTimeMinutes)
             xPos := (axisPosition * (gridRight - gridLeft)) + gridLeft
 
-            fmt.Fprintf(w, xAxisLabelTmpl,
+            fmt.Fprintf(w, xAxisLabelTmpl, // tick label
                 xPos, gridBottom + labelOffset,
                 timeStr)
-            fmt.Fprintf(w, tickLineTmpl,
+            fmt.Fprintf(w, lineTmpl, 1, "black", // tick line
                 xPos, gridBottom,
                 xPos, gridBottom + tickLineLength)
-            fmt.Fprintf(w, gridLineTmpl, "darkgrey",
+            fmt.Fprintf(w, lineTmpl, 1, "darkgrey", // grid line
                 xPos, gridTop,
                 xPos, gridBottom)
 
@@ -130,7 +135,7 @@ func plotTempSVG(data []TemperatureReading, w io.Writer) {
                 subTimeMinutes := timeMinutes + minutesBetweenTicks / 2
                 subAxisPosition := float32(subTimeMinutes) / float32(maxTimeMinutes)
                 subXPos := (subAxisPosition * (gridRight - gridLeft)) + gridLeft
-                fmt.Fprintf(w, gridLineTmpl, "lightgrey",
+                fmt.Fprintf(w, lineTmpl, 1, "lightgrey", // minor grid line
                     subXPos, gridTop,
                     subXPos, gridBottom)
             }
@@ -144,44 +149,94 @@ func plotTempSVG(data []TemperatureReading, w io.Writer) {
                 timeMinutes = maxTimeMinutes
             }
         }
-    }
-    { // Axes
-        // Vertical
-        fmt.Fprintf(w, axisLineTmpl,
-            gridLeft, gridTop,
-            gridLeft, gridBottom)
-        // Horizonal
-        fmt.Fprintf(w, axisLineTmpl,
+        fmt.Fprintf(w, lineTmpl, 2, "black", // Horizontal axis line
             gridLeft, gridBottom,
             gridRight, gridBottom)
     }
-
-    var line SVGPolyline
-    for _, t := range data {
-        durationIntoDay := t.Time.Sub(startOfDay)
-        percentIntoDay := durationIntoDay.Seconds() / (24 * time.Hour).Seconds()
-        // The data where X and Y are between 0 and 1
-        plotPoint := Point{
-            X: float32(percentIntoDay),
-            Y: (t.Celsius - minTempAxis) / (maxTempAxis - minTempAxis),
+    { // Plot the data lines + legend more than one line
+        tempsToPoints := func (temps []TemperatureReading) []Point {
+            var ret []Point
+            for _, t := range temps {
+                durationIntoDay := t.Time.Sub(startOfDay)
+                percentIntoDay := durationIntoDay.Seconds() / (24 * time.Hour).Seconds()
+                // The data where X and Y are between 0 and 1
+                plotPoint := Point{
+                    X: float32(percentIntoDay),
+                    Y: (t.Celsius - minTempAxis) / (maxTempAxis - minTempAxis),
+                }
+                // Add the padding for the margin before the axes
+                plotPoint.X = (plotPoint.X * (gridRight - gridLeft)) + gridLeft
+                plotPoint.Y = ((1.0 - plotPoint.Y) * (gridBottom - gridTop)) + gridTop
+                ret = append(ret, plotPoint)
+            }
+            return ret
         }
-        // Add the padding for the margin before the axes
-        plotPoint.X = (plotPoint.X * (gridRight - gridLeft)) + gridLeft
-        plotPoint.Y = ((1.0 - plotPoint.Y) * (gridBottom - gridTop)) + gridTop
-        line = append(line, plotPoint)
+        if len(data) == 1 { // Only one line, no legend
+            plotPolylineSVG(w, tempsToPoints(data[0].Data), "black", 1)
+            fmt.Fprintf(w, "</svg>")
+            return
+        }
+        colors := []string{"blue", "red", "green", "orange", "magenta", "black"}
+        getColor := func(index int) string {
+            if index >= len(colors) {
+                return colors[len(colors)-1]
+            }
+            return colors[index]
+        }
+        // Plot the data lines
+        for i, line := range data {
+            plotPolylineSVG(w, tempsToPoints(line.Data), getColor(i), 1)
+        }
+        // Plot the legend
+        const (
+            legendMargin = 5.0
+            legendPadding = 5.0
+            legendLineSpacing = 5.0
+            legendTickLength = 15.0
+            legendCharWidth = 12.0
+            legendCharHeight = 16.0
+        )
+        legendHeight := float32(len(data)) * (legendLineSpacing + legendCharHeight) + legendPadding
+        var legendTextWidth float32
+        for _, line := range data {
+            folderWidth := float32(len(line.Folder) * legendCharWidth + legendPadding) 
+            if folderWidth > legendTextWidth {
+                legendTextWidth = folderWidth
+            }
+        }
+        legendWidth := legendTextWidth + legendTickLength + 2*legendPadding
+        legendLeft := gridRight - legendWidth - legendMargin
+        legendTop := gridTop + legendMargin
+        fmt.Fprintf(w, rectTmpl,
+            legendLeft, legendTop, legendWidth, legendHeight)
+        for i, line := range data {
+            lineY := legendTop + legendPadding + legendLineSpacing + float32(i) * (legendCharHeight + legendLineSpacing)
+            fmt.Fprintf(w, legendLabelTmpl, // legend label
+                legendLeft + legendPadding, lineY,
+                line.Folder)
+            legendTickLeft := legendLeft + legendTextWidth
+            fmt.Fprintf(w, lineTmpl, 1, getColor(i), // legend example line (tick)
+                legendTickLeft, lineY,
+                legendTickLeft + legendTickLength, lineY)
+        }
     }
-    fmt.Fprintf(w, "%v", line)
-    fmt.Fprintf(w, "</svg>")
 }
 
-func HandleGraphPage(w http.ResponseWriter, r *http.Request) {
-    // TODO: indoor/outdoor
+type GraphPageHandler struct {
+    RootDataDir string
+}
+
+func (h *GraphPageHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
     w.Header().Set("Content-Type", "text/html")
     head :=
 `<!doctype html>
 <html>
 <head>
+<link href="https://fonts.googleapis.com/css?family=Roboto" rel="stylesheet">
 <style>
+* {
+    font-family: 'Roboto', sans-serif;
+}
 h2 {
     text-align: center;
 }
@@ -222,16 +277,18 @@ svg {
         fmt.Fprintf(w, "%v<h2>Invalid URL</h2>", head)
         return
     }
-    optionalDataSubdir := pathMatches[1]
-    date := pathMatches[2]
-    // Find the date to display, and the prev and next dates for navigation
-    folder := filepath.Join(*rootDataDir, optionalDataSubdir)
-    var err error
+    optionalDataFolder := pathMatches[1]
+    optionalDataDate := pathMatches[2]
+    // Find the date to display, the folders that have data for that date, and
+    // the prev and next dates for navigation
+    date := optionalDataDate
+    var folders []string
     var prev, next string
+    var err error
     if date == "" {
-        prev, date, err = findNewestDataDate(folder)
+        prev, date, folders, err = FindNewestDataDate(h.RootDataDir)
     } else {
-        prev, next, err = findAdjacentDataDates(folder, date)
+        prev, next, folders, err = FindAdjacentDataDates(h.RootDataDir, date)
     }
     if err != nil {
         w.WriteHeader(http.StatusInternalServerError)
@@ -239,21 +296,55 @@ svg {
         fmt.Fprintf(w, "%v<h2>Internal Server Error: Invalid data directory</h2>", head)
         return
     }
-    if date == "" {
+    if date == "" || len(folders) == 0 {
         w.WriteHeader(http.StatusNotFound)
         fmt.Fprintf(w, "%v<h2>No data found</h2>", head)
         return
     }
-    // Read the file to display
-    filename := filepath.Join(folder, date)
-    data, err := readTempLog(filename)
-    if err != nil {
+    if optionalDataFolder != "" {
+        var optFolderHasData bool
+        for _, folder := range folders {
+            if folder != optionalDataFolder {
+                continue
+            }
+            optFolderHasData = true
+        }
+        if !optFolderHasData {
+            w.WriteHeader(http.StatusNotFound)
+            fmt.Fprintf(w, "%v<h2>No data found for specfied folder</h2>", head)
+            return
+        }
+    }
+
+    // After this point, date and optionalDataFolder are known safe strings even
+    // though they're user input.
+    //  - date must have matched the date regex and be a file on the disk
+    //  - optionalDataFolder must match the name of a data folder on disk
+
+    // Read the file(s) to display
+    var lines []TemperatureLine
+    for _, folder := range folders {
+        if optionalDataFolder != "" && optionalDataFolder != folder {
+            continue // Only output the one folder if specified
+        }
+        filename := filepath.Join(h.RootDataDir, folder, date)
+        data, err := readTempLog(filename)
+        if err != nil {
+            log.Printf("Failed to read data file (%v): %v",
+                filename, err)
+            continue
+        }
+        lines = append(lines, TemperatureLine{
+            Folder: folder,
+            Data: data,
+        })
+    }
+    if len(lines) == 0 {
         w.WriteHeader(http.StatusNotFound)
-        log.Printf("HTTP 404 Error; Failed to read data file (%v): %v",
-            filename, err)
         fmt.Fprintf(w, "%v<h2>No data for %v</h2>", head, date)
         return
     }
+
     // No errors, print the header section (200 OK)
     fmt.Fprint(w, head)
     // Output the navigation bar
@@ -263,7 +354,11 @@ svg {
     } else {
         fmt.Fprintf(w, "    <div></div>")
     }
-    fmt.Fprintf(w, "    <h2>%s</h2>", date)
+    if optionalDataFolder == "" {
+        fmt.Fprintf(w, "    <h2>%s</h2>", date)
+    }else {
+        fmt.Fprintf(w, "    <h2>%s/%s</h2>", optionalDataFolder, date)
+    }
     if next != "" {
         fmt.Fprintf(w, `    <a id="next" href="%s">%s</a>`, next, next)
     } else {
@@ -271,5 +366,5 @@ svg {
     }
     fmt.Fprintf(w, "</nav>")
 
-    plotTempSVG(data, w)
+    plotTemperatureGraphSVG(w, lines)
 }

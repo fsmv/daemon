@@ -45,6 +45,7 @@ func promptForIntLessThan(max int) int {
     return ret
 }
 
+// TODO: split the sensor file reading from the prompting. Put it in measurement.go
 func promptForSensorFiles() (indoor, outdoor *os.File, err error) {
     // List the device files
     devicesDir, err := os.Open(w1Dir)
@@ -133,7 +134,10 @@ func main() {
         go logTemperature(outdoorFile, filepath.Join(*rootDataDir, outdoorDataDir))
     }
 
-    http.HandleFunc(register, HandleGraphPage)
+    graphPage := GraphPageHandler{
+        RootDataDir: *rootDataDir,
+    }
+    http.Handle(register, &graphPage)
     http.HandleFunc("/quit", func(w http.ResponseWriter, r *http.Request) {
         fmt.Fprint(w, "<body><h3>Shutting down!</h3></body>")
         time.AfterFunc(time.Second, func () {

@@ -1,5 +1,18 @@
 package main
 
+import (
+    "os"
+    "fmt"
+    "log"
+    "time"
+    "regexp"
+    "strconv"
+    "bufio"
+    "math"
+    "sort"
+    "path/filepath"
+)
+
 var (
     // Used for matching filenames
     dateRegex = regexp.MustCompile(`\d{4}-\d{2}-\d{2}`)
@@ -25,22 +38,26 @@ func logTempMeasurement(file *TemperatureFile, now time.Time, celsius float32) e
                     file.DataDir, err)
             }
         } else {
-            err := dataFile.Close()
-            if err != nil { // could be a write error on flush
+            if err := file.Handle.Close(); err != nil {
+                // could be a write error on flush
+                // TODO: want to return this so we can alert, but still also try
+                // to write the next value...
                 log.Printf("Failed to close data file: %v", err)
                 // Still try to open the next file
             }
         }
+        var err error
         currDateStr := fmt.Sprintf("%04d-%02d-%02d", now.Year(), now.Month(), now.Day())
-        file.Handle, err := os.OpenFile(filepath.Join(file.DataDir, currDateStr),
+        file.Handle, err = os.OpenFile(filepath.Join(file.DataDir, currDateStr),
             os.O_RDWR|os.O_APPEND|os.O_CREATE, os.FileMode(0644))
         if err != nil {
             return err
         }
     }
     // Log the temperature
-    return file.Handle.WriteString(fmt.Sprintf("%02d:%02d:%02d, %v\n",
-        now.Hour(), now.Minute(), now.Second(), temperature))
+    _, err := file.Handle.WriteString(fmt.Sprintf("%02d:%02d:%02d, %v\n",
+        now.Hour(), now.Minute(), now.Second(), celsius))
+    return err
 }
 
 type TemperatureReading struct {
@@ -109,37 +126,6 @@ func findTempRange(data []TemperatureReading) (min float32, max float32) {
     return
 }
 
-// Assumes the lists are sorted. Inputs are unaffected, returns a copy.
-func union(a, b []string) []string {
-    var ret []string
-    var last string
-    take := func(arr []string) []string {
-        // Skip duplicates
-        if arr[0] == last {
-            return arr[1:]
-        }
-        last = arr[0]
-        // Save and move to the next one
-        ret = append(ret, arr[0])
-        return arr[1:]
-    }
-    for len(a) > 0 || len(b) > 0 {
-        if len(a) == 0 {
-            b = take(b)
-        } else if len(b) == 0 {
-            a = take(a)
-        } else if a[0] < b[0] {
-            a = take(a)
-        } else if b[0] < a[0] {
-            b = take(b)
-        } else /* if a[0] == b[0] */ {
-            a = take(a)
-            b = b[1:] // skip the duplicate
-        }
-    }
-    return ret
-}
-
 // Returns a list of the data filenames (if the data dir is listable).
 // All names are in the form yyyy-mm-dd and are sorted newest first.
 func listDataDates(dataDir string) ([]string, error) {
@@ -151,8 +137,6 @@ func listDataDates(dataDir string) ([]string, error) {
     if err != nil {
         return nil, err
     }
-    // TODO: check for folders and recurse. The returned list should be the
-    // union of all the dates in all the folders
     var ret []string
     for _, dataFile := range dataFiles {
         filename := dataFile.Name()
@@ -163,49 +147,124 @@ func listDataDates(dataDir string) ([]string, error) {
     }
     // sort.Strings sorts oldest first :(
     sort.Slice(ret, func(i, j int) bool {
+        // yyyy-mm-dd makes this easy
         return ret[i] > ret[j]
     })
     return ret, nil
 }
 
-// Finds the newest data file and the one immediately before it.
+type DataFolder struct {
+    Folder string
+    Dates []string
+}
+
+func ListDataFolders(rootDataDir string) ([]DataFolder, error) {
+    f, err := os.Open(rootDataDir)
+    if err != nil {
+        return nil, fmt.Errorf(
+            "Failed to open root data dir (%#v): %v", rootDataDir, err)
+    }
+    rootDirList, err := f.Readdir(-1)
+    if err != nil {
+        return nil, fmt.Errorf(
+            "Failed to list root dir (%#v): %v", rootDataDir, err)
+    }
+    var ret []DataFolder
+    for _, maybeDataFolder := range rootDirList {
+        if !maybeDataFolder.IsDir() {
+            continue
+        }
+        folder := maybeDataFolder.Name()
+        dataDates, err := listDataDates(filepath.Join(rootDataDir, folder))
+        if err != nil {
+            // Maybe this should just log, it's fine this way for me though
+            return nil, fmt.Errorf(
+                "Failed to list data dates for %#v: %v", folder, err)
+        }
+        ret = append(ret, DataFolder{
+            Folder: folder,
+            Dates: dataDates,
+        })
+    }
+    sort.Slice(ret, func(i, j int) bool {
+        return ret[i].Folder < ret[j].Folder
+    })
+    return ret, nil
+}
+
+// Finds the newest date for a data file in any of dataFolders lists. Then,
+// advances the pointer to cut off that date in the folders that have it.
+// Finally, returns the newest date and the list of folders that contained it.
+func nextNewestDate(dataFolders []DataFolder) (string, []string) {
+    var nextNewestDate string
+    var folders []string
+    for _, dataFolder := range dataFolders {
+        if len(dataFolder.Dates) == 0 {
+            continue
+        }
+        folderNextDate := dataFolder.Dates[0]
+        if nextNewestDate == "" || folderNextDate < nextNewestDate {
+            nextNewestDate = folderNextDate
+        }
+    }
+    if nextNewestDate == "" {
+        return "", nil
+    }
+    for i, _ := range dataFolders {
+        if len(dataFolders[i].Dates) == 0 {
+            continue
+        }
+        folderNextDate := dataFolders[i].Dates[0]
+        if folderNextDate == nextNewestDate {
+            folders = append(folders, dataFolders[i].Folder)
+            dataFolders[i].Dates = dataFolders[i].Dates[1:]
+        }
+    }
+    return nextNewestDate, folders
+}
+
+// Finds the newest data date and the date immediately before it. Also returns
+// the list of folders that have data for the newest date.
 //
 //   - If err != nil then the data directory was not listable.
 //   - If there are no data files, then both prev and newest will be the empty
-//     string.
-//   - If there is only one data file, then prev will be the empty string.
-func findNewestDataDate(dataDir string) (prev, newest string, err error) {
-    dates, err := listDataDates(dataDir)
-    if err != nil || len(dates) == 0 {
-        return
-    }
-    newest = dates[0]
-    if len(dates) >= 2 {
-        prev = dates[1]
-    }
-    return
-}
-
-// Finds the two data files immediately before and after the mid date.
-//
-//   - If there are no adjacent files in a direction, the empty string is
-//     returned.
-//   - If err != nil then the data directory was not listable.
-//   - If mid does not exist then ("", "", nil) is returned.
-func findAdjacentDataDates(dataDir, mid string) (prev, next string, err error) {
-    dates, err := listDataDates(dataDir)
+//     string. newestFolders will be nil.
+//   - If there is only one data date, then prev will be the empty string.
+func FindNewestDataDate(rootDataDir string) (prev, newest string, newestFolders []string, err error) {
+    dataFolders, err := ListDataFolders(rootDataDir)
     if err != nil {
         return
     }
-    var lastDate string
-    for _, date := range dates {
-        if date == mid {
-            next = lastDate
-        } else if lastDate == mid {
-            prev = date
+    newest, newestFolders = nextNewestDate(dataFolders)
+    prev, _ = nextNewestDate(dataFolders)
+    return
+}
+
+// Finds the two data files immediately before and after the mid date. Also
+// returns the list of folders that have data for the mid date.
+//
+//   - If there are no adjacent data dates in a direction, the empty string is
+//     returned.
+//   - If err != nil then the data directory was not listable.
+//   - If mid does not exist then ("", "", nil, nil) is returned.
+func FindAdjacentDataDates(rootDataDir, mid string) (prev, next string, midFolders []string, err error) {
+    dataFolders, err := ListDataFolders(rootDataDir)
+    if err != nil {
+        return
+    }
+    var lastNewestDate string
+    for {
+        date, folders := nextNewestDate(dataFolders)
+        if date == "" { // All folders are empty now
             break
         }
-        lastDate = date
+        if date == mid {
+            next = lastNewestDate
+            midFolders = folders
+        } else if lastNewestDate == mid {
+            prev = date
+        }
+        lastNewestDate = date
     }
     return
 }

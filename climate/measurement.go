@@ -5,12 +5,7 @@ import (
     "fmt"
     "log"
     "strconv"
-    "bufio"
-    "math"
-    "sort"
     "time"
-    "regexp"
-    "path/filepath"
 )
 
 const (
@@ -66,8 +61,7 @@ func logTemperature(sensor *os.File, dataDir string) {
             maybeAlert("Error writing temperature", err, now)
         }
     }
-    err = file.Handle.Close()
-    if err != nil {
+    if err := file.Handle.Close(); err != nil {
         log.Printf("Failed to close final data file: %v", err)
     }
 }
