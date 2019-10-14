@@ -1,4 +1,4 @@
-package main
+package alert
 
 import (
     "fmt"
@@ -18,12 +18,16 @@ var (
         "SMTP server address for sending alerts")
 
 
-    lastAlert error
-    lastAlertTime time.Time
-    alertDuplicateDelay = 15 * time.Minute
+    duplicateErrorCount = 0
+    lastError error
+    lastErrorTime time.Time
+
+    // When using ... this is the how long to wait before sending another email
+    // for duplicate errors.
+    DuplicateErrorDelay = 15 * time.Minute
 )
 
-func alertEmail(subject, message string) error {
+func SendEmail(subject, message string) error {
     if *alertServerAddr == "" || *alertEmailAddr == "" || *alertEmailPassword == "" {
         log.Print("Alert emails disabled (the flags must be set)")
         return nil
@@ -37,7 +41,7 @@ func alertEmail(subject, message string) error {
         *alertEmailAddr, []string{*alertEmailAddr}, []byte(headers + message))
 }
 
-func alert(message string, err error) {
+func Error(message string, err error) {
     log.Printf("Alert! %v: %v", message, err)
     err = alertEmail(message, err.Error())
     if err != nil {
@@ -45,13 +49,21 @@ func alert(message string, err error) {
     }
 }
 
-func maybeAlert(message string, err error, now time.Time) {
-    if lastAlert != nil && lastAlert.Error() == err.Error() &&
-       now.Sub(lastAlertTime) < alertDuplicateDelay {
-        log.Printf("(Repeat Alert) %v: %v", message, err)
+// RepeatedError only sends one email every 
+// suppressed 
+func RepeatedError(message string, err error, now time.Time) {
+    if lastError != nil && lastError.Error() == err.Error() &&
+       now.Sub(lastErrorTime) < DuplicateErrorDelay
+    {
+        duplicateErrorCount += 1
+        log.Printf("Duplicate alert: %v: %v", message, err)
     } else {
-        alert(message, err)
+        duplicateErrorCount += 1
+        alert(
+            fmt.Sprintf("%v (%v duplicates suppressed)", message, duplicateErrorCount),
+            err)
+        duplicateErrorCount = 0
     }
-    lastAlert = err
-    lastAlertTime = now
+    lastError = err
+    lastErrorTime = now
 }

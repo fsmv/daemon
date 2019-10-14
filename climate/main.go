@@ -15,6 +15,7 @@ import (
     "os/signal"
     "syscall"
 
+    "daemon/util/alert"
     "daemon/feproxy/proxyserv"
 )
 
