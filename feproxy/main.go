@@ -37,7 +37,7 @@ var (
         "shared by the parent process.")
 )
 
-func loadFilePathOrFD(pathOrFD string) (*os.File, error) {
+func openFilePathOrFD(pathOrFD string) (*os.File, error) {
     if fd, err := strconv.Atoi(pathOrFD); err == nil {
         return os.NewFile(uintptr(fd), ""), nil
     }
@@ -61,12 +61,12 @@ func main() {
         close(quit)
     }()
 
-    tlsCert, err := loadFilePathOrFD(*tlsCertPath)
+    tlsCert, err := openFilePathOrFD(*tlsCertPath)
     if err != nil {
         log.Fatalf("Failed to load tls cert file (%v): %v",
             *tlsCertPath, err)
     }
-    tlsKey, err := loadFilePathOrFD(*tlsKeyPath)
+    tlsKey, err := openFilePathOrFD(*tlsKeyPath)
     if err != nil {
         log.Fatalf("Failed to load tls key file (%v): %v",
             *tlsKeyPath, err)
