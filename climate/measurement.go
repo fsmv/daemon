@@ -28,8 +28,17 @@ func readTemperature(sensorFile *os.File) (float32, error) {
     data := make([]byte, 5)
     _, err := sensorFile.ReadAt(data, /*offset=*/0)
     if err != nil {
+        // TODO: if the sensor gets unplugged and plugged back in we error here
+        // We could re-open the file to get going again automatically. It's a
+        // little complicated though:
+        //   - Use os.Open(sensorFile.Name()) (and then handle the error)
+        //   - Open might fail for few tries before the device comes back
+        //   - I don't want to get this error on email and not know it just came
+        //     back on its own
+        //   - Maybe want to only do the reloading for "no such device" errors,
+        //     but there's not a nice type or constant to check for this.
         return TemperatureErrVal,
-            fmt.Errorf("Failed to read file: %v", err)
+            fmt.Errorf("Failed to read sensor file: %v", err)
     }
     // Parse the data
     if data[2] != ' ' {
