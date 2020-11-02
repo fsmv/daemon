@@ -19,6 +19,7 @@ import (
     "net/url"
     "os"
     "strconv"
+    "strings"
     "sync"
     "time"
     "errors"
@@ -52,6 +53,7 @@ type forwarder struct {
     Timeout time.Time
     Pattern string
     Port    uint16
+    IsStaticMapping bool // If true there's no timeout (this was configured in the static_mapping flag)
 }
 
 // GetNumLeases returns the number of Registered Leases
@@ -90,19 +92,17 @@ func (p *ProxyServ) reservePortUnsafe() (uint16, error) {
     return port, nil
 }
 
-// Register leases a new forwarder for the given pattern.
-// Returns an error if the server has no more ports to lease.
-func (p *ProxyServ) Register(clientAddr string, pattern string) (lease Lease, err error) {
-    p.mut.Lock()
-    defer p.mut.Unlock()
-    port, err := p.reservePortUnsafe()
+// Creates and saves a new forwarder that handles request and forwards them to
+// the given client.
+//
+// Returns the pointer to the new forwarder because callers must set either
+// Timeout or IsStaticMapping
+//
+// mut must be locked
+func (p *ProxyServ) saveForwarder(clientAddr string, clientPort uint16, pattern string, stripPattern bool) (*forwarder, error) {
+    backend, err := url.Parse("http://" + clientAddr + ":" + strconv.Itoa(int(clientPort)))
     if err != nil {
-        return Lease{}, err
-    }
-    backend, err := url.Parse("http://" + clientAddr + ":" + strconv.Itoa(int(port)))
-    if err != nil {
-        log.Fatal(err)
-        return Lease{}, err
+        return nil, err
     }
     // Store the forwarder
     backendQuery := backend.RawQuery
@@ -115,11 +115,20 @@ func (p *ProxyServ) Register(clientAddr string, pattern string) (lease Lease, er
             // causes a redirect loop if the pattern has a trailing / because
             // this will remove it and the DefaultServMux will redirect no
             // trailing slash to trailing slash.
-            if req.URL.Path[0] == '/' {
-                req.URL.Path = backend.Path + req.URL.Path
-            } else {
-                req.URL.Path = backend.Path + "/" + req.URL.Path
+            if req.URL.Path[0] != '/' {
+                req.URL.Path = "/" + req.URL.Path
             }
+            if stripPattern {
+                if pattern[len(pattern)-1] != '/' { // if the pattern doesn't end in / then it's exact match only
+                    req.URL.Path = "/"
+                } else {
+                    req.URL.Path = strings.TrimPrefix(req.URL.Path, pattern[0:len(pattern)-1])
+                    if req.URL.Path == "" {
+                        req.URL.Path = "/"
+                    }
+                }
+            }
+            req.URL.Path = backend.Path + req.URL.Path
             if backendQuery == "" || req.URL.RawQuery == "" {
                 req.URL.RawQuery = backendQuery + req.URL.RawQuery
             } else {
@@ -133,12 +142,50 @@ func (p *ProxyServ) Register(clientAddr string, pattern string) (lease Lease, er
             req.Header.Add("Orig-Address", req.RemoteAddr)
         },
     }
-    p.forwarders[pattern] = &forwarder{
+    ret := &forwarder{
         Handler: proxy,
-        Timeout: time.Now().Add(p.ttlDuration),
         Pattern: pattern,
-        Port:    port,
+        Port:    clientPort,
     }
+    p.forwarders[pattern] = ret
+    return ret, nil
+}
+
+func (p *ProxyServ) RegisterStatic(clientAddr string, clientPort uint16, pattern string) error {
+    // Assumes the port is not in the configured range (because otherwise we
+    // might hand out a lease for that port). It's checked in the flag Set method.
+    p.mut.Lock()
+    defer p.mut.Unlock()
+
+    fwdr, err := p.saveForwarder(clientAddr, clientPort, pattern, true)
+    if err != nil {
+        return err
+    }
+    fwdr.IsStaticMapping = true
+
+    // This isn't called through the RPC server so we have to log it here
+    log.Printf("Registered static forwarder to %v:%v, Pattern: %v",
+               clientAddr, clientPort, pattern)
+    return nil
+}
+
+// Register leases a new forwarder for the given pattern.
+// Returns an error if the server has no more ports to lease.
+func (p *ProxyServ) Register(clientAddr string, pattern string) (lease Lease, err error) {
+    p.mut.Lock()
+    defer p.mut.Unlock()
+
+    port, err := p.reservePortUnsafe()
+    if err != nil {
+        return Lease{}, err
+    }
+
+    fwdr, err := p.saveForwarder(clientAddr, port, pattern, false)
+    if err != nil {
+        return Lease{}, err
+    }
+    fwdr.Timeout = time.Now().Add(p.ttlDuration)
+
     return Lease{
         Pattern: pattern,
         Port:    port,
@@ -171,6 +218,9 @@ func (p *ProxyServ) monitorTTLs(ticker *time.Ticker, quit <-chan struct{}) {
             p.mut.Lock()
             now := time.Now()
             for pattern, fwd := range p.forwarders {
+                if fwd.IsStaticMapping {
+                    continue
+                }
                 if now.After(fwd.Timeout) {
                     p.unusedPorts = append(p.unusedPorts, int(fwd.Port))
                     delete(p.forwarders, pattern)
@@ -230,15 +280,27 @@ func (p *ProxyServ) ServeHTTP(w http.ResponseWriter, req *http.Request) {
     fwd := p.selectForwarder(req.URL.Path)
     // No handler for this path, 404
     if fwd == nil {
+        log.Print("Forwarder not found for path: ", req.URL.Path)
         http.NotFound(w, req)
         return
     }
     // Handler timed out, delete it then 404
-    if time.Now().After(fwd.Timeout) {
+    if !fwd.IsStaticMapping && time.Now().After(fwd.Timeout) {
+        log.Print("Forwarder timed out for pattern: ", fwd.Pattern)
         p.Unregister(req.URL.Path)
         http.NotFound(w, req)
         return
     }
+
+    // If the pattern ends in /, redirect so the url ends in / so relative paths
+    // in the html work right
+    if fwd.Pattern[len(fwd.Pattern)-1] == '/' && req.URL.Path == fwd.Pattern[:len(fwd.Pattern)-1] {
+        log.Print("Redirecting...")
+        req.URL.Path += "/"
+        http.Redirect(w, req, req.URL.String(), http.StatusSeeOther)
+        return
+    }
+
     // handle the request with the selected forwarder
     fwd.Handler.ServeHTTP(w, req)
 }

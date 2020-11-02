@@ -37,6 +37,7 @@ type Command struct {
     User        string
     // Args is the arguments to pass to the executable
     Args        []string
+    JsonArgs    []JsonArg
     // Ports to listen on (with tcp) and pass to the process as files.
     // Useful for accessing the privelaged ports (<1024).
     //
@@ -48,6 +49,11 @@ type Command struct {
     // In the child process, the files will have fd = 3 + len(Ports) + i, where
     // Files[i] is the file
     Files       []string
+}
+
+type JsonArg struct {
+    Name string
+    Value []interface{} // A JSON list
 }
 
 type Child struct {
@@ -211,8 +217,24 @@ func StartPrograms(programs []Command) (map[int]*Child, int) {
                 Gid: uint32(gid),
             },
         }
-        // Start the process
+        // Finalize the argv
+        var jsonArgs []string
+        for _,jsonArg := range cmd.JsonArgs {
+            argVal, err := json.Marshal(jsonArg.Value)
+            if err != nil {
+                log.Printf("%v: Error in json arg %v, message: %v",
+                    name, jsonArg.Name, err)
+                errCnt++
+                break
+            }
+            jsonArgs = append(jsonArgs, fmt.Sprintf("--%v=%v", jsonArg.Name, string(argVal)))
+        }
+        if len(jsonArgs) != len(cmd.JsonArgs) {
+            continue // There was an error parsing json args
+        }
         argv := append([]string{cmd.Filepath}, cmd.Args...)
+        argv = append(argv, jsonArgs...)
+        // Start the process
         proc, err := os.StartProcess(cmd.Filepath, argv, attr)
         c := &Child{
             Cmd: &cmd,
