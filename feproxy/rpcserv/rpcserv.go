@@ -16,7 +16,7 @@ type RPCServ struct {
     quit      chan struct{}
 }
 
-// Register registers a new forwarding rule in the proxy server.
+// Register registers a new forwarding rule to the rpc client's ip address.
 // Randomly assigns port for the client to listen on
 func (s *RPCServ) Register(clientAddr net.Addr, pattern string, ret *proxyserv.Lease) error {
     addrRaw := clientAddr.String()
@@ -29,6 +29,26 @@ func (s *RPCServ) Register(clientAddr net.Addr, pattern string, ret *proxyserv.L
     }
     log.Printf("Registered forwarder to %v:%v, Pattern: %v, TTL: %v",
                addrNoPort, lease.Port, pattern, lease.TTL)
+    *ret = lease
+    return nil
+}
+
+// Register registers a new forwarding rule to the rpc client's ip address.
+// Uses a fixed port (which must be out of feproxy's reserved range) and strips
+// the pattern in requests, intended for web servers that don't know about feproxy.
+func (s *RPCServ) RegisterThirdParty(clientAddr net.Addr, args *proxyserv.ThirdPartyArgs, ret *proxyserv.Lease) error {
+    // Strip the port that the client connected to the RPC server with
+    addrRaw := clientAddr.String()
+    portIdx := strings.Index(addrRaw, ":")
+    addrNoPort := addrRaw[:portIdx]
+
+    lease, err := s.proxyServ.RegisterThirdParty(addrNoPort, args.Port, args.Pattern)
+    if err != nil {
+        log.Print(err)
+        return err
+    }
+    log.Printf("Registered third party forwarder to %v:%v, Pattern: %v, TTL: %v",
+               addrNoPort, lease.Port, lease.Pattern, lease.TTL)
     *ret = lease
     return nil
 }

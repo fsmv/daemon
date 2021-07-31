@@ -18,6 +18,28 @@ type Client struct {
     client *rpc.Client
 }
 
+type ThirdPartyArgs struct {
+    Port uint16
+    Pattern string
+}
+
+func ConnectAndRegisterThirdParty(feproxyAddr string, thirdPartyPort uint16, pattern string) (Client, Lease, error) {
+    client, err := rpc.Dial("tcp", feproxyAddr)
+    if err != nil {
+        return Client{}, Lease{}, fmt.Errorf(
+            "Failed to connect to frontend proxy RPC server: %v", err)
+    }
+    var lease Lease
+    err = client.Call("feproxy.RegisterThirdParty", ThirdPartyArgs{thirdPartyPort, pattern}, &lease)
+    if err != nil {
+        return Client{}, Lease{}, fmt.Errorf(
+            "Failed to obtain lease from feproxy: %v", err)
+    }
+    log.Printf("Obtained lease for %#v, port: %v, ttl: %v",
+        lease.Pattern, lease.Port, lease.TTL)
+    return Client{client}, lease, nil
+}
+
 func ConnectAndRegister(feproxyAddr, pattern string) (Client, Lease, error) {
     client, err := rpc.Dial("tcp", feproxyAddr)
     if err != nil {
@@ -37,6 +59,14 @@ func ConnectAndRegister(feproxyAddr, pattern string) (Client, Lease, error) {
 
 func MustConnectAndRegister(feproxyAddr, pattern string) (Client, Lease) {
     c, l, err := ConnectAndRegister(feproxyAddr, pattern)
+    if err != nil {
+        log.Fatal(err)
+    }
+    return c, l
+}
+
+func MustConnectAndRegisterThirdParty(feproxyAddr string, thirdPartyPort uint16, pattern string) (Client, Lease) {
+    c, l, err := ConnectAndRegisterThirdParty(feproxyAddr, thirdPartyPort, pattern)
     if err != nil {
         log.Fatal(err)
     }

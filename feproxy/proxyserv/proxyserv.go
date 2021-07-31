@@ -45,6 +45,8 @@ type ProxyServ struct {
     unusedPortOffset uint16
     ttlString        string
     ttlDuration      time.Duration
+    startPort        uint16
+    endPort          uint16
 }
 
 // forwarder holds the data for a forwarding rule registered with ProxyServ
@@ -53,7 +55,6 @@ type forwarder struct {
     Timeout time.Time
     Pattern string
     Port    uint16
-    IsStaticMapping bool // If true there's no timeout (this was configured in the static_mapping flag)
 }
 
 // GetNumLeases returns the number of Registered Leases
@@ -95,14 +96,15 @@ func (p *ProxyServ) reservePortUnsafe() (uint16, error) {
 // Creates and saves a new forwarder that handles request and forwards them to
 // the given client.
 //
-// Returns the pointer to the new forwarder because callers must set either
-// Timeout or IsStaticMapping
+// if stripPattern is true, the pattern will be removed from the prefix of the
+// http request paths. This is needed for third party applications that expect
+// to get requests for / not /pattern/
 //
 // mut must be locked
-func (p *ProxyServ) saveForwarder(clientAddr string, clientPort uint16, pattern string, stripPattern bool) (*forwarder, error) {
+func (p *ProxyServ) saveForwarder(clientAddr string, clientPort uint16, pattern string, stripPattern bool) error {
     backend, err := url.Parse("http://" + clientAddr + ":" + strconv.Itoa(int(clientPort)))
     if err != nil {
-        return nil, err
+        return err
     }
     // Store the forwarder
     backendQuery := backend.RawQuery
@@ -142,31 +144,37 @@ func (p *ProxyServ) saveForwarder(clientAddr string, clientPort uint16, pattern 
             req.Header.Add("Orig-Address", req.RemoteAddr)
         },
     }
-    ret := &forwarder{
+    fwd := &forwarder{
         Handler: proxy,
         Pattern: pattern,
         Port:    clientPort,
+        Timeout: time.Now().Add(p.ttlDuration),
     }
-    p.forwarders[pattern] = ret
-    return ret, nil
+    p.forwarders[pattern] = fwd
+    return nil
 }
 
-func (p *ProxyServ) RegisterStatic(clientAddr string, clientPort uint16, pattern string) error {
+func (p *ProxyServ) RegisterThirdParty(clientAddr string, clientPort uint16, pattern string) (lease Lease, err error) {
     // Assumes the port is not in the configured range (because otherwise we
     // might hand out a lease for that port). It's checked in the flag Set method.
     p.mut.Lock()
     defer p.mut.Unlock()
 
-    fwdr, err := p.saveForwarder(clientAddr, clientPort, pattern, true)
-    if err != nil {
-        return err
+    if (clientPort >= p.startPort && clientPort <= p.endPort) {
+        return Lease{}, fmt.Errorf("Fixed port %v must not be in the reserved feproxy client range: [%v, %v]",
+            clientPort, p.startPort, p.endPort)
     }
-    fwdr.IsStaticMapping = true
 
-    // This isn't called through the RPC server so we have to log it here
-    log.Printf("Registered static forwarder to %v:%v, Pattern: %v",
-               clientAddr, clientPort, pattern)
-    return nil
+    err = p.saveForwarder(clientAddr, clientPort, pattern, /*stripPattern*/ true)
+    if err != nil {
+        return Lease{}, err
+    }
+
+    return Lease{
+        Pattern: pattern,
+        Port:    clientPort,
+        TTL:     p.ttlString,
+    }, nil
 }
 
 // Register leases a new forwarder for the given pattern.
@@ -180,11 +188,10 @@ func (p *ProxyServ) Register(clientAddr string, pattern string) (lease Lease, er
         return Lease{}, err
     }
 
-    fwdr, err := p.saveForwarder(clientAddr, port, pattern, false)
+    err = p.saveForwarder(clientAddr, port, pattern, /*stripPattern*/ false)
     if err != nil {
         return Lease{}, err
     }
-    fwdr.Timeout = time.Now().Add(p.ttlDuration)
 
     return Lease{
         Pattern: pattern,
@@ -218,9 +225,6 @@ func (p *ProxyServ) monitorTTLs(ticker *time.Ticker, quit <-chan struct{}) {
             p.mut.Lock()
             now := time.Now()
             for pattern, fwd := range p.forwarders {
-                if fwd.IsStaticMapping {
-                    continue
-                }
                 if now.After(fwd.Timeout) {
                     p.unusedPorts = append(p.unusedPorts, int(fwd.Port))
                     delete(p.forwarders, pattern)
@@ -285,7 +289,7 @@ func (p *ProxyServ) ServeHTTP(w http.ResponseWriter, req *http.Request) {
         return
     }
     // Handler timed out, delete it then 404
-    if !fwd.IsStaticMapping && time.Now().After(fwd.Timeout) {
+    if time.Now().After(fwd.Timeout) {
         log.Print("Forwarder timed out for pattern: ", fwd.Pattern)
         p.Unregister(req.URL.Path)
         http.NotFound(w, req)
@@ -384,6 +388,8 @@ func StartNew(tlsCert, tlsKey *os.File, httpList, httpsList net.Listener,
         unusedPortOffset: startPort,
         ttlString:        leaseTTL,
         ttlDuration:      ttlDuration,
+        startPort:        startPort,
+        endPort:          endPort,
     }
     tlsServer := &http.Server{
         Handler: p,
