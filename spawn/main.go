@@ -235,16 +235,17 @@ func StartPrograms(programs []Command) (map[int]*Child, int) {
             Cmd: &cmd,
             Proc: proc,
         }
-        ret[proc.Pid] = c
         if err != nil {
             log.Printf("%v: Error starting process: %v", cmd.Filepath, err)
             errCnt++
             if proc != nil && proc.Pid > 0 {
                 c.Up = false
                 c.Message = fmt.Sprintf("Error starting process: %v", err)
+                ret[proc.Pid] = c
             }
             continue
         }
+        ret[proc.Pid] = c
         c.Up = true
         log.Printf("Started process: %v; pid: %v", name, proc.Pid)
         log.Printf("Args: %v", argv)
