@@ -84,14 +84,15 @@ func MonitorChildrenDeaths(quit chan struct{},
             var resUsage syscall.Rusage
             for {
                 pid, err := syscall.Wait4(-1, &status, syscall.WNOHANG, &resUsage)
-                if pid == 0 || err == syscall.ECHILD {
-                    break
+                if pid == 0 || err == syscall.ECHILD || err == syscall.EINTR {
+                    // ECHILD means we have no children
+                    // EINTR means an interrupt handler happened while we were waiting
+                    continue
                 }
                 if err != nil {
                     log.Printf("Error checking child status: " +
-                        "pid = %v; error = %v",
-                        pid, err)
-                    break
+                        "pid = %v; error = %v", pid, err)
+                    continue
                 }
                 if !status.Exited() {
                     continue
