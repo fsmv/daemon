@@ -49,6 +49,9 @@ type Command struct {
     // In the child process, the files will have fd = 3 + len(Ports) + i, where
     // Files[i] is the file
     Files       []string
+    // Set to true if you don't want a chroot to the home dir, which is the
+    // default
+    NoChroot    bool
 }
 
 type Child struct {
@@ -138,6 +141,28 @@ func openFiles(files []string) ([]*os.File, error) {
     return ret, nil
 }
 
+// Returns the new filepath of the binary
+func copyBinary(oldName string, newDir string, uid, gid int) (string, error) {
+    newName := filepath.Join(newDir, filepath.Base(oldName))
+    oldf, err := os.Open(oldName)
+    if err != nil {
+        return newName, err
+    }
+    defer oldf.Close()
+    newf, err := os.OpenFile(newName, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0550)
+    if err != nil {
+        return newName, err
+    }
+    defer newf.Close()
+    if _, err := io.Copy(newf, oldf); err != nil {
+        return newName, err
+    }
+    if err := newf.Chown(uid, gid); err != nil {
+        return newName, err
+    }
+    return newName, nil
+}
+
 func StartPrograms(programs []Command) (map[int]*Child, int) {
     var errCnt int = 0
     ret := make(map[int]*Child)
@@ -149,7 +174,6 @@ func StartPrograms(programs []Command) (map[int]*Child, int) {
         }
         name := filepath.Base(cmd.Filepath)
         // Set up stdout and stderr piping
-        // TODO: don't do pipes at all, just read the child's logfile
         r, w, err := os.Pipe()
         if err != nil {
             log.Printf("%v: Error, failed to create pipe: %v", name, err)
@@ -206,12 +230,29 @@ func StartPrograms(programs []Command) (map[int]*Child, int) {
         if err != nil {
             log.Fatal("Gid string not an integer. Gid string: %v", u.Gid)
         }
-        attr.Dir = u.HomeDir
         attr.Sys = &syscall.SysProcAttr{
             Credential: &syscall.Credential{
                 Uid: uint32(uid),
                 Gid: uint32(gid),
             },
+        }
+        var chrootBinaryCopy string
+        if cmd.NoChroot {
+            attr.Dir = u.HomeDir
+        } else { // Do a chroot
+            attr.Dir = "/"
+            attr.Sys.Chroot = u.HomeDir
+
+            // Copy the binary into the chroot and give the user access
+            chrootBinaryCopy, err = copyBinary(cmd.Filepath, u.HomeDir, uid, gid)
+            if err != nil {
+                log.Printf("%v: Error copying the binary into the chroot: %v",
+                    name, err)
+                errCnt++
+                continue
+            }
+            // The hardlink we'll run is at /binary in the chroot
+            cmd.Filepath = "/"+filepath.Base(cmd.Filepath)
         }
         // Finalize the argv
         var jsonArgs []string
@@ -245,6 +286,10 @@ func StartPrograms(programs []Command) (map[int]*Child, int) {
                 ret[proc.Pid] = c
             }
             continue
+        }
+        // Don't leave a dangling binary copy if we chrooted
+        if chrootBinaryCopy != "" {
+            _ = os.Remove(chrootBinaryCopy)
         }
         ret[proc.Pid] = c
         c.Up = true
