@@ -131,7 +131,7 @@
 
     The net/rpc package is frozen and is not accepting new features.
 */
-package rpcserv
+package main
 
 import (
     "bufio"

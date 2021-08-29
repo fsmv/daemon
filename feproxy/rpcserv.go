@@ -1,4 +1,4 @@
-package rpcserv
+package main
 
 import (
     "fmt"
@@ -7,18 +7,18 @@ import (
     "strings"
     "strconv"
 
-    "daemon/feproxy/proxyserv"
+    "ask.systems/daemon/feproxy/client"
 )
 
 // Methods on this type are exported as rpc calls
 type RPCServ struct {
-    proxyServ *proxyserv.ProxyServ
+    proxyServ *ProxyServ
     quit      chan struct{}
 }
 
 // Register registers a new forwarding rule to the rpc client's ip address.
 // Randomly assigns port for the client to listen on
-func (s *RPCServ) Register(clientAddr net.Addr, pattern string, ret *proxyserv.Lease) error {
+func (s *RPCServ) Register(clientAddr net.Addr, pattern string, ret *client.Lease) error {
     addrRaw := clientAddr.String()
     portIdx := strings.Index(addrRaw, ":")
     addrNoPort := addrRaw[:portIdx]
@@ -36,7 +36,7 @@ func (s *RPCServ) Register(clientAddr net.Addr, pattern string, ret *proxyserv.L
 // Register registers a new forwarding rule to the rpc client's ip address.
 // Uses a fixed port (which must be out of feproxy's reserved range) and strips
 // the pattern in requests, intended for web servers that don't know about feproxy.
-func (s *RPCServ) RegisterThirdParty(clientAddr net.Addr, args *proxyserv.ThirdPartyArgs, ret *proxyserv.Lease) error {
+func (s *RPCServ) RegisterThirdParty(clientAddr net.Addr, args *client.ThirdPartyArgs, ret *client.Lease) error {
     // Strip the port that the client connected to the RPC server with
     addrRaw := clientAddr.String()
     portIdx := strings.Index(addrRaw, ":")
@@ -65,7 +65,7 @@ func (s *RPCServ) Unregister(clientAddr net.Addr, pattern string, _ *struct{}) e
 }
 
 // Renew renews the lease on a currently registered pattern
-func (s *RPCServ) Renew(clientAddr net.Addr, pattern string, ret *proxyserv.Lease) error {
+func (s *RPCServ) Renew(clientAddr net.Addr, pattern string, ret *client.Lease) error {
     lease, err := s.proxyServ.Renew(pattern)
     if err != nil {
         log.Print(err)
@@ -84,7 +84,7 @@ func (s *RPCServ) Quit(clientAddr net.Addr, _, _ *struct{}) error {
 }
 
 // StartNew creates a new RPCServ and starts it
-func StartNew(proxyServ *proxyserv.ProxyServ, port uint16,
+func StartRPCServer(proxyServ *ProxyServ, port uint16,
               quit chan struct{}) (*RPCServ, error) {
     s := &RPCServ{
         proxyServ: proxyServ,

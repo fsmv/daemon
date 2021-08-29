@@ -8,9 +8,6 @@ import (
     "os"
     "os/signal"
     "strconv"
-
-    "daemon/feproxy/proxyserv"
-    "daemon/feproxy/rpcserv"
 )
 
 const (
@@ -82,7 +79,7 @@ func main() {
             *httpsPortSpec, err)
     }
 
-    proxySrv, err := proxyserv.StartNew(
+    proxySrv, err := StartHTTPProxy(
         tlsCert, tlsKey, httpListener, httpsListener,
         portRangeStart, portRangeEnd, leaseTTL, quit)
     log.Print("Started frontend proxy server")
@@ -90,7 +87,7 @@ func main() {
         log.Fatalf("Failed to start proxyserv: %v", err)
     }
 
-    _, err = rpcserv.StartNew(proxySrv, rpcPort, quit)
+    _, err = StartRPCServer(proxySrv, rpcPort, quit)
     log.Print("Started rpc server on port ", rpcPort)
     if err != nil {
         log.Fatal(err)

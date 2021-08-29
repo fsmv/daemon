@@ -5,7 +5,7 @@
 // Registration will grant the caller a Lease to the forwarding rule for a time
 // period called the time to live (TTL). After the TTL has expired, the
 // forwarding rule will be automatically unregistered.
-package proxyserv
+package main
 
 import (
     "crypto/tls"
@@ -22,11 +22,8 @@ import (
     "strings"
     "sync"
     "time"
-    "errors"
-)
 
-var (
-    NotRegisteredError = errors.New("pattern not registered")
+    "ask.systems/daemon/feproxy/client"
 )
 
 // How often to look through the Leases and unregister those past TTL
@@ -72,7 +69,7 @@ func (p *ProxyServ) Unregister(pattern string) error {
     defer p.mut.Unlock()
     fwd, ok := p.forwarders[pattern]
     if !ok {
-        return NotRegisteredError
+        return client.NotRegisteredError
     }
     p.unusedPorts = append(p.unusedPorts, int(fwd.Port))
     delete(p.forwarders, pattern)
@@ -154,23 +151,23 @@ func (p *ProxyServ) saveForwarder(clientAddr string, clientPort uint16, pattern 
     return nil
 }
 
-func (p *ProxyServ) RegisterThirdParty(clientAddr string, clientPort uint16, pattern string) (lease Lease, err error) {
+func (p *ProxyServ) RegisterThirdParty(clientAddr string, clientPort uint16, pattern string) (lease client.Lease, err error) {
     // Assumes the port is not in the configured range (because otherwise we
     // might hand out a lease for that port). It's checked in the flag Set method.
     p.mut.Lock()
     defer p.mut.Unlock()
 
     if (clientPort >= p.startPort && clientPort <= p.endPort) {
-        return Lease{}, fmt.Errorf("Fixed port %v must not be in the reserved feproxy client range: [%v, %v]",
+        return client.Lease{}, fmt.Errorf("Fixed port %v must not be in the reserved feproxy client range: [%v, %v]",
             clientPort, p.startPort, p.endPort)
     }
 
     err = p.saveForwarder(clientAddr, clientPort, pattern, /*stripPattern*/ true)
     if err != nil {
-        return Lease{}, err
+        return client.Lease{}, err
     }
 
-    return Lease{
+    return client.Lease{
         Pattern: pattern,
         Port:    clientPort,
         TTL:     p.ttlString,
@@ -179,21 +176,21 @@ func (p *ProxyServ) RegisterThirdParty(clientAddr string, clientPort uint16, pat
 
 // Register leases a new forwarder for the given pattern.
 // Returns an error if the server has no more ports to lease.
-func (p *ProxyServ) Register(clientAddr string, pattern string) (lease Lease, err error) {
+func (p *ProxyServ) Register(clientAddr string, pattern string) (lease client.Lease, err error) {
     p.mut.Lock()
     defer p.mut.Unlock()
 
     port, err := p.reservePortUnsafe()
     if err != nil {
-        return Lease{}, err
+        return client.Lease{}, err
     }
 
     err = p.saveForwarder(clientAddr, port, pattern, /*stripPattern*/ false)
     if err != nil {
-        return Lease{}, err
+        return client.Lease{}, err
     }
 
-    return Lease{
+    return client.Lease{
         Pattern: pattern,
         Port:    port,
         TTL:     p.ttlString,
@@ -202,15 +199,15 @@ func (p *ProxyServ) Register(clientAddr string, pattern string) (lease Lease, er
 
 // Renew renews an existing lease. Returns an error if the pattern is not
 // registered.
-func (p *ProxyServ) Renew(pattern string) (lease Lease, err error) {
+func (p *ProxyServ) Renew(pattern string) (lease client.Lease, err error) {
     p.mut.Lock()
     defer p.mut.Unlock()
     fwd, ok := p.forwarders[pattern]
     if !ok {
-        return Lease{}, NotRegisteredError
+        return client.Lease{}, client.NotRegisteredError
     }
     fwd.Timeout = time.Now().Add(p.ttlDuration)
-    return Lease{
+    return client.Lease{
         Port: fwd.Port,
         TTL:  p.ttlString,
     }, nil
@@ -363,7 +360,7 @@ func runServer(quit chan struct{}, name string,
 //  - startPort and endPort set the range of ports this server offer for lease
 //  - leaseTTL is the duration of the life of a lease
 //  - quit is a channel that will be closed when the server should quit
-func StartNew(tlsCert, tlsKey *os.File, httpList, httpsList net.Listener,
+func StartHTTPProxy(tlsCert, tlsKey *os.File, httpList, httpsList net.Listener,
     startPort, endPort uint16,
     leaseTTL string, quit chan struct{}) (*ProxyServ, error) {
 

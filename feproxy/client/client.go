@@ -1,10 +1,15 @@
-package proxyserv
+package client
 
 import (
+    "errors"
     "net/rpc"
     "time"
     "log"
     "fmt"
+)
+
+var (
+    NotRegisteredError = errors.New("pattern not registered")
 )
 
 // Lease contains the terms of the lease granted by ProxyServ
