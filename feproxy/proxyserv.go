@@ -24,6 +24,7 @@ import (
     "time"
 
     "ask.systems/daemon/feproxy/client"
+    "google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // How often to look through the Leases and unregister those past TTL
@@ -40,7 +41,6 @@ type ProxyServ struct {
     unusedPorts      []int
     // Add this to the values in unusedPorts to get the stored port number
     unusedPortOffset uint16
-    ttlString        string
     ttlDuration      time.Duration
     startPort        uint16
     endPort          uint16
@@ -71,6 +71,7 @@ func (p *ProxyServ) Unregister(pattern string) error {
     if !ok {
         return client.NotRegisteredError
     }
+    // TODO: this puts fixed ports into the pool if they call unregister, which is bad
     p.unusedPorts = append(p.unusedPorts, int(fwd.Port))
     delete(p.forwarders, pattern)
     return nil
@@ -98,13 +99,14 @@ func (p *ProxyServ) reservePortUnsafe() (uint16, error) {
 // to get requests for / not /pattern/
 //
 // mut must be locked
-func (p *ProxyServ) saveForwarder(clientAddr string, clientPort uint16, pattern string, stripPattern bool) error {
-    backend, err := url.Parse("http://" + clientAddr + ":" + strconv.Itoa(int(clientPort)))
+func (p *ProxyServ) saveForwarder(clientAddr string, lease *client.Lease, stripPattern bool) error {
+    backend, err := url.Parse("http://" + clientAddr + ":" + strconv.Itoa(int(lease.Port)))
     if err != nil {
         return err
     }
     // Store the forwarder
     backendQuery := backend.RawQuery
+    pattern := lease.Pattern
     proxy := &httputil.ReverseProxy{
         Director: func (req *http.Request) {
             // Copied from https://golang.org/src/net/http/httputil/reverseproxy.go?s=2588:2649#L80
@@ -145,12 +147,13 @@ func (p *ProxyServ) saveForwarder(clientAddr string, clientPort uint16, pattern 
         Handler: proxy,
         Pattern: pattern,
         Port:    clientPort,
-        Timeout: time.Now().Add(p.ttlDuration),
+        Timeout: lease.Timeout.AsTime(),
     }
     p.forwarders[pattern] = fwd
     return nil
 }
 
+/*
 func (p *ProxyServ) RegisterThirdParty(clientAddr string, clientPort uint16, pattern string) (lease client.Lease, err error) {
     // Assumes the port is not in the configured range (because otherwise we
     // might hand out a lease for that port). It's checked in the flag Set method.
@@ -162,7 +165,7 @@ func (p *ProxyServ) RegisterThirdParty(clientAddr string, clientPort uint16, pat
             clientPort, p.startPort, p.endPort)
     }
 
-    err = p.saveForwarder(clientAddr, clientPort, pattern, /*stripPattern*/ true)
+    err = p.saveForwarder(clientAddr, clientPort, pattern, /*stripPattern/ true)
     if err != nil {
         return client.Lease{}, err
     }
@@ -172,34 +175,34 @@ func (p *ProxyServ) RegisterThirdParty(clientAddr string, clientPort uint16, pat
         Port:    clientPort,
         TTL:     p.ttlString,
     }, nil
-}
+}*/
 
 // Register leases a new forwarder for the given pattern.
 // Returns an error if the server has no more ports to lease.
-func (p *ProxyServ) Register(clientAddr string, pattern string) (lease client.Lease, err error) {
+func (p *ProxyServ) Register(clientAddr string, pattern string) (lease *client.Lease, err error) {
     p.mut.Lock()
     defer p.mut.Unlock()
 
     port, err := p.reservePortUnsafe()
     if err != nil {
-        return client.Lease{}, err
+        return &client.Lease{}, err
     }
-
-    err = p.saveForwarder(clientAddr, port, pattern, /*stripPattern*/ false)
-    if err != nil {
-        return client.Lease{}, err
-    }
-
-    return client.Lease{
+    lease := &client.Lease{
         Pattern: pattern,
-        Port:    port,
-        TTL:     p.ttlString,
-    }, nil
+        Port: uint32(port),
+        Timeout: timestamppb.New(time.Now().Add(p.ttlDuration)),
+    }
+
+    err = p.saveForwarder(clientAddr, lease, /*stripPattern*/ false)
+    if err != nil {
+        return &client.Lease{}, err
+    }
+    return lease, nil
 }
 
 // Renew renews an existing lease. Returns an error if the pattern is not
 // registered.
-func (p *ProxyServ) Renew(pattern string) (lease client.Lease, err error) {
+func (p *ProxyServ) Renew(pattern string) (lease *client.Lease, err error) {
     p.mut.Lock()
     defer p.mut.Unlock()
     fwd, ok := p.forwarders[pattern]
@@ -207,7 +210,7 @@ func (p *ProxyServ) Renew(pattern string) (lease client.Lease, err error) {
         return client.Lease{}, client.NotRegisteredError
     }
     fwd.Timeout = time.Now().Add(p.ttlDuration)
-    return client.Lease{
+    return &client.Lease{
         Port: fwd.Port,
         TTL:  p.ttlString,
     }, nil

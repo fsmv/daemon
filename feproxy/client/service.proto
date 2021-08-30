@@ -1,0 +1,34 @@
+syntax = "proto3";
+package client;
+option go_package = "feproxy/client";
+
+import "google/protobuf/timestamp.proto";
+
+service Feproxy {
+    rpc Register(RegisterRequest) returns (Lease) {}
+    rpc Renew(Lease) returns (Lease) {}
+    rpc Unregister(Lease) returns () {}
+}
+
+message RegisterRequest {
+    Pattern pattern = 1; // TODO: maybe support multiple patterns for the same IP/port
+    // Set for third party web interfaces that can't take an automatic lease port
+    // Must be outside the range of feproxy's automatic ports
+    uint32 fixed_port = 2;
+    // If set, replace instances of pattern in HTTP requests forwarded to the backend
+    // Handles:
+    //  - Requests to /pattern/* will be changed to /pattern_replacement/*
+    //  - Redirect responses with Location: /pattern_replacement/* will be changed to /pattern/*
+    //  - In HTML page responses /pattern_replacement/* URLs will be changed to /pattern/*
+    string pattern_replacement = 3;
+}
+
+message Pattern {
+    string pattern = 1;
+}
+
+message Lease {
+    Pattern pattern = 1;
+    uint32 port = 2;
+    google.protobuf.Timestamp timeout = 3;
+}

@@ -12,13 +12,6 @@ var (
     NotRegisteredError = errors.New("pattern not registered")
 )
 
-// Lease contains the terms of the lease granted by ProxyServ
-type Lease struct {
-    Pattern string
-    Port    uint16
-    TTL     string
-}
-
 type Client struct {
     client *rpc.Client
 }
@@ -93,11 +86,7 @@ func (c Client) KeepLeaseRenewed(quit <-chan struct{}, lease Lease) {
         log.Printf("feproxy lease %#v unregistered and connection closed",
             lease.Pattern)
     }()
-    renewDuration, err := time.ParseDuration(lease.TTL)
-    if err != nil {
-        log.Fatalf("Failed to parse TTL duration (TTL: %#v Err: %v)",
-            lease.TTL, err)
-    }
+    renewDuration := time.Until(lease.TTL.AsTime())
     renewDuration -= time.Hour // so we don't miss the deadline
     timer := time.NewTimer(renewDuration)
     for {
