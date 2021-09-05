@@ -2,10 +2,12 @@ package client
 
 import (
     "errors"
-    "net/rpc"
     "time"
     "log"
     "fmt"
+    "context"
+
+    "google.golang.org/grpc"
 )
 
 var (
@@ -13,7 +15,7 @@ var (
 )
 
 type Client struct {
-    client *rpc.Client
+    client *grpc.ClientConn
 }
 
 type ThirdPartyArgs struct {
@@ -21,41 +23,45 @@ type ThirdPartyArgs struct {
     Pattern string
 }
 
-func ConnectAndRegisterThirdParty(feproxyAddr string, thirdPartyPort uint16, pattern string) (Client, Lease, error) {
-    client, err := rpc.Dial("tcp", feproxyAddr)
+func ConnectAndRegisterThirdParty(feproxyAddr string, thirdPartyPort uint16, pattern string) (Client, *Lease, error) {
+    client, err := grpc.Dial(feproxyAddr)
     if err != nil {
-        return Client{}, Lease{}, fmt.Errorf(
+        return Client{}, nil, fmt.Errorf(
             "Failed to connect to frontend proxy RPC server: %v", err)
     }
     var lease Lease
-    err = client.Call("feproxy.RegisterThirdParty", ThirdPartyArgs{thirdPartyPort, pattern}, &lease)
+    err = client.Invoke(context.Background(), "Register", &RegisterRequest{
+      Pattern: pattern,
+      FixedPort: uint32(thirdPartyPort),
+      StripPattern: true,
+    }, &lease)
     if err != nil {
-        return Client{}, Lease{}, fmt.Errorf(
+        return Client{}, nil, fmt.Errorf(
             "Failed to obtain lease from feproxy: %v", err)
     }
-    log.Printf("Obtained lease for %#v, port: %v, ttl: %v",
-        lease.Pattern, lease.Port, lease.TTL)
-    return Client{client}, lease, nil
+    log.Printf("Obtained lease for %#v, port: %v, timeout: %v",
+        lease.Pattern, lease.Port, lease.Timeout.AsTime())
+    return Client{client}, &lease, nil
 }
 
-func ConnectAndRegister(feproxyAddr, pattern string) (Client, Lease, error) {
-    client, err := rpc.Dial("tcp", feproxyAddr)
+func ConnectAndRegister(feproxyAddr, pattern string) (Client, *Lease, error) {
+    client, err := grpc.Dial(feproxyAddr)
     if err != nil {
-        return Client{}, Lease{}, fmt.Errorf(
+        return Client{}, nil, fmt.Errorf(
             "Failed to connect to frontend proxy RPC server: %v", err)
     }
     var lease Lease
-    err = client.Call("feproxy.Register", pattern, &lease)
+    err = client.Invoke(context.Background(), "Register", &RegisterRequest{Pattern: pattern}, &lease)
     if err != nil {
-        return Client{}, Lease{}, fmt.Errorf(
+        return Client{}, nil, fmt.Errorf(
             "Failed to obtain lease from feproxy: %v", err)
     }
     log.Printf("Obtained lease for %#v, port: %v, ttl: %v",
-        lease.Pattern, lease.Port, lease.TTL)
-    return Client{client}, lease, nil
+        lease.Pattern, lease.Port, lease.Timeout.AsTime())
+    return Client{client}, &lease, nil
 }
 
-func MustConnectAndRegister(feproxyAddr, pattern string) (Client, Lease) {
+func MustConnectAndRegister(feproxyAddr, pattern string) (Client, *Lease) {
     c, l, err := ConnectAndRegister(feproxyAddr, pattern)
     if err != nil {
         log.Fatal(err)
@@ -63,7 +69,7 @@ func MustConnectAndRegister(feproxyAddr, pattern string) (Client, Lease) {
     return c, l
 }
 
-func MustConnectAndRegisterThirdParty(feproxyAddr string, thirdPartyPort uint16, pattern string) (Client, Lease) {
+func MustConnectAndRegisterThirdParty(feproxyAddr string, thirdPartyPort uint16, pattern string) (Client, *Lease) {
     c, l, err := ConnectAndRegisterThirdParty(feproxyAddr, thirdPartyPort, pattern)
     if err != nil {
         log.Fatal(err)
@@ -76,17 +82,17 @@ func (c Client) Close() {
 }
 
 func (c Client) Unregister(pattern string) error {
-    return c.client.Call("feproxy.Unregister", pattern, nil)
+    return c.client.Invoke(context.Background(), "Unregister", &Lease{Pattern:pattern}, nil)
 }
 
-func (c Client) KeepLeaseRenewed(quit <-chan struct{}, lease Lease) {
+func (c Client) KeepLeaseRenewed(quit <-chan struct{}, lease *Lease) {
     defer func() {
         c.Unregister(lease.Pattern)
         c.Close()
         log.Printf("feproxy lease %#v unregistered and connection closed",
             lease.Pattern)
     }()
-    renewDuration := time.Until(lease.TTL.AsTime())
+    renewDuration := time.Until(lease.Timeout.AsTime())
     renewDuration -= time.Hour // so we don't miss the deadline
     timer := time.NewTimer(renewDuration)
     for {
@@ -95,19 +101,21 @@ func (c Client) KeepLeaseRenewed(quit <-chan struct{}, lease Lease) {
             return
         case <-timer.C:
         }
-        err := c.client.Call("feproxy.Renew", lease.Pattern, &lease)
+        err := c.client.Invoke(context.Background(), "Renew", lease, lease)
         if err != nil {
-            if err == NotRegisteredError {
+            /*if err == NotRegisteredError {
+                // TODO: we would need to save the RegisterRequest options to do
+                // this right. Also would my code work if the port changes?
                 log.Print("Got NotRegisteredError, attempting to register.")
-                err = c.client.Call("feproxy.Register", lease.Pattern, &lease)
+                err = c.client.Invoke("Register", &RegisterRequest{Pattern:lease.Pattern}, lease)
                 if err != nil {
                     log.Printf("Error from register: %v", err)
                 }
-            } else {
+            } else {*/
                 log.Printf("Error from renew: %v", err)
-            }
+            //}
         }
-        log.Printf("Renewed lease, port: %v, ttl: %v", lease.Port, lease.TTL)
+        log.Printf("Renewed lease, port: %v, ttl: %v", lease.Port, lease.Timeout.AsTime())
         // Technically we should check the new TTL, but it is constant
         timer.Reset(renewDuration)
     }

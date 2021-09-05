@@ -81,14 +81,14 @@ func (p *ProxyServ) Unregister(pattern string) error {
 // Returns an error if the server has no more ports to lease.
 //
 // You must have a (write) lock on mut before calling.
-func (p *ProxyServ) reservePortUnsafe() (uint16, error) {
+func (p *ProxyServ) reservePortUnsafe() (uint32, error) {
     if len(p.unusedPorts) == 0 {
         return 0, fmt.Errorf("No remaining ports to lease. Active leases: %v",
                              len(p.forwarders))
     }
     port := uint16(p.unusedPorts[0]) + p.unusedPortOffset
     p.unusedPorts = p.unusedPorts[1:]
-    return port, nil
+    return uint32(port), nil
 }
 
 // Creates and saves a new forwarder that handles request and forwards them to
@@ -146,7 +146,7 @@ func (p *ProxyServ) saveForwarder(clientAddr string, lease *client.Lease, stripP
     fwd := &forwarder{
         Handler: proxy,
         Pattern: pattern,
-        Port:    clientPort,
+        Port:    uint16(lease.Port),
         Timeout: lease.Timeout.AsTime(),
     }
     p.forwarders[pattern] = fwd
@@ -160,10 +160,6 @@ func (p *ProxyServ) RegisterThirdParty(clientAddr string, clientPort uint16, pat
     p.mut.Lock()
     defer p.mut.Unlock()
 
-    if (clientPort >= p.startPort && clientPort <= p.endPort) {
-        return client.Lease{}, fmt.Errorf("Fixed port %v must not be in the reserved feproxy client range: [%v, %v]",
-            clientPort, p.startPort, p.endPort)
-    }
 
     err = p.saveForwarder(clientAddr, clientPort, pattern, /*stripPattern/ true)
     if err != nil {
@@ -179,21 +175,34 @@ func (p *ProxyServ) RegisterThirdParty(clientAddr string, clientPort uint16, pat
 
 // Register leases a new forwarder for the given pattern.
 // Returns an error if the server has no more ports to lease.
-func (p *ProxyServ) Register(clientAddr string, pattern string) (lease *client.Lease, err error) {
+func (p *ProxyServ) Register(clientAddr string, request *client.RegisterRequest) (*client.Lease, error) {
     p.mut.Lock()
     defer p.mut.Unlock()
 
-    port, err := p.reservePortUnsafe()
-    if err != nil {
-        return &client.Lease{}, err
+    // Either use the fixed port or select a port automatically
+    var err error
+    var port uint32
+    if request.FixedPort != 0 {
+      if (request.FixedPort >= uint32(p.startPort) && request.FixedPort <= uint32(p.endPort)) {
+        return &client.Lease{}, fmt.Errorf(
+          "Fixed port %v must not be in the reserved feproxy client range: [%v, %v]",
+          request.FixedPort, p.startPort, p.endPort)
+      }
+      port = request.FixedPort
+    } else {
+      port, err = p.reservePortUnsafe()
+      if err != nil {
+          return &client.Lease{}, err
+      }
     }
+
     lease := &client.Lease{
-        Pattern: pattern,
-        Port: uint32(port),
+        Pattern: request.Pattern,
+        Port: port,
         Timeout: timestamppb.New(time.Now().Add(p.ttlDuration)),
     }
 
-    err = p.saveForwarder(clientAddr, lease, /*stripPattern*/ false)
+    err = p.saveForwarder(clientAddr, lease, /*stripPattern*/ request.StripPattern)
     if err != nil {
         return &client.Lease{}, err
     }
@@ -207,12 +216,12 @@ func (p *ProxyServ) Renew(pattern string) (lease *client.Lease, err error) {
     defer p.mut.Unlock()
     fwd, ok := p.forwarders[pattern]
     if !ok {
-        return client.Lease{}, client.NotRegisteredError
+        return &client.Lease{}, client.NotRegisteredError
     }
     fwd.Timeout = time.Now().Add(p.ttlDuration)
     return &client.Lease{
-        Port: fwd.Port,
-        TTL:  p.ttlString,
+        Port: uint32(fwd.Port),
+        Timeout: timestamppb.New(fwd.Timeout),
     }, nil
 }
 
@@ -386,7 +395,6 @@ func StartHTTPProxy(tlsCert, tlsKey *os.File, httpList, httpsList net.Listener,
         forwarders:       make(map[string]*forwarder),
         unusedPorts:      r.Perm(int(endPort - startPort)),
         unusedPortOffset: startPort,
-        ttlString:        leaseTTL,
         ttlDuration:      ttlDuration,
         startPort:        startPort,
         endPort:          endPort,

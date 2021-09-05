@@ -19,8 +19,8 @@ const _ = grpc.SupportPackageIsVersion7
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type FeproxyClient interface {
 	Register(ctx context.Context, in *RegisterRequest, opts ...grpc.CallOption) (*Lease, error)
-	Renew(ctx context.Context, in *Pattern, opts ...grpc.CallOption) (*Lease, error)
-	Unregister(ctx context.Context, in *Pattern, opts ...grpc.CallOption) (*Pattern, error)
+	Renew(ctx context.Context, in *Lease, opts ...grpc.CallOption) (*Lease, error)
+	Unregister(ctx context.Context, in *Lease, opts ...grpc.CallOption) (*Lease, error)
 }
 
 type feproxyClient struct {
@@ -40,7 +40,7 @@ func (c *feproxyClient) Register(ctx context.Context, in *RegisterRequest, opts 
 	return out, nil
 }
 
-func (c *feproxyClient) Renew(ctx context.Context, in *Pattern, opts ...grpc.CallOption) (*Lease, error) {
+func (c *feproxyClient) Renew(ctx context.Context, in *Lease, opts ...grpc.CallOption) (*Lease, error) {
 	out := new(Lease)
 	err := c.cc.Invoke(ctx, "/client.Feproxy/Renew", in, out, opts...)
 	if err != nil {
@@ -49,8 +49,8 @@ func (c *feproxyClient) Renew(ctx context.Context, in *Pattern, opts ...grpc.Cal
 	return out, nil
 }
 
-func (c *feproxyClient) Unregister(ctx context.Context, in *Pattern, opts ...grpc.CallOption) (*Pattern, error) {
-	out := new(Pattern)
+func (c *feproxyClient) Unregister(ctx context.Context, in *Lease, opts ...grpc.CallOption) (*Lease, error) {
+	out := new(Lease)
 	err := c.cc.Invoke(ctx, "/client.Feproxy/Unregister", in, out, opts...)
 	if err != nil {
 		return nil, err
@@ -63,8 +63,8 @@ func (c *feproxyClient) Unregister(ctx context.Context, in *Pattern, opts ...grp
 // for forward compatibility
 type FeproxyServer interface {
 	Register(context.Context, *RegisterRequest) (*Lease, error)
-	Renew(context.Context, *Pattern) (*Lease, error)
-	Unregister(context.Context, *Pattern) (*Pattern, error)
+	Renew(context.Context, *Lease) (*Lease, error)
+	Unregister(context.Context, *Lease) (*Lease, error)
 	mustEmbedUnimplementedFeproxyServer()
 }
 
@@ -75,10 +75,10 @@ type UnimplementedFeproxyServer struct {
 func (UnimplementedFeproxyServer) Register(context.Context, *RegisterRequest) (*Lease, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Register not implemented")
 }
-func (UnimplementedFeproxyServer) Renew(context.Context, *Pattern) (*Lease, error) {
+func (UnimplementedFeproxyServer) Renew(context.Context, *Lease) (*Lease, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Renew not implemented")
 }
-func (UnimplementedFeproxyServer) Unregister(context.Context, *Pattern) (*Pattern, error) {
+func (UnimplementedFeproxyServer) Unregister(context.Context, *Lease) (*Lease, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Unregister not implemented")
 }
 func (UnimplementedFeproxyServer) mustEmbedUnimplementedFeproxyServer() {}
@@ -113,7 +113,7 @@ func _Feproxy_Register_Handler(srv interface{}, ctx context.Context, dec func(in
 }
 
 func _Feproxy_Renew_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(Pattern)
+	in := new(Lease)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -125,13 +125,13 @@ func _Feproxy_Renew_Handler(srv interface{}, ctx context.Context, dec func(inter
 		FullMethod: "/client.Feproxy/Renew",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(FeproxyServer).Renew(ctx, req.(*Pattern))
+		return srv.(FeproxyServer).Renew(ctx, req.(*Lease))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
 func _Feproxy_Unregister_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(Pattern)
+	in := new(Lease)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -143,7 +143,7 @@ func _Feproxy_Unregister_Handler(srv interface{}, ctx context.Context, dec func(
 		FullMethod: "/client.Feproxy/Unregister",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(FeproxyServer).Unregister(ctx, req.(*Pattern))
+		return srv.(FeproxyServer).Unregister(ctx, req.(*Lease))
 	}
 	return interceptor(ctx, in, info, handler)
 }
