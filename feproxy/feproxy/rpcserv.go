@@ -8,7 +8,7 @@ import (
     "strings"
     "strconv"
 
-    "ask.systems/daemon/feproxy/client"
+    "ask.systems/daemon/feproxy"
     "google.golang.org/protobuf/types/known/timestamppb"
     "google.golang.org/grpc"
     "google.golang.org/grpc/peer"
@@ -16,7 +16,7 @@ import (
 
 // Methods on this type are exported as rpc calls
 type RPCServ struct {
-    client.FeproxyServer
+    feproxy.FeproxyServer
     proxyServ *ProxyServ
     quit      chan struct{}
 }
@@ -28,7 +28,7 @@ func hostname(address string) string {
 
 // Register registers a new forwarding rule to the rpc client's ip address.
 // Randomly assigns port for the client to listen on
-func (s *RPCServ) Register(ctx context.Context, request *client.RegisterRequest) (*client.Lease, error) {
+func (s *RPCServ) Register(ctx context.Context, request *feproxy.RegisterRequest) (*feproxy.Lease, error) {
     // Get the RPC client's address (without the port) from gRPC
     p, _ := peer.FromContext(ctx)
     client := hostname(p.Addr.String())
@@ -44,7 +44,7 @@ func (s *RPCServ) Register(ctx context.Context, request *client.RegisterRequest)
 }
 
 // Unregister unregisters the forwarding rule with the given pattern
-func (s *RPCServ) Unregister(ctx context.Context, lease *client.Lease) (*client.Lease, error) {
+func (s *RPCServ) Unregister(ctx context.Context, lease *feproxy.Lease) (*feproxy.Lease, error) {
     err := s.proxyServ.Unregister(lease.Pattern)
     if err != nil {
         log.Print(err)
@@ -56,7 +56,7 @@ func (s *RPCServ) Unregister(ctx context.Context, lease *client.Lease) (*client.
 }
 
 // Renew renews the lease on a currently registered pattern
-func (s *RPCServ) Renew(ctx context.Context, lease *client.Lease) (*client.Lease, error) {
+func (s *RPCServ) Renew(ctx context.Context, lease *feproxy.Lease) (*feproxy.Lease, error) {
     lease, err := s.proxyServ.Renew(lease.Pattern)
     if err != nil {
         log.Print(err)
@@ -75,7 +75,7 @@ func StartRPCServer(proxyServ *ProxyServ, port uint16,
         quit:      quit,
     }
     server := grpc.NewServer()
-    client.RegisterFeproxyServer(server, s)
+    feproxy.RegisterFeproxyServer(server, s)
     l, err := net.Listen("tcp", ":" + strconv.Itoa(int(port)))
     if err != nil {
         return nil, fmt.Errorf("Failed to start listener: %v", err)

@@ -9,7 +9,7 @@ import (
     "os/signal"
     "fmt"
 
-    feproxy "ask.systems/daemon/feproxy/client"
+    "ask.systems/daemon/feproxy"
 )
 
 var (

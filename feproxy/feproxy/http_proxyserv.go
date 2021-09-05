@@ -21,7 +21,7 @@ import (
     "sync"
     "time"
 
-    "ask.systems/daemon/feproxy/client"
+    "ask.systems/daemon/feproxy"
     "google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -67,7 +67,7 @@ func (p *ProxyServ) Unregister(pattern string) error {
     defer p.mut.Unlock()
     fwd, ok := p.forwarders[pattern]
     if !ok {
-        return client.NotRegisteredError
+        return feproxy.NotRegisteredError
     }
     // TODO: this puts fixed ports into the pool if they call unregister, which is bad
     p.unusedPorts = append(p.unusedPorts, int(fwd.Port))
@@ -97,7 +97,7 @@ func (p *ProxyServ) reservePortUnsafe() (uint32, error) {
 // to get requests for / not /pattern/
 //
 // mut must be locked
-func (p *ProxyServ) saveForwarder(clientAddr string, lease *client.Lease, stripPattern bool) error {
+func (p *ProxyServ) saveForwarder(clientAddr string, lease *feproxy.Lease, stripPattern bool) error {
     backend, err := url.Parse("http://" + clientAddr + ":" + strconv.Itoa(int(lease.Port)))
     if err != nil {
         return err
@@ -173,7 +173,7 @@ func (p *ProxyServ) RegisterThirdParty(clientAddr string, clientPort uint16, pat
 
 // Register leases a new forwarder for the given pattern.
 // Returns an error if the server has no more ports to lease.
-func (p *ProxyServ) Register(clientAddr string, request *client.RegisterRequest) (*client.Lease, error) {
+func (p *ProxyServ) Register(clientAddr string, request *feproxy.RegisterRequest) (*feproxy.Lease, error) {
     p.mut.Lock()
     defer p.mut.Unlock()
 
@@ -182,7 +182,7 @@ func (p *ProxyServ) Register(clientAddr string, request *client.RegisterRequest)
     var port uint32
     if request.FixedPort != 0 {
       if (request.FixedPort >= uint32(p.startPort) && request.FixedPort <= uint32(p.endPort)) {
-        return &client.Lease{}, fmt.Errorf(
+        return &feproxy.Lease{}, fmt.Errorf(
           "Fixed port %v must not be in the reserved feproxy client range: [%v, %v]",
           request.FixedPort, p.startPort, p.endPort)
       }
@@ -190,11 +190,11 @@ func (p *ProxyServ) Register(clientAddr string, request *client.RegisterRequest)
     } else {
       port, err = p.reservePortUnsafe()
       if err != nil {
-          return &client.Lease{}, err
+          return &feproxy.Lease{}, err
       }
     }
 
-    lease := &client.Lease{
+    lease := &feproxy.Lease{
         Pattern: request.Pattern,
         Port: port,
         Timeout: timestamppb.New(time.Now().Add(p.ttlDuration)),
@@ -202,22 +202,22 @@ func (p *ProxyServ) Register(clientAddr string, request *client.RegisterRequest)
 
     err = p.saveForwarder(clientAddr, lease, /*stripPattern*/ request.StripPattern)
     if err != nil {
-        return &client.Lease{}, err
+        return &feproxy.Lease{}, err
     }
     return lease, nil
 }
 
 // Renew renews an existing lease. Returns an error if the pattern is not
 // registered.
-func (p *ProxyServ) Renew(pattern string) (lease *client.Lease, err error) {
+func (p *ProxyServ) Renew(pattern string) (lease *feproxy.Lease, err error) {
     p.mut.Lock()
     defer p.mut.Unlock()
     fwd, ok := p.forwarders[pattern]
     if !ok {
-        return &client.Lease{}, client.NotRegisteredError
+        return &feproxy.Lease{}, feproxy.NotRegisteredError
     }
     fwd.Timeout = time.Now().Add(p.ttlDuration)
-    return &client.Lease{
+    return &feproxy.Lease{
         Port: uint32(fwd.Port),
         Timeout: timestamppb.New(fwd.Timeout),
     }, nil

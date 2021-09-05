@@ -1,6 +1,6 @@
 syntax = "proto3";
-package client;
-option go_package = "feproxy/client";
+package feproxy;
+option go_package = "daemon/feproxy";
 
 import "google/protobuf/timestamp.proto";
 
