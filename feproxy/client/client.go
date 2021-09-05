@@ -16,7 +16,8 @@ var (
 
 // Deprecated: Use StartRegistration instead
 type Client struct {
-    client *grpc.ClientConn
+    client FeproxyClient
+    conn *grpc.ClientConn
 }
 
 // Deprecated: Use StartRegistration instead
@@ -26,62 +27,62 @@ type ThirdPartyArgs struct {
 }
 
 func StartRegistration(feproxyAddr string, request *RegisterRequest, quit <-chan struct{}) (*Lease, error) {
-    client, err := grpc.Dial(feproxyAddr)
+    conn, err := grpc.Dial(feproxyAddr, grpc.WithInsecure())
     if err != nil {
         return nil, fmt.Errorf(
             "Failed to connect to frontend proxy RPC server: %v", err)
     }
-    var lease Lease
-    err = client.Invoke(context.Background(), "Register", request, &lease)
+    client := NewFeproxyClient(conn)
+    lease, err := client.Register(context.Background(), request)
     if err != nil {
         return nil, fmt.Errorf(
             "Failed to obtain lease from feproxy: %v", err)
     }
     log.Printf("Obtained lease for %#v, port: %v, ttl: %v",
         lease.Pattern, lease.Port, lease.Timeout.AsTime())
-    c := Client{client}
-    go c.KeepLeaseRenewed(quit, &lease)
-    return &lease, nil
+    c := Client{client, conn}
+    go c.KeepLeaseRenewed(quit, lease)
+    return lease, nil
 }
 
 // Deprecated: Use StartRegistration instead
 func ConnectAndRegisterThirdParty(feproxyAddr string, thirdPartyPort uint16, pattern string) (Client, *Lease, error) {
-    client, err := grpc.Dial(feproxyAddr)
+    conn, err := grpc.Dial(feproxyAddr, grpc.WithInsecure())
     if err != nil {
         return Client{}, nil, fmt.Errorf(
             "Failed to connect to frontend proxy RPC server: %v", err)
     }
-    var lease Lease
-    err = client.Invoke(context.Background(), "Register", &RegisterRequest{
+    client := NewFeproxyClient(conn)
+    lease, err := client.Register(context.Background(), &RegisterRequest{
       Pattern: pattern,
       FixedPort: uint32(thirdPartyPort),
       StripPattern: true,
-    }, &lease)
+    })
     if err != nil {
         return Client{}, nil, fmt.Errorf(
             "Failed to obtain lease from feproxy: %v", err)
     }
     log.Printf("Obtained lease for %#v, port: %v, timeout: %v",
         lease.Pattern, lease.Port, lease.Timeout.AsTime())
-    return Client{client}, &lease, nil
+    return Client{client, conn}, lease, nil
 }
 
 // Deprecated: Use StartRegistration instead
 func ConnectAndRegister(feproxyAddr, pattern string) (Client, *Lease, error) {
-    client, err := grpc.Dial(feproxyAddr)
+    conn, err := grpc.Dial(feproxyAddr, grpc.WithInsecure())
     if err != nil {
         return Client{}, nil, fmt.Errorf(
             "Failed to connect to frontend proxy RPC server: %v", err)
     }
-    var lease Lease
-    err = client.Invoke(context.Background(), "Register", &RegisterRequest{Pattern: pattern}, &lease)
+    client := NewFeproxyClient(conn)
+    lease, err := client.Register(context.Background(), &RegisterRequest{Pattern: pattern})
     if err != nil {
         return Client{}, nil, fmt.Errorf(
             "Failed to obtain lease from feproxy: %v", err)
     }
     log.Printf("Obtained lease for %#v, port: %v, ttl: %v",
         lease.Pattern, lease.Port, lease.Timeout.AsTime())
-    return Client{client}, &lease, nil
+    return Client{client, conn}, lease, nil
 }
 
 // Deprecated: Use StartRegistration instead
@@ -104,12 +105,13 @@ func MustConnectAndRegisterThirdParty(feproxyAddr string, thirdPartyPort uint16,
 
 // Deprecated: Use StartRegistration instead
 func (c Client) Close() {
-    c.client.Close()
+    c.conn.Close()
 }
 
 // Deprecated: Use StartRegistration instead
 func (c Client) Unregister(pattern string) error {
-    return c.client.Invoke(context.Background(), "Unregister", &Lease{Pattern:pattern}, nil)
+    _, err := c.client.Unregister(context.Background(), &Lease{Pattern:pattern})
+    return err
 }
 
 // Deprecated: Use StartRegistration instead
@@ -129,7 +131,8 @@ func (c Client) KeepLeaseRenewed(quit <-chan struct{}, lease *Lease) {
             return
         case <-timer.C:
         }
-        err := c.client.Invoke(context.Background(), "Renew", lease, lease)
+        var err error
+        lease, err = c.client.Renew(context.Background(), lease)
         if err != nil {
             /*if err == NotRegisteredError {
                 // TODO: we would need to save the RegisterRequest options to do

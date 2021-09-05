@@ -4,8 +4,8 @@ import (
     "fmt"
     "log"
     "net"
-    "net/url"
     "context"
+    "strings"
     "strconv"
 
     "ask.systems/daemon/feproxy/client"
@@ -21,24 +21,25 @@ type RPCServ struct {
     quit      chan struct{}
 }
 
+func hostname(address string) string {
+    portIdx := strings.Index(address, ":")
+    return address[:portIdx]
+}
+
 // Register registers a new forwarding rule to the rpc client's ip address.
 // Randomly assigns port for the client to listen on
 func (s *RPCServ) Register(ctx context.Context, request *client.RegisterRequest) (*client.Lease, error) {
     // Get the RPC client's address (without the port) from gRPC
     p, _ := peer.FromContext(ctx)
-    client, err := url.Parse(p.Addr.String())
-    if err != nil {
-        log.Print(err)
-        return nil, fmt.Errorf("Failed to get client hostname: %v", err)
-    }
+    client := hostname(p.Addr.String())
 
-    lease, err := s.proxyServ.Register(client.Hostname(), request)
+    lease, err := s.proxyServ.Register(client, request)
     if err != nil {
         log.Print(err)
         return nil, err
     }
     log.Printf("Registered forwarder to %v:%v, Pattern: %v, Timeout: %v",
-               client.Hostname(), lease.Port, request.Pattern, lease.Timeout.AsTime())
+               client, lease.Port, request.Pattern, lease.Timeout.AsTime())
     return lease, nil
 }
 
