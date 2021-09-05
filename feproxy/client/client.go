@@ -14,15 +14,37 @@ var (
     NotRegisteredError = errors.New("pattern not registered")
 )
 
+// Deprecated: Use StartRegistration instead
 type Client struct {
     client *grpc.ClientConn
 }
 
+// Deprecated: Use StartRegistration instead
 type ThirdPartyArgs struct {
     Port uint16
     Pattern string
 }
 
+func StartRegistration(feproxyAddr string, request *RegisterRequest, quit <-chan struct{}) (*Lease, error) {
+    client, err := grpc.Dial(feproxyAddr)
+    if err != nil {
+        return nil, fmt.Errorf(
+            "Failed to connect to frontend proxy RPC server: %v", err)
+    }
+    var lease Lease
+    err = client.Invoke(context.Background(), "Register", request, &lease)
+    if err != nil {
+        return nil, fmt.Errorf(
+            "Failed to obtain lease from feproxy: %v", err)
+    }
+    log.Printf("Obtained lease for %#v, port: %v, ttl: %v",
+        lease.Pattern, lease.Port, lease.Timeout.AsTime())
+    c := Client{client}
+    go c.KeepLeaseRenewed(quit, &lease)
+    return &lease, nil
+}
+
+// Deprecated: Use StartRegistration instead
 func ConnectAndRegisterThirdParty(feproxyAddr string, thirdPartyPort uint16, pattern string) (Client, *Lease, error) {
     client, err := grpc.Dial(feproxyAddr)
     if err != nil {
@@ -44,6 +66,7 @@ func ConnectAndRegisterThirdParty(feproxyAddr string, thirdPartyPort uint16, pat
     return Client{client}, &lease, nil
 }
 
+// Deprecated: Use StartRegistration instead
 func ConnectAndRegister(feproxyAddr, pattern string) (Client, *Lease, error) {
     client, err := grpc.Dial(feproxyAddr)
     if err != nil {
@@ -61,6 +84,7 @@ func ConnectAndRegister(feproxyAddr, pattern string) (Client, *Lease, error) {
     return Client{client}, &lease, nil
 }
 
+// Deprecated: Use StartRegistration instead
 func MustConnectAndRegister(feproxyAddr, pattern string) (Client, *Lease) {
     c, l, err := ConnectAndRegister(feproxyAddr, pattern)
     if err != nil {
@@ -69,6 +93,7 @@ func MustConnectAndRegister(feproxyAddr, pattern string) (Client, *Lease) {
     return c, l
 }
 
+// Deprecated: Use StartRegistration instead
 func MustConnectAndRegisterThirdParty(feproxyAddr string, thirdPartyPort uint16, pattern string) (Client, *Lease) {
     c, l, err := ConnectAndRegisterThirdParty(feproxyAddr, thirdPartyPort, pattern)
     if err != nil {
@@ -77,14 +102,17 @@ func MustConnectAndRegisterThirdParty(feproxyAddr string, thirdPartyPort uint16,
     return c, l
 }
 
+// Deprecated: Use StartRegistration instead
 func (c Client) Close() {
     c.client.Close()
 }
 
+// Deprecated: Use StartRegistration instead
 func (c Client) Unregister(pattern string) error {
     return c.client.Invoke(context.Background(), "Unregister", &Lease{Pattern:pattern}, nil)
 }
 
+// Deprecated: Use StartRegistration instead
 func (c Client) KeepLeaseRenewed(quit <-chan struct{}, lease *Lease) {
     defer func() {
         c.Unregister(lease.Pattern)
