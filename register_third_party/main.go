@@ -9,7 +9,7 @@ import (
     "os/signal"
     "fmt"
 
-    "daemon/feproxy/proxyserv"
+    feproxy "ask.systems/daemon/feproxy/client"
 )
 
 var (
@@ -59,7 +59,7 @@ func main() {
     quit := make(chan struct{})
     // Register the mappings with feproxy and start the threads to renew the leases
     for _, mapping := range mappings {
-        fe, lease := proxyserv.MustConnectAndRegisterThirdParty(*feproxyAddr,
+        fe, lease := feproxy.MustConnectAndRegisterThirdParty(*feproxyAddr,
             mapping.Port, mapping.UrlPattern)
         wg.Add(1)
         go func () {
