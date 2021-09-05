@@ -10,14 +10,12 @@ package main
 import (
     "crypto/tls"
     "fmt"
-    "io/ioutil"
     "log"
     "math/rand"
     "net"
     "net/http"
     "net/http/httputil"
     "net/url"
-    "os"
     "strconv"
     "strings"
     "sync"
@@ -328,29 +326,6 @@ func RedirectToHTTPS(w http.ResponseWriter, req *http.Request) {
     http.Redirect(w, req, url.String(), http.StatusSeeOther)
 }
 
-// loadTLSConfig loads the data from the tls files then closes them
-func loadTLSConfig(tlsCert, tlsKey *os.File) (*tls.Config, error) {
-    defer tlsCert.Close()
-    defer tlsKey.Close()
-    certBytes, err := ioutil.ReadAll(tlsCert)
-    if err != nil {
-        return nil, fmt.Errorf("failed to read tls cert file: %v", err)
-    }
-    keyBytes, err := ioutil.ReadAll(tlsKey)
-    if err != nil {
-        return nil, fmt.Errorf("failed to read tls key file: %v", err)
-    }
-    cert, err := tls.X509KeyPair(certBytes, keyBytes)
-    if err != nil {
-        return nil, fmt.Errorf("invalid tls file format: %v", err)
-    }
-    ret := &tls.Config{
-        Certificates: make([]tls.Certificate, 1),
-    }
-    ret.Certificates[0] = cert
-    return ret, nil
-}
-
 // runServer calls serv.Serv(list) and prints and error and closes the quit
 // channel if the server dies
 func runServer(quit chan struct{}, name string,
@@ -372,7 +347,7 @@ func runServer(quit chan struct{}, name string,
 //  - startPort and endPort set the range of ports this server offer for lease
 //  - leaseTTL is the duration of the life of a lease
 //  - quit is a channel that will be closed when the server should quit
-func StartHTTPProxy(tlsCert, tlsKey *os.File, httpList, httpsList net.Listener,
+func StartHTTPProxy(tlsConfig *tls.Config, httpList, httpsList net.Listener,
     startPort, endPort uint16,
     leaseTTL string, quit chan struct{}) (*ProxyServ, error) {
 
@@ -384,10 +359,6 @@ func StartHTTPProxy(tlsCert, tlsKey *os.File, httpList, httpsList net.Listener,
     ttlDuration, err := time.ParseDuration(leaseTTL)
     if err != nil {
         return nil, fmt.Errorf("bad leaseTTL string format: %v", leaseTTL)
-    }
-    tlsConfig, err := loadTLSConfig(tlsCert, tlsKey)
-    if err != nil {
-        return nil, fmt.Errorf("failed to load TLS config: %v", err)
     }
     // Start the TLS server
     p := &ProxyServ{
