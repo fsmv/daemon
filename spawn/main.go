@@ -22,6 +22,10 @@ var (
         "The path to the config file")
     path = flag.String("path", "",
         "A single path to use for relative paths in the config file")
+    spawningDelay = flag.Duration("spawning_delay", 2*time.Second,
+        "The amount of time to wait between starting processes.\n" +
+        "Useful especially for feproxy which should go first and be given time\n" +
+        "to start up so others can connect.")
 )
 
 // Command is one executable to run with options
@@ -295,8 +299,8 @@ func StartPrograms(programs []Command) (map[int]*Child, int) {
         c.Up = true
         log.Printf("Started process: %v; pid: %v", name, proc.Pid)
         log.Printf("Args: %v", argv)
-        log.Printf("Waiting 1 second...")
-        time.Sleep(time.Second)
+        log.Printf("Waiting %v...", *spawningDelay)
+        time.Sleep(*spawningDelay)
     }
     return ret, errCnt
 }
