@@ -1,5 +1,4 @@
 syntax = "proto3";
-package feproxy;
 option go_package = "daemon/feproxy";
 
 import "google/protobuf/timestamp.proto";
@@ -24,4 +23,9 @@ message Lease {
     string pattern = 1;
     uint32 port = 2;
     google.protobuf.Timestamp timeout = 3;
+}
+
+// Just so this can be used as a json flag
+message RegisterRequests {
+    repeated RegisterRequest requests = 1;
 }

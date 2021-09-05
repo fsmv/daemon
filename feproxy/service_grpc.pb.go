@@ -33,7 +33,7 @@ func NewFeproxyClient(cc grpc.ClientConnInterface) FeproxyClient {
 
 func (c *feproxyClient) Register(ctx context.Context, in *RegisterRequest, opts ...grpc.CallOption) (*Lease, error) {
 	out := new(Lease)
-	err := c.cc.Invoke(ctx, "/feproxy.Feproxy/Register", in, out, opts...)
+	err := c.cc.Invoke(ctx, "/Feproxy/Register", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -42,7 +42,7 @@ func (c *feproxyClient) Register(ctx context.Context, in *RegisterRequest, opts 
 
 func (c *feproxyClient) Renew(ctx context.Context, in *Lease, opts ...grpc.CallOption) (*Lease, error) {
 	out := new(Lease)
-	err := c.cc.Invoke(ctx, "/feproxy.Feproxy/Renew", in, out, opts...)
+	err := c.cc.Invoke(ctx, "/Feproxy/Renew", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -51,7 +51,7 @@ func (c *feproxyClient) Renew(ctx context.Context, in *Lease, opts ...grpc.CallO
 
 func (c *feproxyClient) Unregister(ctx context.Context, in *Lease, opts ...grpc.CallOption) (*Lease, error) {
 	out := new(Lease)
-	err := c.cc.Invoke(ctx, "/feproxy.Feproxy/Unregister", in, out, opts...)
+	err := c.cc.Invoke(ctx, "/Feproxy/Unregister", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -104,7 +104,7 @@ func _Feproxy_Register_Handler(srv interface{}, ctx context.Context, dec func(in
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/feproxy.Feproxy/Register",
+		FullMethod: "/Feproxy/Register",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(FeproxyServer).Register(ctx, req.(*RegisterRequest))
@@ -122,7 +122,7 @@ func _Feproxy_Renew_Handler(srv interface{}, ctx context.Context, dec func(inter
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/feproxy.Feproxy/Renew",
+		FullMethod: "/Feproxy/Renew",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(FeproxyServer).Renew(ctx, req.(*Lease))
@@ -140,7 +140,7 @@ func _Feproxy_Unregister_Handler(srv interface{}, ctx context.Context, dec func(
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/feproxy.Feproxy/Unregister",
+		FullMethod: "/Feproxy/Unregister",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(FeproxyServer).Unregister(ctx, req.(*Lease))
@@ -152,7 +152,7 @@ func _Feproxy_Unregister_Handler(srv interface{}, ctx context.Context, dec func(
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
 var Feproxy_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "feproxy.Feproxy",
+	ServiceName: "Feproxy",
 	HandlerType: (*FeproxyServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
