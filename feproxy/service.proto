@@ -1,0 +1,36 @@
+syntax = "proto3";
+option go_package = "daemon/feproxy";
+
+import "google/protobuf/timestamp.proto";
+
+service Feproxy {
+    rpc Register(RegisterRequest) returns (Lease) {}
+    rpc Renew(Lease) returns (Lease) {}
+    rpc Unregister(Lease) returns (Lease) {}
+}
+
+message RegisterRequest {
+    // For HTTP: A url pattern that works with http.DefaultServMux
+    // For TCP: ":tcp:port" for the port number feproxy should listen on
+    string pattern = 1; // TODO: maybe support multiple patterns for the same IP/port
+    // Set for third party web interfaces (or TCP proxy backends) that can't
+    // use an random lease port.
+    // Must be outside the range of feproxy's automatic ports.
+    uint32 fixed_port = 2;
+    // If true, remove the pattern in the URL of HTTP requests we forward to the
+    // backend to hide that it is behind a reverse proxy.
+    //
+    // Ignored for TCP proxies.
+    bool strip_pattern = 3;
+}
+
+message Lease {
+    string pattern = 1;
+    uint32 port = 2;
+    google.protobuf.Timestamp timeout = 3;
+}
+
+// Just so this can be used as a json flag
+message RegisterRequests {
+    repeated RegisterRequest requests = 1;
+}

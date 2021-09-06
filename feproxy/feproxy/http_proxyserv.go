@@ -11,7 +11,6 @@ import (
     "crypto/tls"
     "fmt"
     "log"
-    "math/rand"
     "net"
     "net/http"
     "net/http/httputil"
@@ -21,30 +20,19 @@ import (
     "sync"
     "time"
 
-    "ask.systems/daemon/feproxy/client"
+    "ask.systems/daemon/feproxy"
 )
 
-// How often to look through the Leases and unregister those past TTL
-const ttlCheckFreq = "15m"
-
-// ProxyServ implements http.Handler to handle requests using a pool of
+// HTTPProxy implements http.Handler to handle requests using a pool of
 // forwarding rules registered at runtime
-type ProxyServ struct {
+type HTTPProxy struct {
+    leasor *PortLeasor
     mut              *sync.RWMutex
     // Map from pattern to forwarder. Protected by mut.
     forwarders       map[string]*forwarder
-    // List of ports to be leased out, in a random order. Protected by mut.
-    // Always has values between 0 and n, see unusedPortOffset.
-    unusedPorts      []int
-    // Add this to the values in unusedPorts to get the stored port number
-    unusedPortOffset uint16
-    ttlString        string
-    ttlDuration      time.Duration
-    startPort        uint16
-    endPort          uint16
 }
 
-// forwarder holds the data for a forwarding rule registered with ProxyServ
+// forwarder holds the data for a forwarding rule registered with HTTPProxy
 type forwarder struct {
     Handler http.Handler
     Timeout time.Time
@@ -52,40 +40,24 @@ type forwarder struct {
     Port    uint16
 }
 
-// GetNumLeases returns the number of Registered Leases
-func (p *ProxyServ) GetNumLeases() int {
-    p.mut.RLock()
-    defer p.mut.RUnlock()
-    ret := len(p.forwarders)
-    return ret
-}
-
-// Unregister deletes the forwarder and associated lease with the given pattern.
-// Returns an error if the pattern is not registered
-func (p *ProxyServ) Unregister(pattern string) error {
-    p.mut.Lock()
-    defer p.mut.Unlock()
-    fwd, ok := p.forwarders[pattern]
-    if !ok {
-        return client.NotRegisteredError
-    }
-    p.unusedPorts = append(p.unusedPorts, int(fwd.Port))
-    delete(p.forwarders, pattern)
-    return nil
-}
-
-// reservePort retuns a random unused port and marks it as used.
+// Register leases a new forwarder for the given pattern.
 // Returns an error if the server has no more ports to lease.
-//
-// You must have a (write) lock on mut before calling.
-func (p *ProxyServ) reservePortUnsafe() (uint16, error) {
-    if len(p.unusedPorts) == 0 {
-        return 0, fmt.Errorf("No remaining ports to lease. Active leases: %v",
-                             len(p.forwarders))
+func (p *HTTPProxy) Register(clientAddr string, request *feproxy.RegisterRequest) (*feproxy.Lease, error) {
+    lease, err := p.leasor.Register(&feproxy.Lease{
+        Pattern: request.Pattern,
+        Port: request.FixedPort,
+    }, func() { delete(p.forwarders, request.Pattern) })
+    if err != nil {
+        return nil, err
     }
-    port := uint16(p.unusedPorts[0]) + p.unusedPortOffset
-    p.unusedPorts = p.unusedPorts[1:]
-    return port, nil
+
+    err = p.saveForwarder(clientAddr, lease, request.StripPattern)
+    if err != nil {
+        return nil, err
+    }
+    log.Printf("Registered forwarder to %v:%v, Pattern: %v, Timeout: %v",
+        clientAddr, lease.Port, request.Pattern, lease.Timeout.AsTime())
+    return lease, nil
 }
 
 // Creates and saves a new forwarder that handles request and forwards them to
@@ -94,15 +66,16 @@ func (p *ProxyServ) reservePortUnsafe() (uint16, error) {
 // if stripPattern is true, the pattern will be removed from the prefix of the
 // http request paths. This is needed for third party applications that expect
 // to get requests for / not /pattern/
-//
-// mut must be locked
-func (p *ProxyServ) saveForwarder(clientAddr string, clientPort uint16, pattern string, stripPattern bool) error {
-    backend, err := url.Parse("http://" + clientAddr + ":" + strconv.Itoa(int(clientPort)))
+func (p *HTTPProxy) saveForwarder(clientAddr string, lease *feproxy.Lease, stripPattern bool) error {
+    p.mut.Lock()
+    defer p.mut.Unlock()
+    backend, err := url.Parse("http://" + clientAddr + ":" + strconv.Itoa(int(lease.Port)))
     if err != nil {
         return err
     }
     // Store the forwarder
     backendQuery := backend.RawQuery
+    pattern := lease.Pattern
     proxy := &httputil.ReverseProxy{
         Director: func (req *http.Request) {
             // Copied from https://golang.org/src/net/http/httputil/reverseproxy.go?s=2588:2649#L80
@@ -142,95 +115,11 @@ func (p *ProxyServ) saveForwarder(clientAddr string, clientPort uint16, pattern 
     fwd := &forwarder{
         Handler: proxy,
         Pattern: pattern,
-        Port:    clientPort,
-        Timeout: time.Now().Add(p.ttlDuration),
+        Port:    uint16(lease.Port),
+        Timeout: lease.Timeout.AsTime(),
     }
     p.forwarders[pattern] = fwd
     return nil
-}
-
-func (p *ProxyServ) RegisterThirdParty(clientAddr string, clientPort uint16, pattern string) (lease client.Lease, err error) {
-    // Assumes the port is not in the configured range (because otherwise we
-    // might hand out a lease for that port). It's checked in the flag Set method.
-    p.mut.Lock()
-    defer p.mut.Unlock()
-
-    if (clientPort >= p.startPort && clientPort <= p.endPort) {
-        return client.Lease{}, fmt.Errorf("Fixed port %v must not be in the reserved feproxy client range: [%v, %v]",
-            clientPort, p.startPort, p.endPort)
-    }
-
-    err = p.saveForwarder(clientAddr, clientPort, pattern, /*stripPattern*/ true)
-    if err != nil {
-        return client.Lease{}, err
-    }
-
-    return client.Lease{
-        Pattern: pattern,
-        Port:    clientPort,
-        TTL:     p.ttlString,
-    }, nil
-}
-
-// Register leases a new forwarder for the given pattern.
-// Returns an error if the server has no more ports to lease.
-func (p *ProxyServ) Register(clientAddr string, pattern string) (lease client.Lease, err error) {
-    p.mut.Lock()
-    defer p.mut.Unlock()
-
-    port, err := p.reservePortUnsafe()
-    if err != nil {
-        return client.Lease{}, err
-    }
-
-    err = p.saveForwarder(clientAddr, port, pattern, /*stripPattern*/ false)
-    if err != nil {
-        return client.Lease{}, err
-    }
-
-    return client.Lease{
-        Pattern: pattern,
-        Port:    port,
-        TTL:     p.ttlString,
-    }, nil
-}
-
-// Renew renews an existing lease. Returns an error if the pattern is not
-// registered.
-func (p *ProxyServ) Renew(pattern string) (lease client.Lease, err error) {
-    p.mut.Lock()
-    defer p.mut.Unlock()
-    fwd, ok := p.forwarders[pattern]
-    if !ok {
-        return client.Lease{}, client.NotRegisteredError
-    }
-    fwd.Timeout = time.Now().Add(p.ttlDuration)
-    return client.Lease{
-        Port: fwd.Port,
-        TTL:  p.ttlString,
-    }, nil
-}
-
-// monitorTTLs monitors the list of leases and removes the expired ones.
-// Checks the lease once per each ttlCheckFreq duration.
-func (p *ProxyServ) monitorTTLs(ticker *time.Ticker, quit <-chan struct{}) {
-    for {
-        select {
-        case <-ticker.C: // on next tick
-            p.mut.Lock()
-            now := time.Now()
-            for pattern, fwd := range p.forwarders {
-                if now.After(fwd.Timeout) {
-                    p.unusedPorts = append(p.unusedPorts, int(fwd.Port))
-                    delete(p.forwarders, pattern)
-                }
-            }
-            p.mut.Unlock()
-        case <-quit: // on quit
-            ticker.Stop()
-            return
-        }
-    }
 }
 
 // urlMatchesPattern returns whether or not the url matches the pattern string.
@@ -256,7 +145,7 @@ func urlMatchesPattern(url, pattern string) bool{
 // returns nil if no matching forwarder is found
 //
 // Similar to http.ServeMux.match, see https://golang.org/LICENSE
-func (p *ProxyServ) selectForwarder(url string) *forwarder {
+func (p *HTTPProxy) selectForwarder(url string) *forwarder {
     p.mut.RLock()
     defer p.mut.RUnlock()
     var ret *forwarder = nil
@@ -273,20 +162,13 @@ func (p *ProxyServ) selectForwarder(url string) *forwarder {
     return ret
 }
 
-// ServeHTTP is the ProxyServ net/http handler func which selects a registered
+// ServeHTTP is the HTTPProxy net/http handler func which selects a registered
 // forwarder to handle the request based on the forwarder's pattern
-func (p *ProxyServ) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+func (p *HTTPProxy) ServeHTTP(w http.ResponseWriter, req *http.Request) {
     fwd := p.selectForwarder(req.URL.Path)
     // No handler for this path, 404
     if fwd == nil {
         log.Print("Forwarder not found for path: ", req.URL.Path)
-        http.NotFound(w, req)
-        return
-    }
-    // Handler timed out, delete it then 404
-    if time.Now().After(fwd.Timeout) {
-        log.Print("Forwarder timed out for pattern: ", fwd.Pattern)
-        p.Unregister(req.URL.Path)
         http.NotFound(w, req)
         return
     }
@@ -327,7 +209,7 @@ func runServer(quit chan struct{}, name string,
     }
 }
 
-// StartNew creates a new ProxyServ and starts the server.
+// StartNew creates a new HTTPProxy and starts the server.
 //
 // Arguments:
 //  - tlsCert and tlsKey are file handles for the TLS certificate and key files
@@ -335,36 +217,19 @@ func runServer(quit chan struct{}, name string,
 //  - startPort and endPort set the range of ports this server offer for lease
 //  - leaseTTL is the duration of the life of a lease
 //  - quit is a channel that will be closed when the server should quit
-func StartHTTPProxy(tlsConfig *tls.Config, httpList, httpsList net.Listener,
-    startPort, endPort uint16,
-    leaseTTL string, quit chan struct{}) (*ProxyServ, error) {
-
-    if !(startPort < endPort) {
-        return nil, fmt.Errorf("startPort (%v) must be less than endPort (%v)",
-            startPort, endPort)
-    }
-    r := rand.New(rand.NewSource(time.Now().UnixNano()))
-    ttlDuration, err := time.ParseDuration(leaseTTL)
-    if err != nil {
-        return nil, fmt.Errorf("bad leaseTTL string format: %v", leaseTTL)
-    }
+func StartHTTPProxy(l *PortLeasor, tlsConfig *tls.Config,
+    httpList, httpsList net.Listener, quit chan struct{}) (*HTTPProxy, error) {
     // Start the TLS server
-    p := &ProxyServ{
-        mut:              &sync.RWMutex{},
-        forwarders:       make(map[string]*forwarder),
-        unusedPorts:      r.Perm(int(endPort - startPort)),
-        unusedPortOffset: startPort,
-        ttlString:        leaseTTL,
-        ttlDuration:      ttlDuration,
-        startPort:        startPort,
-        endPort:          endPort,
+    p := &HTTPProxy{
+        leasor: l,
+        mut:        &sync.RWMutex{},
+        forwarders: make(map[string]*forwarder),
     }
     tlsServer := &http.Server{
         Handler: p,
         TLSConfig: tlsConfig.Clone(),
     }
     // also start the TTL monitoring thread
-    go p.monitorTTLs(time.NewTicker(ttlDuration), quit)
     go runServer(quit, "TLS", tlsServer, tls.NewListener(httpsList, tlsConfig))
     // Start the HTTP server to redirect to HTTPS
     httpServer := &http.Server{
