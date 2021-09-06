@@ -20,7 +20,7 @@ import (
     "sync"
     "time"
 
-    "ask.systems/daemon/feproxy"
+    "ask.systems/daemon/portal"
 )
 
 // HTTPProxy implements http.Handler to handle requests using a pool of
@@ -42,8 +42,8 @@ type forwarder struct {
 
 // Register leases a new forwarder for the given pattern.
 // Returns an error if the server has no more ports to lease.
-func (p *HTTPProxy) Register(clientAddr string, request *feproxy.RegisterRequest) (*feproxy.Lease, error) {
-    lease, err := p.leasor.Register(&feproxy.Lease{
+func (p *HTTPProxy) Register(clientAddr string, request *portal.RegisterRequest) (*portal.Lease, error) {
+    lease, err := p.leasor.Register(&portal.Lease{
         Pattern: request.Pattern,
         Port: request.FixedPort,
     }, func() { delete(p.forwarders, request.Pattern) })
@@ -66,7 +66,7 @@ func (p *HTTPProxy) Register(clientAddr string, request *feproxy.RegisterRequest
 // if stripPattern is true, the pattern will be removed from the prefix of the
 // http request paths. This is needed for third party applications that expect
 // to get requests for / not /pattern/
-func (p *HTTPProxy) saveForwarder(clientAddr string, lease *feproxy.Lease, stripPattern bool) error {
+func (p *HTTPProxy) saveForwarder(clientAddr string, lease *portal.Lease, stripPattern bool) error {
     p.mut.Lock()
     defer p.mut.Unlock()
     backend, err := url.Parse("http://" + clientAddr + ":" + strconv.Itoa(int(lease.Port)))
@@ -78,6 +78,10 @@ func (p *HTTPProxy) saveForwarder(clientAddr string, lease *feproxy.Lease, strip
     pattern := lease.Pattern
     proxy := &httputil.ReverseProxy{
         Director: func (req *http.Request) {
+            // TODO: does this help anything???
+            //req.Header.Add("X-Forwarded-Host", req.Host)
+            //req.Header.Add("X-Origin-Host", backend.Host)
+
             // Copied from https://golang.org/src/net/http/httputil/reverseproxy.go?s=2588:2649#L80
             req.URL.Scheme = backend.Scheme
             req.URL.Host = backend.Host
@@ -201,6 +205,8 @@ func RedirectToHTTPS(w http.ResponseWriter, req *http.Request) {
 func runServer(quit chan struct{}, name string,
     serv *http.Server, list net.Listener) {
 
+    // TODO: probably should call ServeTLS for tls instead of doing our own
+    // I think this doesn't support HTTP/2 currently
     err := serv.Serve(list)
     if err != http.ErrServerClosed {
         log.Printf("Proxy %v server error: %v", name, err)

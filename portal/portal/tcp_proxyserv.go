@@ -8,7 +8,7 @@ import (
     "net"
     "crypto/tls"
 
-    "ask.systems/daemon/feproxy"
+    "ask.systems/daemon/portal"
 )
 
 // The RegisterRequest.Pattern prefix for tcp proxies
@@ -28,13 +28,13 @@ func StartTCPProxy(l *PortLeasor, tlsConfig *tls.Config, quit chan struct{}) *TC
     }
 }
 
-func (p *TCPProxy) Register(clientAddr string, request *feproxy.RegisterRequest) (*feproxy.Lease, error) {
+func (p *TCPProxy) Register(clientAddr string, request *portal.RegisterRequest) (*portal.Lease, error) {
     cancelLease := make(chan struct{})
     go func() {
         <-p.quit
         close(cancelLease)
     }()
-    lease, err := p.leasor.Register(&feproxy.Lease{
+    lease, err := p.leasor.Register(&portal.Lease{
         Pattern: request.Pattern,
         Port: request.FixedPort,
     }, func () { close(cancelLease) })

@@ -7,7 +7,7 @@ import (
     "errors"
     "math/rand"
 
-    "ask.systems/daemon/feproxy"
+    "ask.systems/daemon/portal"
     "google.golang.org/protobuf/proto"
     "google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -20,7 +20,7 @@ const ttlCheckFreq = 15*time.Minute
 //
 // The main purpose is for not having port conflicts when you're running several
 // server binaries on the same machine. Technically we could have a separate
-// port list for each machine connecting to feproxy but there should be enough
+// port list for each machine connecting to portal but there should be enough
 // ports to just have one list.
 type PortLeasor struct {
     mut    *sync.RWMutex // Everything in this struct needs the lock
@@ -37,7 +37,7 @@ type PortLeasor struct {
 }
 
 type lease struct {
-    *feproxy.Lease
+    *portal.Lease
     cancel func() // call this function to cancel the lease`
 }
 
@@ -59,14 +59,14 @@ func StartPortLeasor(startPort, endPort uint16, ttl time.Duration, quit chan str
     return l
 }
 
-func (l *PortLeasor) Register(request *feproxy.Lease, canceler func()) (*feproxy.Lease, error) {
+func (l *PortLeasor) Register(request *portal.Lease, canceler func()) (*portal.Lease, error) {
     l.mut.Lock()
     defer l.mut.Unlock()
 
     // Either use the fixed port or select a port automatically
     if request.Port != 0 {
         if (request.Port >= uint32(l.startPort) && request.Port <= uint32(l.endPort)) {
-            return nil, fmt.Errorf("Fixed port %v must not be in the reserved feproxy client range: [%v, %v]", request.Port, l.startPort, l.endPort)
+            return nil, fmt.Errorf("Fixed port %v must not be in the reserved portal client range: [%v, %v]", request.Port, l.startPort, l.endPort)
         }
         if (request.Port >= 1 << 16) {
             return nil, fmt.Errorf("Fixed port (%v) out of possiible port range: must be less than 2^16", request.Port)
@@ -84,7 +84,7 @@ func (l *PortLeasor) Register(request *feproxy.Lease, canceler func()) (*feproxy
     return request, nil
 }
 
-func (l *PortLeasor) Renew(lease *feproxy.Lease) (*feproxy.Lease, error) {
+func (l *PortLeasor) Renew(lease *portal.Lease) (*portal.Lease, error) {
     l.mut.Lock()
     defer l.mut.Unlock()
 
@@ -100,7 +100,7 @@ func (l *PortLeasor) Renew(lease *feproxy.Lease) (*feproxy.Lease, error) {
     return foundLease.Lease, nil
 }
 
-func (l *PortLeasor) Unregister(lease *feproxy.Lease) error {
+func (l *PortLeasor) Unregister(lease *portal.Lease) error {
     l.mut.Lock()
     defer l.mut.Unlock()
 

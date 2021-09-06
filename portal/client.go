@@ -1,4 +1,4 @@
-package feproxy
+package portal
 
 import (
     "errors"
@@ -15,24 +15,24 @@ var (
 )
 
 type Client struct {
-    RPC FeproxyClient // Call any of the service.proto functions here
+    RPC PortalClient // Call any of the service.proto functions here
     conn *grpc.ClientConn
 }
 
-// Make a connection to the feproxy RPC service and send the registration
+// Make a connection to the portal RPC service and send the registration
 // request. Also starts a goroutine to renew the lease (KeepLeaseRenewed) until
 // the quit channel is closed.
 //
 // See service.proto for request documentation.
 // Returns the initial lease or an error if the registration didn't work.
-func StartRegistration(feproxyAddr string, request *RegisterRequest, quit <-chan struct{}) (*Lease, error) {
-    c, err := Connect(feproxyAddr)
+func StartRegistration(portalAddr string, request *RegisterRequest, quit <-chan struct{}) (*Lease, error) {
+    c, err := Connect(portalAddr)
     if err != nil {
         return nil, err
     }
     lease, err := c.RPC.Register(context.Background(), request)
     if err != nil {
-        return nil, fmt.Errorf("Failed to obtain lease from feproxy: %v", err)
+        return nil, fmt.Errorf("Failed to obtain lease from portal: %v", err)
     }
     log.Printf("Obtained lease for %#v, port: %v, ttl: %v",
         lease.Pattern, lease.Port, lease.Timeout.AsTime())
@@ -40,14 +40,14 @@ func StartRegistration(feproxyAddr string, request *RegisterRequest, quit <-chan
     return lease, nil
 }
 
-// Connect to the feproxy RPC server and don't do anything else. Use this if you
+// Connect to the portal RPC server and don't do anything else. Use this if you
 // want to call the proto RPCs directly.
-func Connect(feproxyAddr string) (Client, error) {
-    conn, err := grpc.Dial(feproxyAddr, grpc.WithInsecure())
+func Connect(portalAddr string) (Client, error) {
+    conn, err := grpc.Dial(portalAddr, grpc.WithInsecure())
     if err != nil {
         return Client{}, fmt.Errorf("Failed to connect to frontend proxy RPC server: %v", err)
     }
-    return Client{NewFeproxyClient(conn), conn}, nil
+    return Client{NewPortalClient(conn), conn}, nil
 }
 
 // Close the connection to the RPC server
@@ -61,7 +61,7 @@ func (c Client) KeepLeaseRenewed(quit <-chan struct{}, lease *Lease) {
     defer func() {
         c.RPC.Unregister(context.Background(), lease)
         c.Close()
-        log.Printf("feproxy lease %#v unregistered and connection closed",
+        log.Printf("portal lease %#v unregistered and connection closed",
             lease.Pattern)
     }()
     const bufferTime = time.Hour // so we don't let the lease expire
@@ -101,8 +101,8 @@ type ThirdPartyArgs struct {
 
 // Deprecated: Use StartRegistration instead
 // Calls Register with {Pattern: pattern, FixedPort: thirdPartyPort, StripPattern: true}
-func ConnectAndRegisterThirdParty(feproxyAddr string, thirdPartyPort uint16, pattern string) (Client, *Lease, error) {
-    c, err := Connect(feproxyAddr)
+func ConnectAndRegisterThirdParty(portalAddr string, thirdPartyPort uint16, pattern string) (Client, *Lease, error) {
+    c, err := Connect(portalAddr)
     if err != nil {
         return c, nil, err
     }
@@ -113,7 +113,7 @@ func ConnectAndRegisterThirdParty(feproxyAddr string, thirdPartyPort uint16, pat
     })
     if err != nil {
         return c, nil, fmt.Errorf(
-            "Failed to obtain lease from feproxy: %v", err)
+            "Failed to obtain lease from portal: %v", err)
     }
     log.Printf("Obtained lease for %#v, port: %v, timeout: %v",
         lease.Pattern, lease.Port, lease.Timeout.AsTime())
@@ -121,15 +121,15 @@ func ConnectAndRegisterThirdParty(feproxyAddr string, thirdPartyPort uint16, pat
 }
 
 // Deprecated: Use StartRegistration instead
-func ConnectAndRegister(feproxyAddr, pattern string) (Client, *Lease, error) {
-    c, err := Connect(feproxyAddr)
+func ConnectAndRegister(portalAddr, pattern string) (Client, *Lease, error) {
+    c, err := Connect(portalAddr)
     if err != nil {
         return c, nil, err
     }
     lease, err := c.RPC.Register(context.Background(), &RegisterRequest{Pattern: pattern})
     if err != nil {
         return c, nil, fmt.Errorf(
-            "Failed to obtain lease from feproxy: %v", err)
+            "Failed to obtain lease from portal: %v", err)
     }
     log.Printf("Obtained lease for %#v, port: %v, ttl: %v",
         lease.Pattern, lease.Port, lease.Timeout.AsTime())
@@ -137,8 +137,8 @@ func ConnectAndRegister(feproxyAddr, pattern string) (Client, *Lease, error) {
 }
 
 // Deprecated: Use StartRegistration instead
-func MustConnectAndRegister(feproxyAddr, pattern string) (Client, *Lease) {
-    c, l, err := ConnectAndRegister(feproxyAddr, pattern)
+func MustConnectAndRegister(portalAddr, pattern string) (Client, *Lease) {
+    c, l, err := ConnectAndRegister(portalAddr, pattern)
     if err != nil {
         log.Fatal(err)
     }
@@ -147,8 +147,8 @@ func MustConnectAndRegister(feproxyAddr, pattern string) (Client, *Lease) {
 
 // Deprecated: Use StartRegistration instead.
 // See the ConnectAndRegisterThirdParty comment for the arguments to use.
-func MustConnectAndRegisterThirdParty(feproxyAddr string, thirdPartyPort uint16, pattern string) (Client, *Lease) {
-    c, l, err := ConnectAndRegisterThirdParty(feproxyAddr, thirdPartyPort, pattern)
+func MustConnectAndRegisterThirdParty(portalAddr string, thirdPartyPort uint16, pattern string) (Client, *Lease) {
+    c, l, err := ConnectAndRegisterThirdParty(portalAddr, thirdPartyPort, pattern)
     if err != nil {
         log.Fatal(err)
     }

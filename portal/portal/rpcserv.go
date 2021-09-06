@@ -8,7 +8,7 @@ import (
     "strings"
     "strconv"
 
-    "ask.systems/daemon/feproxy"
+    "ask.systems/daemon/portal"
     "google.golang.org/protobuf/types/known/timestamppb"
     "google.golang.org/grpc"
     "google.golang.org/grpc/peer"
@@ -16,7 +16,7 @@ import (
 
 // Methods on this type are exported as rpc calls
 type RPCServ struct {
-    feproxy.FeproxyServer
+    portal.PortalServer
 
     leasor    *PortLeasor
     tcpProxy  *TCPProxy
@@ -31,12 +31,12 @@ func hostname(address string) string {
 
 // Register registers a new forwarding rule to the rpc client's ip address.
 // Randomly assigns port for the client to listen on
-func (s *RPCServ) Register(ctx context.Context, request *feproxy.RegisterRequest) (*feproxy.Lease, error) {
+func (s *RPCServ) Register(ctx context.Context, request *portal.RegisterRequest) (*portal.Lease, error) {
     // Get the RPC client's address (without the port) from gRPC
     p, _ := peer.FromContext(ctx)
     client := hostname(p.Addr.String())
 
-    var lease *feproxy.Lease
+    var lease *portal.Lease
     var err error
     if strings.HasPrefix(request.Pattern, tcpProxyPrefix) {
         lease, err = s.tcpProxy.Register(client, request)
@@ -51,7 +51,7 @@ func (s *RPCServ) Register(ctx context.Context, request *feproxy.RegisterRequest
 }
 
 // Unregister unregisters the forwarding rule with the given pattern
-func (s *RPCServ) Unregister(ctx context.Context, lease *feproxy.Lease) (*feproxy.Lease, error) {
+func (s *RPCServ) Unregister(ctx context.Context, lease *portal.Lease) (*portal.Lease, error) {
     err := s.leasor.Unregister(lease)
     if err != nil {
         log.Print(err)
@@ -63,7 +63,7 @@ func (s *RPCServ) Unregister(ctx context.Context, lease *feproxy.Lease) (*feprox
 }
 
 // Renew renews the lease on a currently registered pattern
-func (s *RPCServ) Renew(ctx context.Context, lease *feproxy.Lease) (*feproxy.Lease, error) {
+func (s *RPCServ) Renew(ctx context.Context, lease *portal.Lease) (*portal.Lease, error) {
     lease, err := s.leasor.Renew(lease)
     if err != nil {
         log.Print(err)
@@ -85,7 +85,7 @@ func StartRPCServer(leasor *PortLeasor, tcpProxy *TCPProxy, httpProxy *HTTPProxy
         quit:      quit,
     }
     server := grpc.NewServer()
-    feproxy.RegisterFeproxyServer(server, s)
+    portal.RegisterPortalServer(server, s)
     l, err := net.Listen("tcp", ":" + strconv.Itoa(int(port)))
     if err != nil {
         return nil, fmt.Errorf("Failed to start listener: %v", err)

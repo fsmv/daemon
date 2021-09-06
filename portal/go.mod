@@ -1,4 +1,4 @@
-module ask.systems/daemon/feproxy
+module ask.systems/daemon/portal
 
 go 1.17
 
