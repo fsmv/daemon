@@ -1,5 +1,40 @@
-// TODO: comments
-package main
+// To make OAuth authentications you'll need an OAuthClient and to obtain your
+// OAuth app ID and secret key. Ex:
+//
+//     client := &OAuthClient{
+//         ID:          *oauthClientId, // configured as a flag
+//         Secret:      *oauthClientSecret, // configured as a flag
+//         RedirectURI: "https://example.com/app/callback"
+//     }
+//
+// In onder to handle authentication responses from the OAuth host you need to
+// get the host's token request URL and register your callback handler. Ex:
+//
+//     callbackHandler := client.NewCallbackHandler(
+//       "https://www.googleapis.com/oauth2/v4/token",
+//       func (token string) bool { return verifyXSRFToken(token) },
+//       func (token OAuthToken) { /* save the token so you can use it */ })
+//     http.Handle(client.RedirectURI, callbackHandler)
+//
+// Finally, when a client wants to authenticate, you'll need your host
+// authentication URL and the API scope URL, and to generate a random XSRF
+// token. Ex:
+//
+//     func (h *YourHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+//     ...
+//       // Use the OAuthClient to generate the url to redirect the user to so
+//       // they can log in on the host website
+//       redirectURL := h.client.GetRedirectURL(
+//         "https://accounts.google.com/o/oauth2/v2/",
+//         "https://www.googleapis.com/auth/spreadsheets",
+//         genXSRFToken())
+//       // Redirect the user to the login page
+//       http.Redirect(w, r, redirectURL, http.StatusSeeOther)
+//
+//
+// TODO: add XSRF token generation and verification to this file
+package util
+
 
 import (
     "bytes"
@@ -45,6 +80,7 @@ type OAuthCallbackHandler struct {
 }
 
 func (c *OAuthClient) NewCallbackHandler(tokenReqURL string,
+// TODO: interface for these functions
     checkXSRFToken func(string) bool,
     successfulAuth func(OAuthToken)) *OAuthCallbackHandler {
 
