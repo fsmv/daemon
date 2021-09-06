@@ -5,19 +5,19 @@ import (
     "fmt"
     "log"
     "net"
+    "time"
     "crypto/tls"
     "os"
     "os/signal"
     "io/ioutil"
     "strconv"
-    "encoding/json"
 )
 
 const (
     rpcPort = 2048
     portRangeStart = 2049
     portRangeEnd = 4096
-    leaseTTL = "24h"
+    leaseTTL = 24*time.Hour
 )
 
 var (
@@ -35,45 +35,7 @@ var (
         "If positive, the port to bind to for https traffic or\n" +
         "if negative, the file descriptor id for a socket to listen on\n" +
         "shared by the parent process.")
-    tcpMappings TCPMappings
 )
-
-func init() {
-    flag.Var(&tcpMappings, "tcp_proxy",
-        "A JSON flag for wrapping an internal TCP server in the feproxy SSL/TLS key.\n" +
-        "Also accepts negative numbers for the port to use a file descriptor instead.\n" +
-        fmt.Sprintf("Schema: %+v", []TCPMapping{{1234, "127.0.0.1:4242"}}))
-    flag.Parse()
-}
-
-type TCPMappings []TCPMapping
-type TCPMapping struct {
-    TLSPort int // The port feproxy should listen on
-    TCPServerAddress string // The ip_address:port for a TCP server feproxy should forward requests to
-}
-
-func (f *TCPMappings) Set(input string) error {
-    err := json.Unmarshal([]byte(input), f)
-    if err != nil {
-        return err
-    }
-    for i, mapping := range *f {
-        if mapping.TLSPort == 0 {
-            return fmt.Errorf("Missing TLSPort in index %v", i)
-        }
-        if mapping.TCPServerAddress == "" {
-            return fmt.Errorf("Missing TCPServerAddress in index %v", i)
-        }
-    }
-    return nil
-}
-
-func (f *TCPMappings) String() string {
-    if f == nil {
-        return "nil"
-    }
-    return fmt.Sprintf("%+v", []TCPMapping(*f))
-}
 
 func openFilePathOrFD(pathOrFD string) (*os.File, error) {
     if fd, err := strconv.Atoi(pathOrFD); err == nil {
@@ -113,6 +75,7 @@ func loadTLSConfig(tlsCert, tlsKey *os.File) (*tls.Config, error) {
 }
 
 func main() {
+    flag.Parse()
     quit := make(chan struct{})
     sigs := make(chan os.Signal, 2)
     signal.Notify(sigs, os.Interrupt, os.Kill)
@@ -143,25 +106,15 @@ func main() {
         log.Fatalf("Failed to listen on https port (%v): %v", *httpsPortSpec, err)
     }
 
-    for i, m := range tcpMappings {
-        tcpListener, err := listenerFromPortOrFD(m.TLSPort)
-        if err != nil {
-            log.Fatalf("Failed to listen on port for TLS mapping (#%v %+v): %v",
-                i, m, err)
-        }
-        StartTCPProxy(tls.NewListener(tcpListener, tlsConfig), m.TCPServerAddress, quit)
-        log.Print("Started TCP proxy server")
-    }
-
-    proxySrv, err := StartHTTPProxy(
-        tlsConfig, httpListener, httpsListener,
-        portRangeStart, portRangeEnd, leaseTTL, quit)
+    l := StartPortLeasor(portRangeStart, portRangeEnd, leaseTTL, quit)
+    tcpProxy := StartTCPProxy(l, tlsConfig, quit)
+    httpProxy, err := StartHTTPProxy(l, tlsConfig, httpListener, httpsListener, quit)
     log.Print("Started HTTP proxy server")
     if err != nil {
         log.Fatalf("Failed to start HTTP proxy server: %v", err)
     }
 
-    _, err = StartRPCServer(proxySrv, rpcPort, quit)
+    _, err = StartRPCServer(l, tcpProxy, httpProxy, rpcPort, quit)
     log.Print("Started rpc server on port ", rpcPort)
     if err != nil {
         log.Fatal("Failed to start RPC server:", err)

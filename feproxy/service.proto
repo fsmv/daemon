@@ -10,12 +10,17 @@ service Feproxy {
 }
 
 message RegisterRequest {
+    // For HTTP: A url pattern that works with http.DefaultServMux
+    // For TCP: ":tcp:port" for the port number feproxy should listen on
     string pattern = 1; // TODO: maybe support multiple patterns for the same IP/port
-    // Set for third party web interfaces that can't take an automatic lease port
-    // Must be outside the range of feproxy's automatic ports
+    // Set for third party web interfaces (or TCP proxy backends) that can't
+    // use an random lease port.
+    // Must be outside the range of feproxy's automatic ports.
     uint32 fixed_port = 2;
     // If true, remove the pattern in the URL of HTTP requests we forward to the
     // backend to hide that it is behind a reverse proxy.
+    //
+    // Ignored for TCP proxies.
     bool strip_pattern = 3;
 }
 

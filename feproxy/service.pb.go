@@ -26,12 +26,17 @@ type RegisterRequest struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
+	// For HTTP: A url pattern that works with http.DefaultServMux
+	// For TCP: ":tcp:port" for the port number feproxy should listen on
 	Pattern string `protobuf:"bytes,1,opt,name=pattern,proto3" json:"pattern,omitempty"` // TODO: maybe support multiple patterns for the same IP/port
-	// Set for third party web interfaces that can't take an automatic lease port
-	// Must be outside the range of feproxy's automatic ports
+	// Set for third party web interfaces (or TCP proxy backends) that can't
+	// use an random lease port.
+	// Must be outside the range of feproxy's automatic ports.
 	FixedPort uint32 `protobuf:"varint,2,opt,name=fixed_port,json=fixedPort,proto3" json:"fixed_port,omitempty"`
 	// If true, remove the pattern in the URL of HTTP requests we forward to the
 	// backend to hide that it is behind a reverse proxy.
+	//
+	// Ignored for TCP proxies.
 	StripPattern bool `protobuf:"varint,3,opt,name=strip_pattern,json=stripPattern,proto3" json:"strip_pattern,omitempty"`
 }
 

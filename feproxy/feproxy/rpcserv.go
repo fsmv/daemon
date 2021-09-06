@@ -17,7 +17,10 @@ import (
 // Methods on this type are exported as rpc calls
 type RPCServ struct {
     feproxy.FeproxyServer
-    proxyServ *ProxyServ
+
+    leasor    *PortLeasor
+    tcpProxy  *TCPProxy
+    httpProxy *HTTPProxy
     quit      chan struct{}
 }
 
@@ -33,19 +36,23 @@ func (s *RPCServ) Register(ctx context.Context, request *feproxy.RegisterRequest
     p, _ := peer.FromContext(ctx)
     client := hostname(p.Addr.String())
 
-    lease, err := s.proxyServ.Register(client, request)
+    var lease *feproxy.Lease
+    var err error
+    if strings.HasPrefix(request.Pattern, tcpProxyPrefix) {
+        lease, err = s.tcpProxy.Register(client, request)
+    } else {
+        lease, err = s.httpProxy.Register(client, request)
+    }
     if err != nil {
         log.Print(err)
         return nil, err
     }
-    log.Printf("Registered forwarder to %v:%v, Pattern: %v, Timeout: %v",
-               client, lease.Port, request.Pattern, lease.Timeout.AsTime())
     return lease, nil
 }
 
 // Unregister unregisters the forwarding rule with the given pattern
 func (s *RPCServ) Unregister(ctx context.Context, lease *feproxy.Lease) (*feproxy.Lease, error) {
-    err := s.proxyServ.Unregister(lease.Pattern)
+    err := s.leasor.Unregister(lease)
     if err != nil {
         log.Print(err)
         return lease, err
@@ -57,7 +64,7 @@ func (s *RPCServ) Unregister(ctx context.Context, lease *feproxy.Lease) (*feprox
 
 // Renew renews the lease on a currently registered pattern
 func (s *RPCServ) Renew(ctx context.Context, lease *feproxy.Lease) (*feproxy.Lease, error) {
-    lease, err := s.proxyServ.Renew(lease.Pattern)
+    lease, err := s.leasor.Renew(lease)
     if err != nil {
         log.Print(err)
         return nil, err
@@ -68,10 +75,13 @@ func (s *RPCServ) Renew(ctx context.Context, lease *feproxy.Lease) (*feproxy.Lea
 }
 
 // StartNew creates a new RPCServ and starts it
-func StartRPCServer(proxyServ *ProxyServ, port uint16,
-              quit chan struct{}) (*RPCServ, error) {
+func StartRPCServer(leasor *PortLeasor, tcpProxy *TCPProxy, httpProxy *HTTPProxy,
+    port uint16, quit chan struct{}) (*RPCServ, error) {
+
     s := &RPCServ{
-        proxyServ: proxyServ,
+        leasor: leasor,
+        tcpProxy: tcpProxy,
+        httpProxy: httpProxy,
         quit:      quit,
     }
     server := grpc.NewServer()
