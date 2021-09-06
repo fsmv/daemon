@@ -1,4 +1,4 @@
-module ask.systems/daemon/register_third_party
+module ask.systems/daemon/assimilate
 
 go 1.17
 
