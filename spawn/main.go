@@ -157,14 +157,15 @@ func copyBinary(oldName string, newDir string, uid, gid int) (string, error) {
     if err != nil {
         return newName, err
     }
-    defer newf.Close()
     if _, err := io.Copy(newf, oldf); err != nil {
+        newf.Close()
         return newName, err
     }
     if err := newf.Chown(uid, gid); err != nil {
+        newf.Close()
         return newName, err
     }
-    return newName, nil
+    return newName, newf.Close()
 }
 
 func StartPrograms(programs []Command) (map[int]*Child, int) {
@@ -234,28 +235,45 @@ func StartPrograms(programs []Command) (map[int]*Child, int) {
         if err != nil {
             log.Fatal("Gid string not an integer. Gid string: %v", u.Gid)
         }
+        groupsStr, err := u.GroupIds()
+        if err != nil {
+            log.Fatal("Failed to lookup groups: %v", err)
+        }
+        var groups []uint32
+        for i,group := range groupsStr {
+            id, err := strconv.Atoi(group)
+            if err != nil {
+                log.Fatal("Supplimental gid #%v string not an integer. Gid string: %v", i, id)
+            }
+            /*if id == gid {
+              continue
+            }*/
+            groups = append(groups, uint32(id))
+        }
         attr.Sys = &syscall.SysProcAttr{
             Credential: &syscall.Credential{
                 Uid: uint32(uid),
                 Gid: uint32(gid),
+                Groups: groups,
             },
         }
         var chrootBinaryCopy string
+        // Copy the binary into the home dir and give the user access
+        chrootBinaryCopy, err = copyBinary(cmd.Filepath, u.HomeDir, uid, gid)
+        if err != nil {
+          log.Printf("%v: Error copying the binary into the chroot: %v",
+          name, err)
+          errCnt++
+          continue
+        }
         if cmd.NoChroot {
             attr.Dir = u.HomeDir
+            // The copy we'll run is at ~/binary
+            cmd.Filepath = filepath.Join(u.HomeDir,filepath.Base(cmd.Filepath))
         } else { // Do a chroot
             attr.Dir = "/"
             attr.Sys.Chroot = u.HomeDir
-
-            // Copy the binary into the chroot and give the user access
-            chrootBinaryCopy, err = copyBinary(cmd.Filepath, u.HomeDir, uid, gid)
-            if err != nil {
-                log.Printf("%v: Error copying the binary into the chroot: %v",
-                    name, err)
-                errCnt++
-                continue
-            }
-            // The hardlink we'll run is at /binary in the chroot
+            // The copy we'll run is at /binary in the chroot
             cmd.Filepath = "/"+filepath.Base(cmd.Filepath)
         }
         // Finalize the argv
@@ -277,6 +295,12 @@ func StartPrograms(programs []Command) (map[int]*Child, int) {
         argv = append(argv, jsonArgs...)
         // Start the process
         proc, err := os.StartProcess(cmd.Filepath, argv, attr)
+        // Don't leave a dangling binary copy if we chrooted
+        defer func() {
+            if chrootBinaryCopy != "" {
+                _ = os.Remove(chrootBinaryCopy)
+            }
+        }()
         c := &Child{
             Cmd: &cmd,
             Proc: proc,
@@ -290,10 +314,6 @@ func StartPrograms(programs []Command) (map[int]*Child, int) {
                 ret[proc.Pid] = c
             }
             continue
-        }
-        // Don't leave a dangling binary copy if we chrooted
-        if chrootBinaryCopy != "" {
-            _ = os.Remove(chrootBinaryCopy)
         }
         ret[proc.Pid] = c
         c.Up = true
@@ -327,6 +347,7 @@ func readConfig(filename string) ([]Command, error) {
         return nil, err
     }
     var ret []Command
+    // TODO: make a reader wrapper that skips comments
     dec := json.NewDecoder(f)
     for dec.More() {
         var cmd Command
