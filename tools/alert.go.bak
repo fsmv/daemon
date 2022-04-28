@@ -1,4 +1,4 @@
-package alert
+package tools
 
 import (
     "fmt"
@@ -53,8 +53,7 @@ func Error(message string, err error) {
 // suppressed 
 func RepeatedError(message string, err error, now time.Time) {
     if lastError != nil && lastError.Error() == err.Error() &&
-       now.Sub(lastErrorTime) < DuplicateErrorDelay
-    {
+       now.Sub(lastErrorTime) < DuplicateErrorDelay {
         duplicateErrorCount += 1
         log.Printf("Duplicate alert: %v: %v", message, err)
     } else {

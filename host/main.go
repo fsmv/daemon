@@ -11,12 +11,12 @@ import (
     "strings"
     "time"
 
-    "daemon/feproxy/proxyserv"
+    "ask.systems/daemon/portal"
 )
 
 var (
-    feproxyAddr = flag.String("feproxy_addr", "127.0.0.1:2048",
-        "Address and port for the feproxy server")
+    portalAddr = flag.String("portal_addr", "127.0.0.1:2048",
+        "Address and port for the portal server")
     webRoot = flag.String("web_root", "",
         "Directory to serve files from")
     urlPath = flag.String("url_path", "/",
@@ -64,20 +64,29 @@ func main() {
     var srv http.Server
     shutdownOnSignals(&srv)
     url := addSlashes(*urlPath)
-    // Register with feproxy and get the port
-    fe, lease := proxyserv.MustConnectAndRegister(*feproxyAddr, url)
-    defer fe.Unregister(lease.Pattern)
-    defer fe.Close()
-    go fe.MustKeepLeaseRenewedForever(lease)
+    lease, err := portal.StartRegistration(*portalAddr, &portal.RegisterRequest{
+      Pattern: url,
+    }, make(chan struct{})) // TODO fix quit channel
+    if err != nil {
+      log.Fatal(err)
+    }
     srv.Addr = ":" + strconv.Itoa(int(lease.Port))
     // Start the server
-    fileServer := http.StripPrefix(url, http.FileServer(http.Dir(*webRoot)))
+    dir := http.Dir(*webRoot)
+    fileServer := http.StripPrefix(url, http.FileServer(dir))
+
+    f, err := dir.Open("/")
+    log.Printf("Test open: %v", err)
+    _, err = f.Stat()
+    log.Printf("Test stat: %v", err)
+    f.Close()
+
     http.HandleFunc(url, func(w http.ResponseWriter, req *http.Request) {
         log.Printf("%v requested %v", req.Header.Get("Orig-Address"), req.URL)
         fileServer.ServeHTTP(w, req)
     })
     log.Print("Starting server...")
-    err := srv.ListenAndServe()
+    err = srv.ListenAndServe()
     if err != nil && err != http.ErrServerClosed {
         log.Fatal("Server died:", err)
     }

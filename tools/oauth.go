@@ -33,7 +33,7 @@
 //
 //
 // TODO: add XSRF token generation and verification to this file
-package util
+package tools
 
 
 import (
