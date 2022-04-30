@@ -15,6 +15,8 @@ import (
     "os/user"
     "syscall"
     "path/filepath"
+
+    "ask.systems/daemon/tools"
 )
 
 var (
@@ -366,8 +368,13 @@ func readConfig(filename string) ([]Command, error) {
     return ret, nil
 }
 
+func init() {
+    if !flag.Parsed() {
+      flag.Parse()
+    }
+}
+
 func main() {
-    flag.Parse()
     commands, err := readConfig(*configFilename)
     if err != nil {
         log.Fatalf("Failed to read config file. error: \"%v\"", err)
@@ -379,12 +386,7 @@ func main() {
     }
 
     quit := make(chan struct{})
-    sigs := make(chan os.Signal, 2)
-    signal.Notify(sigs, os.Interrupt, os.Kill)
-    go func() {
-        <-sigs
-        close(quit)
-    }()
+    tools.CloseOnSignals(quit)
 
     var children map[int]*Child
     childrenMut := &sync.RWMutex{}
@@ -410,4 +412,5 @@ func main() {
     }
 
     <-quit
+    log.Print("Goodbye.")
 }

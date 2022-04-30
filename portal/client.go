@@ -40,6 +40,14 @@ func StartRegistration(portalAddr string, request *RegisterRequest, quit <-chan 
     return lease, nil
 }
 
+func MustStartRegistration(portalAddr string, request *RegisterRequest, quit <-chan struct{}) *Lease {
+  lease, err := StartRegistration(portalAddr, request, quit)
+  if err != nil {
+    log.Fatal(err)
+  }
+  return lease
+}
+
 // Connect to the portal RPC server and don't do anything else. Use this if you
 // want to call the proto RPCs directly.
 func Connect(portalAddr string) (Client, error) {

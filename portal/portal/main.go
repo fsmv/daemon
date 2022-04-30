@@ -8,9 +8,10 @@ import (
     "time"
     "crypto/tls"
     "os"
-    "os/signal"
     "io/ioutil"
     "strconv"
+
+    "ask.systems/daemon/tools"
 )
 
 const (
@@ -74,15 +75,15 @@ func loadTLSConfig(tlsCert, tlsKey *os.File) (*tls.Config, error) {
     return ret, nil
 }
 
-func main() {
+func init() {
+  if !flag.Parsed() {
     flag.Parse()
+  }
+}
+
+func main() {
     quit := make(chan struct{})
-    sigs := make(chan os.Signal, 2)
-    signal.Notify(sigs, os.Interrupt, os.Kill)
-    go func() {
-        <-sigs
-        close(quit)
-    }()
+    tools.CloseOnSignals(quit)
 
     tlsCert, err := openFilePathOrFD(*tlsCertPath)
     if err != nil {
