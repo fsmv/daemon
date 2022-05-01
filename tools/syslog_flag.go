@@ -51,11 +51,14 @@ func (w *timestampWriter) Write(in []byte) (int, error) {
     return n1, err
   }
   // Do two Write calls to avoid copying the input
-  n2, err := w.Writer.Write(in)
-  return n1+n2, err
+  // Return just the n from this write not everything we wrote because
+  // MultiWriter checks if the output size is the same as the input size:
+  // https://cs.opensource.google/go/go/+/refs/tags/go1.18.1:src/io/multi.go;l=64;drc=112f28defcbd8f48de83f4502093ac97149b4da6
+  return w.Writer.Write(in)
 }
 
 func handleSyslogFlag(value string) error {
+  log.Print("Loading syslog...")
   var err error
   // TODO: it would be nice to read the flag value as an address to optionally
   // do remote logging
@@ -64,8 +67,7 @@ func handleSyslogFlag(value string) error {
     return err
   }
   log.SetFlags(0) // Just use the syslog built in timestamp
-  log.SetOutput(io.MultiWriter(
-    &timestampWriter{os.Stdout, "2006/01/02 15:04:05 "},
-    Syslog))
+  log.SetOutput(io.MultiWriter(Syslog,
+    &timestampWriter{os.Stdout, "2006/01/02 15:04:05 "}))
   return nil
 }
