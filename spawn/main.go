@@ -58,6 +58,8 @@ type Command struct {
     // Set to true if you don't want a chroot to the home dir, which is the
     // default
     NoChroot    bool
+    // If unset, cd and/or chroot into $HOME, otherwise use this directory
+    WorkingDir  string
 }
 
 type Child struct {
@@ -259,8 +261,11 @@ func StartPrograms(programs []*Command, children Children) (errCnt int) {
             },
         }
         var chrootBinaryCopy string
+        if cmd.WorkingDir == "" {
+          cmd.WorkingDir = u.HomeDir
+        }
         // Copy the binary into the home dir and give the user access
-        chrootBinaryCopy, err = copyBinary(cmd.Filepath, u.HomeDir, uid, gid)
+        chrootBinaryCopy, err = copyBinary(cmd.Filepath, cmd.WorkingDir, uid, gid)
         if err != nil {
           log.Printf("%v: Error copying the binary into the chroot: %v",
           name, err)
@@ -268,12 +273,12 @@ func StartPrograms(programs []*Command, children Children) (errCnt int) {
           continue
         }
         if cmd.NoChroot {
-            attr.Dir = u.HomeDir
+            attr.Dir = cmd.WorkingDir
             // The copy we'll run is at ~/binary
-            cmd.Filepath = filepath.Join(u.HomeDir,filepath.Base(cmd.Filepath))
+            cmd.Filepath = filepath.Join(cmd.WorkingDir, filepath.Base(cmd.Filepath))
         } else { // Do a chroot
             attr.Dir = "/"
-            attr.Sys.Chroot = u.HomeDir
+            attr.Sys.Chroot = cmd.WorkingDir
             // The copy we'll run is at /binary in the chroot
             cmd.Filepath = "/"+filepath.Base(cmd.Filepath)
         }
