@@ -7,6 +7,7 @@ import (
   "time"
   "io"
   "os"
+  "path/filepath"
 )
 
 var (
@@ -55,7 +56,7 @@ func (w *timestampWriter) Write(in []byte) (int, error) {
 
 func handleSyslogFlag(value string) error {
   var err error
-  Syslog, err = syslog.New(syslog.LOG_INFO | syslog.LOG_USER, os.Args[0])
+  Syslog, err = syslog.New(syslog.LOG_INFO | syslog.LOG_USER, filepath.Base(os.Args[0]))
   if err != nil {
     return err
   }
