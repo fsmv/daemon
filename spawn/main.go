@@ -170,7 +170,7 @@ func copyBinary(oldName string, newDir string, uid, gid int) (string, error) {
     return newName, newf.Close()
 }
 
-func StartPrograms(programs []Command) (map[int]*Child, int) {
+func StartPrograms(programs []*Command) (map[int]*Child, int) {
     var errCnt int = 0
     ret := make(map[int]*Child)
     for i, cmd := range programs {
@@ -304,7 +304,7 @@ func StartPrograms(programs []Command) (map[int]*Child, int) {
             }
         }()
         c := &Child{
-            Cmd: &cmd,
+            Cmd: cmd,
             Proc: proc,
         }
         if err != nil {
@@ -327,9 +327,9 @@ func StartPrograms(programs []Command) (map[int]*Child, int) {
     return ret, errCnt
 }
 
-func ResolveRelativePaths(path string, commands []Command) error {
+func ResolveRelativePaths(path string, commands []*Command) error {
     for i, _ := range commands {
-        cmd := &commands[i]
+        cmd := commands[i]
         if len(cmd.Filepath) == 0 || cmd.Filepath[0] == '/' {
             continue
         }
@@ -343,17 +343,17 @@ func ResolveRelativePaths(path string, commands []Command) error {
     return nil
 }
 
-func readConfig(filename string) ([]Command, error) {
+func readConfig(filename string) ([]*Command, error) {
     f, err := os.Open(filename)
     if err != nil {
         return nil, err
     }
-    var ret []Command
+    var ret []*Command
     // TODO: make a reader wrapper that skips comments
     dec := json.NewDecoder(f)
     for dec.More() {
-        var cmd Command
-        err = dec.Decode(&cmd)
+        cmd := new(Command)
+        err = dec.Decode(cmd)
         if err != nil {
             return nil, fmt.Errorf(
                 "parsing error. filepath: %v, command #%v, error: \"%v\"",
