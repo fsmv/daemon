@@ -170,9 +170,8 @@ func copyBinary(oldName string, newDir string, uid, gid int) (string, error) {
     return newName, newf.Close()
 }
 
-func StartPrograms(programs []*Command) (map[int]*Child, int) {
-    var errCnt int = 0
-    ret := make(map[int]*Child)
+func StartPrograms(programs []*Command, children Children) (errCnt int) {
+    errCnt = 0
     for i, cmd := range programs {
         if len(cmd.Filepath) == 0 {
             log.Printf("Error in Command #%v, Filepath is required", i)
@@ -313,18 +312,22 @@ func StartPrograms(programs []*Command) (map[int]*Child, int) {
             if proc != nil && proc.Pid > 0 {
                 c.Up = false
                 c.Message = fmt.Sprintf("Error starting process: %v", err)
-                ret[proc.Pid] = c
+                children.Lock()
+                children.ByPID[proc.Pid] = c
+                children.Unlock()
             }
             continue
         }
-        ret[proc.Pid] = c
         c.Up = true
+        children.Lock()
+        children.ByPID[proc.Pid] = c
+        children.Unlock()
         log.Printf("Started process: %v; pid: %v", name, proc.Pid)
         log.Printf("Args: %v", argv)
         log.Printf("Waiting %v...", *spawningDelay)
         time.Sleep(*spawningDelay)
     }
-    return ret, errCnt
+    return errCnt
 }
 
 func ResolveRelativePaths(path string, commands []*Command) error {
@@ -368,6 +371,11 @@ func readConfig(filename string) ([]*Command, error) {
     return ret, nil
 }
 
+type Children struct {
+  *sync.Mutex
+  ByPID map[int]*Child
+}
+
 func main() {
     flag.Parse()
     commands, err := readConfig(*configFilename)
@@ -383,12 +391,11 @@ func main() {
     quit := make(chan struct{})
     tools.CloseOnSignals(quit)
 
-    var children map[int]*Child
-    childrenMut := &sync.RWMutex{}
+    children := Children {&sync.Mutex{}, make(map[int]*Child)}
     go MonitorChildrenDeaths(quit, func (pid int, message string) {
-        childrenMut.Lock()
-        defer childrenMut.Unlock()
-        child, ok := children[pid]
+        children.Lock()
+        defer children.Unlock() // need it the whole time we modify child
+        child, ok := children.ByPID[pid]
         if !ok {
             log.Printf("Got death message for unregistered child: %v", message)
             return
@@ -396,14 +403,16 @@ func main() {
         child.Up = false
         child.Message = message
         log.Printf("%v (pid: %v)\n\n%v",
-            children[pid].Cmd.Filepath, pid, message)
+            child.Cmd.Filepath, pid, message)
     })
     // Mutex to make the death message handler wait for data about the children
-    childrenMut.Lock()
-    children, errcnt := StartPrograms(commands)
-    childrenMut.Unlock()
+    errcnt := StartPrograms(commands, children)
     if errcnt != 0 {
         log.Printf("%v errors occurred in spawning", errcnt)
+    }
+    if _, err := StartDashboard(children, quit); err != nil {
+        log.Print("Failed to start dashboard: ", err)
+        // TODO: retry it? Also check the dashboardQuit signal for retries
     }
 
     <-quit
