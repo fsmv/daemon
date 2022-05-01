@@ -20,8 +20,9 @@ var (
 
 func init () {
   flag.Var(BoolFunc(handleSyslogFlag), "use_syslog",
-    "If set, log to the syslog service in addition to stdout when using the go log package.\n"+
-    "Logs under user.info (facility.severity). See man syslog.")
+    "If set, log to the syslog service in addition to stdout when using the go\n"+
+    "log package. Logs under user.info (facility.severity). See also: man syslog.\n"+
+    "To use this in a chroot configure syslogd with the -l flag to create the <chroot>/dev/log file.")
 }
 
 type timestampWriter struct {
@@ -44,7 +45,7 @@ func (w *timestampWriter) Write(in []byte) (int, error) {
 
   // Use AppendFormat to avoid having the time package []byte converted to
   // string then immediately back to []byte
-  time.Now().AppendFormat(b, w.TimeFormat)
+  b = time.Now().AppendFormat(b, w.TimeFormat)
   n1, err := w.Writer.Write(b)
   if err != nil {
     return n1, err
@@ -56,6 +57,8 @@ func (w *timestampWriter) Write(in []byte) (int, error) {
 
 func handleSyslogFlag(value string) error {
   var err error
+  // TODO: it would be nice to read the flag value as an address to optionally
+  // do remote logging
   Syslog, err = syslog.New(syslog.LOG_INFO | syslog.LOG_USER, filepath.Base(os.Args[0]))
   if err != nil {
     return err
