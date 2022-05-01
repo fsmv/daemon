@@ -1,14 +1,14 @@
 package main
 
 import (
-  "fmt"
+  "log"
   "flag"
   "bytes"
-  "html"
+  "embed"
   "net/http"
+  "html/template"
   "crypto/sha256"
   "crypto/subtle"
-  "path/filepath"
   "encoding/base64"
 
   "ask.systems/daemon/portal"
@@ -21,6 +21,8 @@ var (
   passwordHash = flag.String("password_hash", "set me",
     "sha256sum hash of the 'admin' user's basic auth password.")
   wantUsernameHash = sha256.Sum256([]byte("admin"))
+  //go:embed *.tmpl.html
+  templatesFS embed.FS
 )
 
 const (
@@ -28,8 +30,10 @@ const (
 )
 
 type dashboard struct {
-  Children Children
+  Children *Children
   WantPasswordHash []byte
+
+  templates *template.Template
 }
 
 func (d *dashboard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -49,30 +53,41 @@ func (d *dashboard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
   }
   // Auth OK
 
+  if r.Method == "POST" {
+    err := r.ParseForm()
+    if err != nil {
+      log.Print("Recieved invaid form data: ", err)
+      http.Error(w, "Invalid form data", http.StatusBadRequest)
+      return
+    }
+    if r.Form.Get("submit") == "restart" {
+      name := r.Form.Get("name")
+      log.Print("Restart request for ", name)
+      go d.Children.RestartChild(name)
+    }
+  }
+
   d.Children.Lock()
   defer d.Children.Unlock()
-  var out bytes.Buffer
-  out.WriteString("<html><body><ul>")
-  for _, child := range d.Children.ByPID {
-    out.WriteString("<li>")
-    if child.Up {
-      out.WriteString("<span>&nbsp;UP&nbsp;</span>")
-    } else {
-      out.WriteString("<span color=\"red\">DOWN</span>")
-    }
-    out.WriteString(fmt.Sprintf("<span>%v</span>", filepath.Base(child.Cmd.Filepath)))
-    if !child.Up {
-      out.WriteString("<p>")
-      out.WriteString(html.EscapeString(child.Message))
-      out.WriteString("</p>")
-    }
-    out.WriteString("</li>")
+  //sortedChildren := make([]*Child, len(d.Children.ByPID))
+  //for _, child := range d.Children.ByPID {
+  //  sortedChildren = append(sortedChildren, child)
+  //}
+  // TODO: this segfaulted
+  //sort.Slice(sortedChildren, func (i, j int) bool {
+  //  return sortedChildren[i].Name < sortedChildren[j].Name
+  //})
+  var buff bytes.Buffer
+  err := d.templates.ExecuteTemplate(&buff, "dashboard.tmpl.html", d.Children.ByName)
+  if err == nil {
+    w.Write(buff.Bytes())
+  } else {
+    log.Print("Error in dashboard template: ", err)
+    http.Error(w, "Internal Server Error", http.StatusInternalServerError)
   }
-  out.WriteString("</ul></body></html>")
-  w.Write(out.Bytes())
 }
 
-func StartDashboard(children Children, quit chan struct{}) (dashboardQuit chan struct{}, err error) {
+func StartDashboard(children *Children, quit chan struct{}) (dashboardQuit chan struct{}, err error) {
   // If the main  quit closes, shut down the dashboard. But, if the dashboard
   // crashes don't shut down the main process.
   dashboardQuit = make(chan struct{})
@@ -87,12 +102,19 @@ func StartDashboard(children Children, quit chan struct{}) (dashboardQuit chan s
     close(dashboardQuit)
     return dashboardQuit, err
   }
+
+  // Setup the handler
   wantPasswordHash, err := base64.StdEncoding.DecodeString(*passwordHash)
   if err != nil {
     close(dashboardQuit)
     return dashboardQuit, err
   }
-  http.Handle(dashboardUrl, &dashboard{children, wantPasswordHash})
+  templates, err := template.ParseFS(templatesFS, "*.tmpl.html")
+  if err != nil {
+    close(dashboardQuit)
+    return dashboardQuit, err
+  }
+  http.Handle(dashboardUrl, &dashboard{children, wantPasswordHash, templates})
 
   go tools.RunHTTPServer(lease.Port, dashboardQuit)
   return dashboardQuit, nil

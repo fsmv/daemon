@@ -1,0 +1,47 @@
+<!doctype html>
+<html>
+  <head>
+<style>
+span {
+  display: inline-block;
+}
+.status {
+  width: 3.5em;
+  text-align: center;
+}
+.name {
+  min-width: 13em;
+}
+p {
+  margin-bottom: 0;
+}
+form {
+  display: inline;
+}
+</style>
+  </head>
+  <body>
+    <ul>
+      {{range .}}
+      <li>
+        {{if .Up}}
+        <span class="status" style="color:darkgreen">UP</span>
+        {{else}}
+        <span class="status" style="color:red">DOWN</span>
+        {{end}}
+
+        <span class="name">{{.Name}}</span>
+
+        <form method="post">
+          <input type="hidden" name="name" value="{{.Name}}" />
+          <button type="submit" name="submit" value="restart">Restart Server</button>
+        </form>
+
+        {{if not .Up }}
+        <p>{{.Message}}</p>
+        {{end}}
+      </li>
+      {{end}}
+    </ul>
+  </body>
+</html>
