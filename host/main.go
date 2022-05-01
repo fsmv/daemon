@@ -16,8 +16,8 @@ var (
     webRoot = flag.String("web_root", "",
         "Directory to serve files from")
     urlPath = flag.String("url_path", "/",
-        "Url path to serve the files under. Leading and trailing slashes are\n\t" +
-        "optional but encouraged. For example \"/test/\" would serve your files\n\t" +
+        "Url path to serve the files under. Leading and trailing slashes are\n" +
+        "optional but encouraged. For example \"/test/\" would serve your files\n" +
         "under 127.0.0.1/test/.")
 )
 
@@ -34,13 +34,8 @@ func addSlashes(path string) string {
     return b.String()
 }
 
-func init() {
-    if !flag.Parsed() {
-      flag.Parse()
-    }
-}
-
 func main() {
+    flag.Parse()
     quit := make(chan struct{})
     tools.CloseOnSignals(quit)
 

@@ -368,13 +368,8 @@ func readConfig(filename string) ([]Command, error) {
     return ret, nil
 }
 
-func init() {
-    if !flag.Parsed() {
-      flag.Parse()
-    }
-}
-
 func main() {
+    flag.Parse()
     commands, err := readConfig(*configFilename)
     if err != nil {
         log.Fatalf("Failed to read config file. error: \"%v\"", err)

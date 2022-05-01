@@ -75,13 +75,8 @@ func loadTLSConfig(tlsCert, tlsKey *os.File) (*tls.Config, error) {
     return ret, nil
 }
 
-func init() {
-  if !flag.Parsed() {
-    flag.Parse()
-  }
-}
-
 func main() {
+    flag.Parse()
     quit := make(chan struct{})
     tools.CloseOnSignals(quit)
 
