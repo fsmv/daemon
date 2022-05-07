@@ -2,6 +2,7 @@ package main
 
 import (
     "fmt"
+    "log"
     "time"
     "sync"
     "errors"
@@ -81,6 +82,7 @@ func (l *PortLeasor) Register(request *portal.Lease, canceler func()) (*portal.L
 
     request.Timeout = timestamppb.New(time.Now().Add(l.ttl))
     l.leases[request.Port] = lease{request, canceler}
+    log.Print("New lease registered: ", request)
     return request, nil
 }
 
@@ -97,6 +99,7 @@ func (l *PortLeasor) Renew(lease *portal.Lease) (*portal.Lease, error) {
     }
 
     foundLease.Timeout = timestamppb.New(time.Now().Add(l.ttl))
+    log.Print("Lease renewed: ", foundLease)
     return foundLease.Lease, nil
 }
 
@@ -112,6 +115,7 @@ func (l *PortLeasor) Unregister(lease *portal.Lease) error {
         return errors.New("The lease you requested to renew doesn't match our records for that port.")
     }
 
+    log.Print("Lease unregistered: ", foundLease)
     l.deleteLeaseUnsafe(foundLease)
     return nil
 }
@@ -154,6 +158,7 @@ func (l *PortLeasor) monitorTTLs(quit chan struct{}) {
             now := time.Now()
             for _, lease := range l.leases {
                 if now.After(lease.Timeout.AsTime()) {
+                    log.Print("Lease expired: ", lease)
                     l.deleteLeaseUnsafe(lease)
                 }
             }
