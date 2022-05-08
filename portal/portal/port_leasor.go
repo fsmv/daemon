@@ -24,7 +24,7 @@ const ttlCheckFreq = 15*time.Minute
 // port list for each machine connecting to portal but there should be enough
 // ports to just have one list.
 type PortLeasor struct {
-    mut    *sync.RWMutex // Everything in this struct needs the lock
+    mut    *sync.Mutex // Everything in this struct needs the lock
     leases map[uint32]lease // maps the port to the lease
 
     // List of automatic ports to be leased out, in a random order.
@@ -48,7 +48,7 @@ func StartPortLeasor(startPort, endPort uint16, ttl time.Duration, quit chan str
     }
     r := rand.New(rand.NewSource(time.Now().UnixNano()))
     l := &PortLeasor{
-        mut: &sync.RWMutex{},
+        mut: &sync.Mutex{},
         startPort: startPort,
         endPort: endPort,
         ttl: ttl,

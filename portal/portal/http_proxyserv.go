@@ -27,9 +27,8 @@ import (
 // forwarding rules registered at runtime
 type HTTPProxy struct {
     leasor *PortLeasor
-    mut              *sync.RWMutex
-    // Map from pattern to forwarder. Protected by mut.
-    forwarders       map[string]*forwarder
+    // Map from pattern to *forwarder, which must not be modified
+    forwarders sync.Map
 }
 
 // forwarder holds the data for a forwarding rule registered with HTTPProxy
@@ -55,11 +54,7 @@ func (p *HTTPProxy) Register(clientAddr string, request *portal.RegisterRequest)
     lease, err := p.leasor.Register(&portal.Lease{
         Pattern: request.Pattern,
         Port: request.FixedPort,
-    }, func() {
-        p.mut.Lock()
-        delete(p.forwarders, request.Pattern)
-        p.mut.Unlock()
-    })
+    }, func() { p.forwarders.Delete(request.Pattern) })
     if err != nil {
         log.Print("Error registering: ", err)
         return nil, err
@@ -81,8 +76,6 @@ func (p *HTTPProxy) Register(clientAddr string, request *portal.RegisterRequest)
 // http request paths. This is needed for third party applications that expect
 // to get requests for / not /pattern/
 func (p *HTTPProxy) saveForwarder(clientAddr string, lease *portal.Lease, stripPattern bool) error {
-    p.mut.Lock()
-    defer p.mut.Unlock()
     backend, err := url.Parse("http://" + clientAddr + ":" + strconv.Itoa(int(lease.Port)))
     if err != nil {
         return err
@@ -136,7 +129,7 @@ func (p *HTTPProxy) saveForwarder(clientAddr string, lease *portal.Lease, stripP
         Port:    lease.Port,
         Timeout: lease.Timeout.AsTime(),
     }
-    p.forwarders[pattern] = fwd
+    p.forwarders.Store(pattern, fwd)
     return nil
 }
 
@@ -164,19 +157,19 @@ func urlMatchesPattern(url, pattern string) bool{
 //
 // Similar to http.ServeMux.match, see https://golang.org/LICENSE
 func (p *HTTPProxy) selectForwarder(url string) *forwarder {
-    p.mut.RLock()
-    defer p.mut.RUnlock()
     var ret *forwarder = nil
     var maxPatternLen = 0
-    for pattern, fwd := range p.forwarders {
+    p.forwarders.Range(func (key, value interface{}) bool {
+        pattern := key.(string)
         if !urlMatchesPattern(url, pattern) {
-            continue
+            return true
         }
         if ret == nil || len(pattern) > maxPatternLen {
             maxPatternLen = len(pattern)
-            ret = fwd
+            ret = value.(*forwarder)
         }
-    }
+        return true
+    })
     return ret
 }
 
@@ -242,8 +235,6 @@ func StartHTTPProxy(l *PortLeasor, tlsConfig *tls.Config,
     // Start the TLS server
     p := &HTTPProxy{
         leasor: l,
-        mut:        &sync.RWMutex{},
-        forwarders: make(map[string]*forwarder),
     }
     tlsServer := &http.Server{
         Handler: p,
