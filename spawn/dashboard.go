@@ -46,17 +46,8 @@ func (l *logStream) ServeHTTP(w http.ResponseWriter, r *http.Request) {
     http.Error(w, "Streaming is not supported.", http.StatusInternalServerError)
     return
   }
-  serverName := r.URL.Query().Get("server")
-  if serverName == "" {
-    http.Error(w, "Must set the server GET parameter to the server name", http.StatusBadRequest)
-    return
-  }
-  logs, err := l.Children.StreamLogs(serverName)
-  if err != nil {
-    // TODO: any other error types?
-    http.Error(w, err.Error(), http.StatusNotFound)
-  }
-  defer l.Children.CloseLogs(serverName, logs)
+  logs, cancel := l.Children.StreamLogs()
+  defer cancel()
   log.Print("Logs streaming connection started.")
 
   w.Header().Set("Content-Type", "text/event-stream")
@@ -68,8 +59,8 @@ func (l *logStream) ServeHTTP(w http.ResponseWriter, r *http.Request) {
     case <-r.Context().Done():
       log.Print("Logs streaming connection closed.")
       return
-    case data := <-logs:
-      fmt.Fprintf(w, "data: %v\n\n", data)
+    case message := <-logs:
+      fmt.Fprintf(w, "event: %v\ndata: %v\n\n", message.Tag, message.Line)
       flusher.Flush()
     }
   }
@@ -121,14 +112,6 @@ func (d *dashboard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
   d.Children.Lock()
   defer d.Children.Unlock()
-  //sortedChildren := make([]*Child, len(d.Children.ByPID))
-  //for _, child := range d.Children.ByPID {
-  //  sortedChildren = append(sortedChildren, child)
-  //}
-  // TODO: this segfaulted
-  //sort.Slice(sortedChildren, func (i, j int) bool {
-  //  return sortedChildren[i].Name < sortedChildren[j].Name
-  //})
   var buff bytes.Buffer
   err := d.templates.ExecuteTemplate(&buff, "dashboard.tmpl.html", d.Children.ByName)
   if err == nil {

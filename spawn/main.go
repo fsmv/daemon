@@ -20,6 +20,12 @@ import (
   "ask.systems/daemon/tools"
 )
 
+const (
+  kLogLinesBufferSize = 1024 // Shared across all servers
+  kSubscriptionChannelSize = kLogLinesBufferSize
+  kPublishChannelSize = 32
+)
+
 var (
   configFilename = flag.String("config", "config",
     "The path to the config file")
@@ -69,23 +75,22 @@ type Child struct {
   Name    string
   Cmd     *Command
   Proc    *os.Process
-  LogHandler logHandler
 }
 
 type Children struct {
   *sync.Mutex
+  *logHandler
   // Note the PID map will contain all old instances of servers
   ByPID  map[int]*Child
   ByName map[string]*Child
-  quit   chan struct{}
 }
 
 func NewChildren(quit chan struct{}) *Children {
   return &Children {
     &sync.Mutex{},
+    NewLogHandler(quit),
     make(map[int]*Child),
     make(map[string]*Child),
-    quit,
   }
 }
 
@@ -134,14 +139,19 @@ func (c *Children) ReportDown(pid int, message error) {
   log.Printf("%v (pid: %v)\n\n%v", child.Cmd.Filepath, pid, message)
 }
 
+type  LogMessage struct {
+  Line string
+  Tag string
+}
+
 // Not thread safe
 type ringBuffer struct {
-  buffer [256]string
+  buffer [kLogLinesBufferSize]LogMessage
   nextLine int
   filled bool
 }
 
-func (r *ringBuffer) Push(line string) {
+func (r *ringBuffer) Push(line LogMessage) {
   r.buffer[r.nextLine] = line
   r.nextLine++
   if r.nextLine == len(r.buffer) {
@@ -150,14 +160,14 @@ func (r *ringBuffer) Push(line string) {
   }
 }
 
-func (r *ringBuffer) Copy() []string {
+func (r *ringBuffer) Copy() []LogMessage {
   var length int
   if r.filled {
     length = len(r.buffer)
   } else {
     length = r.nextLine
   }
-  ret := make([]string, length)
+  ret := make([]LogMessage, length)
   if !r.filled || r.nextLine == 0 {
     copy(ret, r.buffer[:])
   } else {
@@ -171,53 +181,44 @@ type logHandler struct {
   logLines ringBuffer
   // Broadcasting system
   quit chan struct{}
-  publish chan string
-  subscribe chan chan string
+  publish chan LogMessage
+  subscribe chan chan<- LogMessage
+  subscribers map[chan<- LogMessage]struct{}
 }
 
-func (h *logHandler) HandleLogs(logs *os.File, quit chan struct{}) {
-  if h.publish != nil {
-    return
+func NewLogHandler(quit chan struct{}) *logHandler {
+  h := &logHandler{
+    quit: quit,
+    subscribers: make(map[chan<- LogMessage]struct{}),
+    publish: make(chan LogMessage, kPublishChannelSize),
+    subscribe: make(chan chan<- LogMessage),
   }
-  subscribers := make(map[chan string]bool)
-  h.quit = quit
-  h.publish = make(chan string, 80)
-  h.subscribe = make(chan chan string)
-  go func() {
-    defer logs.Close()
-    r := bufio.NewReader(logs)
-    for {
-      line, err := r.ReadString('\n')
-      if err != nil {
-        log.Print("Failed reading logs: ", err)
-        return
-      }
-      fmt.Print(line)
-      h.publish <- line
-      select {
-      case <-h.quit:
-        return
-      default:
-      }
-    }
-  }()
+  go h.run()
+  return h
+}
+
+// Broadcasts all the lines sent to the publish channel from HandleLogs to all
+// of the subscribers
+func (h *logHandler) run() {
   for {
     select {
     case <-h.quit:
       return
     case sub := <-h.subscribe:
-      if subscribers[sub] {
-        delete(subscribers, sub)
+      if _, ok := h.subscribers[sub]; ok {
+        delete(h.subscribers, sub)
       } else {
+        // New subscribers get the history buffer
         lines := h.logLines.Copy()
         for _, line := range lines {
           sub <- line
         }
-        subscribers[sub] = true
+
+        h.subscribers[sub] = struct{}{}
       }
     case m := <-h.publish:
       h.logLines.Push(m)
-      for sub, _ := range subscribers {
+      for sub, _ := range h.subscribers {
         // TODO: maybe timeout or non-blocking with select default
         sub <- m
       }
@@ -225,36 +226,33 @@ func (h *logHandler) HandleLogs(logs *os.File, quit chan struct{}) {
   }
 }
 
-func (h *logHandler) Stream() chan string{
-  sub := make(chan string)
-  h.subscribe <- sub
-  return sub
-}
-
-// Only pass in a channel returned from Stream
-func (h *logHandler) Unsubscribe(sub chan string) {
-  h.subscribe <- sub
-  close(sub)
-}
-
-func (c *Children) StreamLogs(name string) (chan string, error) {
-  c.Lock()
-  child, ok := c.ByName[name]
-  c.Unlock()
-  if !ok {
-    return nil, fmt.Errorf("%#v not found", name)
+// Publish a logs file or pipe to all of the subscribers of the handler
+func (h *logHandler) HandleLogs(logs *os.File, tag string) {
+  defer logs.Close()
+  r := bufio.NewReader(logs)
+  for {
+    line, err := r.ReadString('\n')
+    if err != nil {
+      log.Print("Failed reading logs: ", err)
+      return
+    }
+    fmt.Printf("%v: %v", tag, line) // for running spawn on commandline and not using syslog
+    h.publish <- LogMessage{Line: line, Tag: tag}
+    select {
+    case <-h.quit:
+      return
+    default:
+    }
   }
-  return child.LogHandler.Stream(), nil
 }
 
-func (c *Children) CloseLogs(name string, logs chan string) {
-  c.Lock()
-  child, ok := c.ByName[name]
-  c.Unlock()
-  if !ok {
-    return
+func (h *logHandler) StreamLogs() (stream <-chan LogMessage, cancel func()) {
+  sub := make(chan LogMessage, kSubscriptionChannelSize)
+  h.subscribe <- sub
+  return sub, func() {
+    h.subscribe <- sub
+    close(sub)
   }
-  child.LogHandler.Unsubscribe(logs)
 }
 
 func makeDeadChildMessage(status syscall.WaitStatus,
@@ -490,7 +488,7 @@ func (children *Children) StartProgram(cmd *Command) error {
     Proc: proc,
     Name: name,
   }
-  go c.LogHandler.HandleLogs(r, children.quit)
+  go children.HandleLogs(r, name)
   if err != nil {
     msg := fmt.Errorf("failed starting process: %v", err)
     if proc != nil && proc.Pid > 0 {

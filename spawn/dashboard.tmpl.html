@@ -33,40 +33,25 @@ li.server {
 }
 </style>
 <script>
+  const eventSource= new EventSource(`/spawn/logs`);
   var streams = new Map()
 
-  function StreamLogs(e, serverName) {
-    // Set the button to turn off logs
-    e.target.innerHTML = "Stop Streaming Logs";
-    e.target.onclick = (e) => Stop(e, serverName);
-
-    const eventSource = new EventSource(`/spawn/logs?server=${encodeURIComponent(serverName)}`);
-    const logsElm = document.getElementById(`logs-${serverName}`);
-    logsElm.style = '';
-    logsElm.innerHTML = '';
-    eventSource.onmessage = function(event) {
-        text = document.createTextNode(event.data+"\n");
-        logsElm.appendChild(text);
-      };
-    eventSource.onerror = function(err) {
-        logsElm.appendChild(document.createTextNode("Error streaming logs.\n"));
-      };
-    streams.set(serverName, eventSource);
-    return eventSource;
+  function Setup() {
+    [...document.getElementsByClassName("name")].forEach(elm => {
+        StreamLogs(elm.innerHTML)
+      })
   }
 
-  function Stop(e, serverName) {
-    var eventSrc = streams.get(serverName);
-    eventSrc.close();
-
-    e.target.innerHTML = "Stream Logs";
-    e.target.onclick = (e) => StreamLogs(e, serverName);
+  function StreamLogs(serverName) {
     const logsElm = document.getElementById(`logs-${serverName}`);
-    logsElm.appendChild(document.createTextNode("Logging streaming stopped.\n"));
+    eventSource.addEventListener(serverName, function(event) {
+        text = document.createTextNode(event.data+"\n");
+        logsElm.appendChild(text);
+      });
   }
 </script>
   </head>
-  <body>
+  <body onload="Setup();">
     <ul>
       {{range .}}
       <li class="server">
@@ -83,8 +68,7 @@ li.server {
           <button type="submit" name="submit" value="restart">Restart Server</button>
         </form>
 
-        <button onclick="StreamLogs(event, '{{.Name}}');">Stream Logs</button>
-        <pre class="logs" style="display:none;" id="logs-{{.Name}}"></pre>
+        <pre class="logs" id="logs-{{.Name}}"></pre>
 
         {{if not .Up }}
         <p>{{.Message}}</p>
