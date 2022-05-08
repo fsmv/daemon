@@ -1,10 +1,9 @@
 package main
 
 import (
+    "log"
     "flag"
     "net/http"
-    "log"
-    "strings"
 
     "ask.systems/daemon/portal"
     "ask.systems/daemon/tools"
@@ -21,25 +20,12 @@ var (
         "under 127.0.0.1/test/.")
 )
 
-func addSlashes(path string) string {
-    var b strings.Builder
-    b.Grow(len(path)+2)
-    if (path[0] != '/') {
-        b.WriteRune('/')
-    }
-    b.WriteString(path)
-    if (path[len(path)-1] != '/') {
-        b.WriteRune('/')
-    }
-    return b.String()
-}
-
 func main() {
     flag.Parse()
     quit := make(chan struct{})
     tools.CloseOnSignals(quit)
 
-    url := addSlashes(*urlPath)
+    url := portal.MakeFullPattern(*urlPath)
     lease := portal.MustStartRegistration(*portalAddr, &portal.RegisterRequest{
       Pattern: url,
     }, quit)

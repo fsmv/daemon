@@ -6,6 +6,7 @@ import (
     "log"
     "fmt"
     "context"
+    "strings"
 
     "google.golang.org/grpc"
 )
@@ -167,4 +168,19 @@ func MustConnectAndRegisterThirdParty(portalAddr string, thirdPartyPort uint16, 
 func (c Client) Unregister(pattern string) error {
     _, err := c.RPC.Unregister(context.Background(), &Lease{Pattern:pattern})
     return err
+}
+
+// Adds slashes to the beginning and end of a given path so that the given path
+// will match all subpaths in serving
+func MakeFullPattern(path string) string {
+    var b strings.Builder
+    b.Grow(len(path)+2)
+    if (path[0] != '/') {
+        b.WriteRune('/')
+    }
+    b.WriteString(path)
+    if (path[len(path)-1] != '/') {
+        b.WriteRune('/')
+    }
+    return b.String()
 }

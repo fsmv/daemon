@@ -21,15 +21,16 @@ var (
     "Address and port for the portal server")
   passwordHash = flag.String("password_hash", "set me",
     "sha256sum hash of the 'admin' user's basic auth password.")
+  dashboardUrlFlag = flag.String("dashboard_url", "/daemon/",
+    "The url to serve the dashboard for this spawn instance. If you have multiple servers running spawn, they need different URLs. Slashes are optional.")
   wantUsernameHash = sha256.Sum256([]byte("admin"))
   wantPasswordHash []byte
   //go:embed *.tmpl.html
   templatesFS embed.FS
-)
 
-const (
-  dashboardUrl = "/daemon/"
-  logsUrl = dashboardUrl + "logs"
+  // Setup in StartDashboard
+  dashboardUrl string
+  logsUrl string
 )
 
 type logStream struct {
@@ -123,6 +124,9 @@ func (d *dashboard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func StartDashboard(children *Children, quit chan struct{}) (dashboardQuit chan struct{}, err error) {
+  dashboardUrl = portal.MakeFullPattern(*dashboardUrlFlag)
+  logsUrl = dashboardUrl + "logs"
+
   // If the main  quit closes, shut down the dashboard. But, if the dashboard
   // crashes don't shut down the main process.
   dashboardQuit = make(chan struct{})
