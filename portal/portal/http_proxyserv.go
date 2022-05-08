@@ -37,17 +37,31 @@ type forwarder struct {
     Handler http.Handler
     Timeout time.Time
     Pattern string
-    Port    uint16
+    Port    uint32
 }
 
 // Register leases a new forwarder for the given pattern.
 // Returns an error if the server has no more ports to lease.
 func (p *HTTPProxy) Register(clientAddr string, request *portal.RegisterRequest) (*portal.Lease, error) {
+    if oldFwd := p.selectForwarder(request.Pattern); oldFwd != nil {
+        if oldFwd.Pattern != request.Pattern {
+            err := fmt.Errorf("Another pattern %#v already covers your requested pattern %#v", oldFwd.Pattern, request.Pattern)
+            log.Print("Error registering: ", err)
+            return nil, err
+        }
+        log.Print("Replacing existing lease with the same pattern: %#v", request.Pattern)
+        p.leasor.UnregisterPort(oldFwd.Port) // ignore not registered error
+    }
     lease, err := p.leasor.Register(&portal.Lease{
         Pattern: request.Pattern,
         Port: request.FixedPort,
-    }, func() { delete(p.forwarders, request.Pattern) })
+    }, func() {
+        p.mut.Lock()
+        delete(p.forwarders, request.Pattern)
+        p.mut.Unlock()
+    })
     if err != nil {
+        log.Print("Error registering: ", err)
         return nil, err
     }
 
@@ -119,7 +133,7 @@ func (p *HTTPProxy) saveForwarder(clientAddr string, lease *portal.Lease, stripP
     fwd := &forwarder{
         Handler: proxy,
         Pattern: pattern,
-        Port:    uint16(lease.Port),
+        Port:    lease.Port,
         Timeout: lease.Timeout.AsTime(),
     }
     p.forwarders[pattern] = fwd

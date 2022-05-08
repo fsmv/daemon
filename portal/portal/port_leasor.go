@@ -90,8 +90,8 @@ func (l *PortLeasor) Renew(lease *portal.Lease) (*portal.Lease, error) {
     l.mut.Lock()
     defer l.mut.Unlock()
 
-    foundLease := l.leases[lease.Port]
-    if foundLease.Lease == nil {
+    foundLease, ok := l.leases[lease.Port]
+    if !ok || foundLease.Lease == nil {
         return nil, errors.New("Not registered")// TODO: unregistered error
     }
     if !proto.Equal(foundLease.Lease, lease) {
@@ -113,6 +113,20 @@ func (l *PortLeasor) Unregister(lease *portal.Lease) error {
     }
     if !proto.Equal(foundLease.Lease, lease) {
         return errors.New("The lease you requested to renew doesn't match our records for that port.")
+    }
+
+    log.Print("Lease unregistered: ", foundLease)
+    l.deleteLeaseUnsafe(foundLease)
+    return nil
+}
+
+func (l *PortLeasor) UnregisterPort(port uint32) error {
+    l.mut.Lock()
+    defer l.mut.Unlock()
+
+    foundLease := l.leases[port]
+    if foundLease.Lease == nil {
+        return errors.New("Not registered")// TODO: unregistered error
     }
 
     log.Print("Lease unregistered: ", foundLease)
