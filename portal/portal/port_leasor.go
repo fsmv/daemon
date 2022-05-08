@@ -15,6 +15,7 @@ import (
 
 // How often to look through the Leases and unregister those past TTL
 const ttlCheckFreq = 15*time.Minute
+var FixedPortTakenErr = errors.New("Requested fixed port is already taken!")
 
 // Manages a list of leases for ports client servers should listen on.
 // Also handles expiration of the leases.
@@ -67,14 +68,21 @@ func (l *PortLeasor) Register(request *portal.Lease, canceler func()) (*portal.L
     // Either use the fixed port or select a port automatically
     if request.Port != 0 {
         if (request.Port >= uint32(l.startPort) && request.Port <= uint32(l.endPort)) {
+            canceler()
             return nil, fmt.Errorf("Fixed port %v must not be in the reserved portal client range: [%v, %v]", request.Port, l.startPort, l.endPort)
         }
         if (request.Port >= 1 << 16) {
-            return nil, fmt.Errorf("Fixed port (%v) out of possiible port range: must be less than 2^16", request.Port)
+            canceler()
+            return nil, fmt.Errorf("%w Requested Port: %v", FixedPortTakenErr, request.Port)
+        }
+        if oldLease, ok := l.leases[request.Port]; ok {
+            canceler()
+            return oldLease.Lease, fmt.Errorf("Fixed port (%v) already taken.", request.Port)
         }
     } else {
         port, err := l.reservePortUnsafe()
         if err != nil {
+            canceler()
             return nil, err
         }
         request.Port = port

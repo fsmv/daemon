@@ -1,11 +1,12 @@
 package main
 
 import (
-    "log"
     "io"
+    "log"
     "fmt"
-    "strings"
     "net"
+    "sync"
+    "strings"
     "crypto/tls"
 
     "ask.systems/daemon/portal"
@@ -18,6 +19,7 @@ type TCPProxy struct {
     leasor *PortLeasor
     tlsConfig *tls.Config
     quit chan struct{}
+    leases sync.Map
 }
 
 func StartTCPProxy(l *PortLeasor, tlsConfig *tls.Config, quit chan struct{}) *TCPProxy {
@@ -29,10 +31,22 @@ func StartTCPProxy(l *PortLeasor, tlsConfig *tls.Config, quit chan struct{}) *TC
 }
 
 func (p *TCPProxy) Register(clientAddr string, request *portal.RegisterRequest) (*portal.Lease, error) {
+    oldLease, loaded := p.leases.LoadOrStore(request.Pattern, nil)
+    if loaded {
+      if oldLease == nil {
+        return nil, fmt.Errorf("Someone else is simultaneously leasing this port")
+      }
+      log.Printf("Replacing an existing lease for the same TCP pattern: %#v", request.Pattern)
+      p.leasor.Unregister(oldLease.(*portal.Lease))
+    }
     cancelLease := make(chan struct{})
     go func() {
-        <-p.quit
-        close(cancelLease)
+        select {
+        case <-p.quit:
+          close(cancelLease)
+        case <-cancelLease:
+          return
+        }
     }()
     lease, err := p.leasor.Register(&portal.Lease{
         Pattern: request.Pattern,
@@ -49,6 +63,7 @@ func (p *TCPProxy) Register(clientAddr string, request *portal.RegisterRequest) 
     serverAddress := fmt.Sprintf("%v:%v", clientAddr, lease.Port)
     startTCPProxy(listener, serverAddress, cancelLease)
     log.Printf("Started a TCP proxy forwarding %v to %v.", port, serverAddress)
+    p.leases.Store(request.Pattern, lease)
     return lease, nil
 }
 

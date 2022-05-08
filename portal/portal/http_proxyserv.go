@@ -48,7 +48,7 @@ func (p *HTTPProxy) Register(clientAddr string, request *portal.RegisterRequest)
             log.Print("Error registering: ", err)
             return nil, err
         }
-        log.Print("Replacing existing lease with the same pattern: %#v", request.Pattern)
+        log.Printf("Replacing existing lease with the same pattern: %#v", request.Pattern)
         p.leasor.UnregisterPort(oldFwd.Port) // ignore not registered error
     }
     lease, err := p.leasor.Register(&portal.Lease{
