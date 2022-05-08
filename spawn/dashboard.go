@@ -1,6 +1,7 @@
 package main
 
 import (
+  "fmt"
   "log"
   "flag"
   "bytes"
@@ -21,34 +22,85 @@ var (
   passwordHash = flag.String("password_hash", "set me",
     "sha256sum hash of the 'admin' user's basic auth password.")
   wantUsernameHash = sha256.Sum256([]byte("admin"))
+  wantPasswordHash []byte
   //go:embed *.tmpl.html
   templatesFS embed.FS
 )
 
 const (
   dashboardUrl = "/spawn/"
+  logsUrl = "/spawn/logs"
 )
+
+type logStream struct {
+  Children *Children
+}
+
+func (l *logStream) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+  if !checkAuth(w, r) {
+    return
+  }
+
+  flusher, ok := w.(http.Flusher)
+  if !ok {
+    http.Error(w, "Streaming is not supported.", http.StatusInternalServerError)
+    return
+  }
+  serverName := r.URL.Query().Get("server")
+  if serverName == "" {
+    http.Error(w, "Must set the server GET parameter to the server name", http.StatusBadRequest)
+    return
+  }
+  logs, err := l.Children.StreamLogs(serverName)
+  if err != nil {
+    // TODO: any other error types?
+    http.Error(w, err.Error(), http.StatusNotFound)
+  }
+  defer l.Children.CloseLogs(serverName, logs)
+  log.Print("Logs streaming connection started.")
+
+  w.Header().Set("Content-Type", "text/event-stream")
+  w.Header().Set("Connection", "keep-alive")
+  w.Header().Set("Cache-Control", "no-cache")
+  w.Header().Set("Access-Control-Allow-Origin", "*")
+  for {
+    select {
+    case <-r.Context().Done():
+      log.Print("Logs streaming connection closed.")
+      return
+    case data := <-logs:
+      fmt.Fprintf(w, "data: %v\n\n", data)
+      flusher.Flush()
+    }
+  }
+}
 
 type dashboard struct {
   Children *Children
-  WantPasswordHash []byte
 
   templates *template.Template
 }
 
-func (d *dashboard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func checkAuth(w http.ResponseWriter, r *http.Request) bool {
   u, p, ok := r.BasicAuth()
   if !ok {
     w.Header().Set("WWW-Authenticate", `Basic realm="daemon", charset="UTF-8"`)
     http.Error(w, "Unauthorized", http.StatusUnauthorized)
-    return
+    return false
   }
   uh := sha256.Sum256([]byte(u))
   ph := sha256.Sum256([]byte(p))
   userMatch := (1 == subtle.ConstantTimeCompare(uh[:], wantUsernameHash[:]))
-  passMatch := (1 == subtle.ConstantTimeCompare(ph[:], d.WantPasswordHash))
+  passMatch := (1 == subtle.ConstantTimeCompare(ph[:], wantPasswordHash[:]))
   if !(userMatch && passMatch) {
     http.Error(w, "Unauthorized", http.StatusUnauthorized)
+    return false
+  }
+  return true
+}
+
+func (d *dashboard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+  if !checkAuth(w, r) {
     return
   }
   // Auth OK
@@ -104,7 +156,7 @@ func StartDashboard(children *Children, quit chan struct{}) (dashboardQuit chan 
   }
 
   // Setup the handler
-  wantPasswordHash, err := base64.StdEncoding.DecodeString(*passwordHash)
+  wantPasswordHash, err = base64.StdEncoding.DecodeString(*passwordHash)
   if err != nil {
     close(dashboardQuit)
     return dashboardQuit, err
@@ -114,7 +166,8 @@ func StartDashboard(children *Children, quit chan struct{}) (dashboardQuit chan 
     close(dashboardQuit)
     return dashboardQuit, err
   }
-  http.Handle(dashboardUrl, &dashboard{children, wantPasswordHash, templates})
+  http.Handle(dashboardUrl, &dashboard{children, templates})
+  http.Handle(logsUrl, &logStream{children})
 
   go tools.RunHTTPServer(lease.Port, dashboardQuit)
   return dashboardQuit, nil

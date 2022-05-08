@@ -13,17 +13,61 @@ span {
   min-width: 13em;
 }
 p {
+  margin-top: 0.5em;
   margin-bottom: 0;
 }
 form {
   display: inline;
 }
+pre.logs {
+  background-color: #EEE;
+  margin: 0.5em 4.5em 0;
+  display: flex;
+  flex-direction: column-reverse;
+  overflow: auto;
+  max-height: 15em;
+  min-height: 1.5em;
+}
+li.server {
+  margin-bottom: 0.5em;
+}
 </style>
+<script>
+  var streams = new Map()
+
+  function StreamLogs(e, serverName) {
+    // Set the button to turn off logs
+    e.target.innerHTML = "Stop Streaming Logs";
+    e.target.onclick = (e) => Stop(e, serverName);
+
+    const eventSource = new EventSource(`/spawn/logs?server=${encodeURIComponent(serverName)}`);
+    const logsElm = document.getElementById(`logs-${serverName}`);
+    logsElm.style = "";
+    eventSource.onmessage = function(event) {
+        logsElm.appendChild(document.createTextNode(event.data+"\n"));
+      };
+    eventSource.onerror = function(err) {
+        logsElm.appendChild(document.createTextNode("Error streaming logs."));
+      };
+    streams.set(serverName, eventSource);
+    return eventSource;
+  }
+
+  function Stop(e, serverName) {
+    var eventSrc = streams.get(serverName);
+    eventSrc.close();
+
+    e.target.innerHTML = "Stream Logs";
+    e.target.onclick = (e) => StreamLogs(e, serverName);
+    const logsElm = document.getElementById(`logs-${serverName}`);
+    logsElm.appendChild(document.createTextNode("Logging streaming stopped.\n"));
+  }
+</script>
   </head>
   <body>
     <ul>
       {{range .}}
-      <li>
+      <li class="server">
         {{if .Up}}
         <span class="status" style="color:darkgreen">UP</span>
         {{else}}
@@ -36,6 +80,9 @@ form {
           <input type="hidden" name="name" value="{{.Name}}" />
           <button type="submit" name="submit" value="restart">Restart Server</button>
         </form>
+
+        <button onclick="StreamLogs(event, '{{.Name}}');">Stream Logs</button>
+        <pre class="logs" style="display:none;" id="logs-{{.Name}}"></pre>
 
         {{if not .Up }}
         <p>{{.Message}}</p>

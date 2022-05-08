@@ -9,6 +9,7 @@ import (
   "flag"
   "sync"
   "time"
+  "bufio"
   "strconv"
   "syscall"
   "os/user"
@@ -68,6 +69,7 @@ type Child struct {
   Name    string
   Cmd     *Command
   Proc    *os.Process
+  LogHandler logHandler
 }
 
 type Children struct {
@@ -75,13 +77,15 @@ type Children struct {
   // Note the PID map will contain all old instances of servers
   ByPID  map[int]*Child
   ByName map[string]*Child
+  quit   chan struct{}
 }
 
-func NewChildren() *Children {
+func NewChildren(quit chan struct{}) *Children {
   return &Children {
     &sync.Mutex{},
     make(map[int]*Child),
     make(map[string]*Child),
+    quit,
   }
 }
 
@@ -114,7 +118,7 @@ func (c *Children) RestartChild(name string) {
     proc.Wait()
     c.ReportDown(proc.Pid, fmt.Errorf("Killed for restart"))
   }
-  StartProgram(cmd, c)
+  c.StartProgram(cmd)
 }
 
 func (c *Children) ReportDown(pid int, message error) {
@@ -128,6 +132,95 @@ func (c *Children) ReportDown(pid int, message error) {
   child.Up = false
   child.Message = message
   log.Printf("%v (pid: %v)\n\n%v", child.Cmd.Filepath, pid, message)
+}
+
+type logHandler struct {
+  // TODO Ring buffer of log lines history for when a client connects
+  logLines [256]string
+  lastLine int
+  linesFilled bool
+
+  // Broadcasting system
+  quit chan struct{}
+  publish chan string
+  subscribe chan chan string
+}
+
+func (h *logHandler) HandleLogs(logs *os.File, quit chan struct{}) {
+  if h.publish != nil {
+    return
+  }
+  subscribers := make(map[chan string]bool)
+  h.quit = quit
+  h.publish = make(chan string)
+  h.subscribe = make(chan chan string)
+  go func() {
+    defer logs.Close()
+    r := bufio.NewReader(logs)
+    for {
+      line, err := r.ReadString('\n')
+      if err != nil {
+        log.Print("Failed reading logs: ", err)
+        return
+      }
+      fmt.Print(line)
+      h.publish <- line
+      select {
+      case <-h.quit:
+        return
+      default:
+      }
+    }
+  }()
+  for {
+    select {
+    case <-h.quit:
+      return
+    case sub := <-h.subscribe:
+      if subscribers[sub] {
+        delete(subscribers, sub)
+      } else {
+        subscribers[sub] = true
+      }
+    case m := <-h.publish:
+      for sub, _ := range subscribers {
+        // TODO: maybe timeout or non-blocking with select default
+        sub <- m
+      }
+    }
+  }
+}
+
+func (h *logHandler) Stream() chan string{
+  sub := make(chan string)
+  h.subscribe <- sub
+  return sub
+}
+
+// Only pass in a channel returned from Stream
+func (h *logHandler) Unsubscribe(sub chan string) {
+  h.subscribe <- sub
+  close(sub)
+}
+
+func (c *Children) StreamLogs(name string) (chan string, error) {
+  c.Lock()
+  child, ok := c.ByName[name]
+  c.Unlock()
+  if !ok {
+    return nil, fmt.Errorf("%#v not found", name)
+  }
+  return child.LogHandler.Stream(), nil
+}
+
+func (c *Children) CloseLogs(name string, logs chan string) {
+  c.Lock()
+  child, ok := c.ByName[name]
+  c.Unlock()
+  if !ok {
+    return
+  }
+  child.LogHandler.Unsubscribe(logs)
 }
 
 func makeDeadChildMessage(status syscall.WaitStatus,
@@ -231,10 +324,10 @@ func copyBinary(oldName string, newDir string, uid, gid int) (string, error) {
   return newName, newf.Close()
 }
 
-func StartPrograms(programs []*Command, children *Children) (errCnt int) {
+func (c *Children) StartPrograms(programs []*Command) (errCnt int) {
   errCnt = 0
   for i, cmd := range programs {
-    err := StartProgram(cmd, children)
+    err := c.StartProgram(cmd)
     if err != nil {
       log.Printf("Error in Command #%v: %v", i, err)
       errCnt++
@@ -244,7 +337,7 @@ func StartPrograms(programs []*Command, children *Children) (errCnt int) {
   return errCnt
 }
 
-func StartProgram(cmd *Command, children *Children) error {
+func (children *Children) StartProgram(cmd *Command) error {
   if len(cmd.Filepath) == 0 {
     return fmt.Errorf("Filepath is required")
   }
@@ -270,8 +363,6 @@ func StartProgram(cmd *Command, children *Children) error {
     }
     files = append(files, openedFiles...)
   }
-  // TODO: not a permanant solution, could have race condition issues.
-  go io.Copy(os.Stdout, r)
   attr := &os.ProcAttr{
     Env: []string{""},
     Files: files,
@@ -357,6 +448,7 @@ func StartProgram(cmd *Command, children *Children) error {
   }
   argv := append([]string{binpath}, cmd.Args...)
   argv = append(argv, jsonArgs...)
+
   // Start the process
   proc, err := os.StartProcess(binpath, argv, attr)
   c := &Child{
@@ -364,6 +456,7 @@ func StartProgram(cmd *Command, children *Children) error {
     Proc: proc,
     Name: name,
   }
+  go c.LogHandler.HandleLogs(r, children.quit)
   if err != nil {
     msg := fmt.Errorf("failed starting process: %v", err)
     if proc != nil && proc.Pid > 0 {
@@ -438,10 +531,10 @@ func main() {
     quit := make(chan struct{})
     tools.CloseOnSignals(quit)
 
-    children := NewChildren()
+    children := NewChildren(quit)
     go children.MonitorDeaths(quit)
     // Mutex to make the death message handler wait for data about the children
-    errcnt := StartPrograms(commands, children)
+    errcnt := children.StartPrograms(commands)
     if errcnt != 0 {
         log.Printf("%v errors occurred in spawning", errcnt)
     }
