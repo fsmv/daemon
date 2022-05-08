@@ -134,12 +134,41 @@ func (c *Children) ReportDown(pid int, message error) {
   log.Printf("%v (pid: %v)\n\n%v", child.Cmd.Filepath, pid, message)
 }
 
-type logHandler struct {
-  // TODO Ring buffer of log lines history for when a client connects
-  logLines [256]string
-  lastLine int
-  linesFilled bool
+// Not thread safe
+type ringBuffer struct {
+  buffer [256]string
+  nextLine int
+  filled bool
+}
 
+func (r *ringBuffer) Push(line string) {
+  r.buffer[r.nextLine] = line
+  r.nextLine++
+  if r.nextLine == len(r.buffer) {
+    r.filled = true
+    r.nextLine = 0
+  }
+}
+
+func (r *ringBuffer) Copy() []string {
+  var length int
+  if r.filled {
+    length = len(r.buffer)
+  } else {
+    length = r.nextLine
+  }
+  ret := make([]string, length)
+  if !r.filled || r.nextLine == 0 {
+    copy(ret, r.buffer[:])
+  } else {
+    n := copy(ret, r.buffer[r.nextLine:])
+    copy(ret[n:], r.buffer[:r.nextLine])
+  }
+  return ret
+}
+
+type logHandler struct {
+  logLines ringBuffer
   // Broadcasting system
   quit chan struct{}
   publish chan string
@@ -152,7 +181,7 @@ func (h *logHandler) HandleLogs(logs *os.File, quit chan struct{}) {
   }
   subscribers := make(map[chan string]bool)
   h.quit = quit
-  h.publish = make(chan string)
+  h.publish = make(chan string, 80)
   h.subscribe = make(chan chan string)
   go func() {
     defer logs.Close()
@@ -180,9 +209,14 @@ func (h *logHandler) HandleLogs(logs *os.File, quit chan struct{}) {
       if subscribers[sub] {
         delete(subscribers, sub)
       } else {
+        lines := h.logLines.Copy()
+        for _, line := range lines {
+          sub <- line
+        }
         subscribers[sub] = true
       }
     case m := <-h.publish:
+      h.logLines.Push(m)
       for sub, _ := range subscribers {
         // TODO: maybe timeout or non-blocking with select default
         sub <- m

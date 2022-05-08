@@ -42,12 +42,14 @@ li.server {
 
     const eventSource = new EventSource(`/spawn/logs?server=${encodeURIComponent(serverName)}`);
     const logsElm = document.getElementById(`logs-${serverName}`);
-    logsElm.style = "";
+    logsElm.style = '';
+    logsElm.innerHTML = '';
     eventSource.onmessage = function(event) {
-        logsElm.appendChild(document.createTextNode(event.data+"\n"));
+        text = document.createTextNode(event.data+"\n");
+        logsElm.appendChild(text);
       };
     eventSource.onerror = function(err) {
-        logsElm.appendChild(document.createTextNode("Error streaming logs."));
+        logsElm.appendChild(document.createTextNode("Error streaming logs.\n"));
       };
     streams.set(serverName, eventSource);
     return eventSource;
