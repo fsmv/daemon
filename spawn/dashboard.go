@@ -28,8 +28,8 @@ var (
 )
 
 const (
-  dashboardUrl = "/spawn/"
-  logsUrl = "/spawn/logs"
+  dashboardUrl = "/daemon/"
+  logsUrl = dashboardUrl + "logs"
 )
 
 type logStream struct {
