@@ -21,8 +21,8 @@ import (
 )
 
 const (
-  kLogLinesBufferSize = 1024 // Shared across all servers
-  kSubscriptionChannelSize = kLogLinesBufferSize
+  kLogLinesBufferSize = 256 // Per tag
+  kSubscriptionChannelSize = 5*kLogLinesBufferSize
   kPublishChannelSize = 32
 )
 
@@ -146,12 +146,12 @@ type  LogMessage struct {
 
 // Not thread safe
 type ringBuffer struct {
-  buffer [kLogLinesBufferSize]LogMessage
+  buffer [kLogLinesBufferSize]string
   nextLine int
   filled bool
 }
 
-func (r *ringBuffer) Push(line LogMessage) {
+func (r *ringBuffer) Push(line string) {
   r.buffer[r.nextLine] = line
   r.nextLine++
   if r.nextLine == len(r.buffer) {
@@ -160,25 +160,20 @@ func (r *ringBuffer) Push(line LogMessage) {
   }
 }
 
-func (r *ringBuffer) Copy() []LogMessage {
-  var length int
+// Not thread safe, simultaneous push will break it
+func (r *ringBuffer) Write(out chan<- LogMessage, tag string) {
   if r.filled {
-    length = len(r.buffer)
-  } else {
-    length = r.nextLine
+    for _, line := range r.buffer[r.nextLine:] {
+      out <- LogMessage{Line: line, Tag: tag}
+    }
   }
-  ret := make([]LogMessage, length)
-  if !r.filled || r.nextLine == 0 {
-    copy(ret, r.buffer[:])
-  } else {
-    n := copy(ret, r.buffer[r.nextLine:])
-    copy(ret[n:], r.buffer[:r.nextLine])
+  for _, line := range r.buffer[:r.nextLine] {
+    out <- LogMessage{Line: line, Tag: tag}
   }
-  return ret
 }
 
 type logHandler struct {
-  logLines ringBuffer
+  logLines map[string]*ringBuffer
   // Broadcasting system
   quit chan struct{}
   publish chan LogMessage
@@ -189,6 +184,7 @@ type logHandler struct {
 func NewLogHandler(quit chan struct{}) *logHandler {
   h := &logHandler{
     quit: quit,
+    logLines: make(map[string]*ringBuffer),
     subscribers: make(map[chan<- LogMessage]struct{}),
     publish: make(chan LogMessage, kPublishChannelSize),
     subscribe: make(chan chan<- LogMessage),
@@ -209,17 +205,27 @@ func (h *logHandler) run() {
         delete(h.subscribers, sub)
       } else {
         // New subscribers get the history buffer
-        lines := h.logLines.Copy()
-        for _, line := range lines {
-          sub <- line
+        for tag, log := range h.logLines {
+          log.Write(sub, tag)
         }
 
         h.subscribers[sub] = struct{}{}
       }
     case m := <-h.publish:
-      h.logLines.Push(m)
+      // Make a new ring buffer if needed and push to the buffer
+      log, ok := h.logLines[m.Tag]
+      if !ok {
+        log = &ringBuffer{}
+        h.logLines[m.Tag] = log
+      }
+      log.Push(m.Line)
+
+      // Push to subscribers
       for sub, _ := range h.subscribers {
         // TODO: maybe timeout or non-blocking with select default
+        //   - if we send id: int after the data in the SSE stream then after
+        //     reconnecting it will send a Last-Event-ID header so we can
+        //     restart from the place we stopped at
         sub <- m
       }
     }
