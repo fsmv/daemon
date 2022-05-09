@@ -2,7 +2,7 @@
 <html>
   <head>
 <style>
-span {
+.server-list span {
   display: inline-block;
 }
 .status {
@@ -11,22 +11,31 @@ span {
 }
 .name {
   min-width: 13em;
+  overflow: hidden;
 }
-p {
+.server-list p {
   margin-top: 0.5em;
   margin-bottom: 0;
 }
-form {
+.server-list form {
   display: inline;
 }
 pre.logs {
   background-color: #EEE;
   margin: 0.5em 4.5em 0;
-  display: flex;
-  flex-direction: column-reverse;
   overflow: auto;
   max-height: 15em;
   min-height: 1.5em;
+
+  /* Make the text stay scrolled at the bottom when appending */
+  display: flex;
+  flex-direction: column-reverse;
+}
+ul.server-list {
+  list-style: none;
+  margin: 0 auto;
+  padding: 0;
+  max-width: 80em;
 }
 li.server {
   margin-bottom: 0.5em;
@@ -52,7 +61,7 @@ li.server {
 </script>
   </head>
   <body onload="Setup();">
-    <ul>
+    <ul class="server-list">
       {{range .}}
       <li class="server">
         {{if .Up}}

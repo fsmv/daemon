@@ -4,6 +4,7 @@ import (
   "fmt"
   "log"
   "flag"
+  "time"
   "bytes"
   "embed"
   "net/http"
@@ -15,6 +16,8 @@ import (
   "ask.systems/daemon/portal"
   "ask.systems/daemon/tools"
 )
+
+const javascriptStreamDelay = 4 * time.Millisecond
 
 var (
   portalAddr = flag.String("portal_addr", "127.0.0.1:2048",
@@ -55,6 +58,9 @@ func (l *logStream) ServeHTTP(w http.ResponseWriter, r *http.Request) {
   w.Header().Set("Connection", "keep-alive")
   w.Header().Set("Cache-Control", "no-cache")
   w.Header().Set("Access-Control-Allow-Origin", "*")
+
+  // Give javascript some time to set up the event listeners, seriously
+  time.Sleep(javascriptStreamDelay)
   for {
     select {
     case <-r.Context().Done():
