@@ -3,7 +3,9 @@ package main
 import (
     "log"
     "flag"
+    "strings"
     "net/http"
+    "path/filepath"
 
     "ask.systems/daemon/portal"
     "ask.systems/daemon/tools"
@@ -15,9 +17,8 @@ var (
     webRoot = flag.String("web_root", "",
         "Directory to serve files from")
     urlPath = flag.String("url_path", "/",
-        "Url path to serve the files under. Leading and trailing slashes are\n" +
-        "optional but encouraged. For example \"/test/\" would serve your files\n" +
-        "under 127.0.0.1/test/.")
+        "Url path to serve files under. A leading slash (/) is required and if you\n"+
+        "don't specify a tailing slash only the single named file will be served (out of the web_root directory).")
 )
 
 func main() {
@@ -25,14 +26,20 @@ func main() {
     quit := make(chan struct{})
     tools.CloseOnSignals(quit)
 
-    url := portal.MakeFullPattern(*urlPath)
+    url := *urlPath
     lease := portal.MustStartRegistration(*portalAddr, &portal.RegisterRequest{
       Pattern: url,
     }, quit)
 
     // Setup the server handler
     dir := http.Dir(*webRoot)
-    fileServer := http.StripPrefix(url, http.FileServer(dir))
+    fileServer := http.FileServer(dir)
+    if strings.HasSuffix(url, "/") {
+      fileServer = http.StripPrefix(url, fileServer)
+    } else {
+      // Don't strip off the filename if we're serving a single file
+      fileServer = http.StripPrefix(filepath.Dir(url), fileServer)
+    }
     http.HandleFunc(url, func(w http.ResponseWriter, req *http.Request) {
         log.Printf("%v requested %v", req.Header.Get("Orig-Address"), req.URL)
         fileServer.ServeHTTP(w, req)
