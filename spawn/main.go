@@ -44,6 +44,9 @@ type Command struct {
   //
   // Required.
   Filepath    string
+  // Additional name to show in the dashboard to keep logs separate
+  // Optional.
+  Name        string
   // User to run the process as. Cannot be root.
   //
   // Required.
@@ -380,6 +383,9 @@ func (children *Children) StartProgram(cmd *Command) error {
     return fmt.Errorf("Filepath is required")
   }
   name := filepath.Base(cmd.Filepath)
+  if cmd.Name != "" {
+    name = fmt.Sprintf("%v-%v", name, cmd.Name)
+  }
   log.Print("Starting ", name)
   // Set up stdout and stderr piping
   r, w, err := os.Pipe()
