@@ -81,9 +81,19 @@ func handleConnection(publicConn net.Conn, serverAddress string, quit chan struc
         publicConn.Close()
         privateConn.Close()
     }()
-    // Forward all the messages unaltered, in both directions
-    go io.Copy(publicConn, privateConn)
-    go io.Copy(privateConn, publicConn)
+    // Forward all the messages unaltered, in both directions.
+    // If either copy direction has an error or closes, we need to make sure
+    // both connections are closed.
+    go func () {
+      io.Copy(publicConn, privateConn)
+      publicConn.Close()
+      privateConn.Close()
+    }()
+    go func () {
+      io.Copy(privateConn, publicConn)
+      publicConn.Close()
+      privateConn.Close()
+    }()
 }
 
 func startTCPProxy(tlsListener net.Listener, serverAddress string, quit chan struct{}) {
