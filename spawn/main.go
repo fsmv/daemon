@@ -116,7 +116,7 @@ func (c *Children) RestartChild(name string) {
   proc := child.Proc
   if proc != nil {
     log.Print("Killing ", name)
-    proc.Kill()
+    proc.Signal(syscall.SIGTERM)
   }
   cmd := child.Cmd // technically we should copy but we don't modify it
 
@@ -125,6 +125,7 @@ func (c *Children) RestartChild(name string) {
   if proc != nil {
     proc.Wait()
     c.ReportDown(proc.Pid, fmt.Errorf("Killed for restart"))
+    log.Print("Down after being killed: ", name)
   }
   c.StartProgram(cmd)
 }

@@ -78,6 +78,7 @@ func (c Client) KeepLeaseRenewed(quit <-chan struct{}, lease *Lease) {
     for {
         select {
         case <-quit:
+            timer.Stop()
             return
         case <-timer.C:
         }

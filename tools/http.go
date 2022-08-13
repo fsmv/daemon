@@ -15,9 +15,9 @@ func RunHTTPServer(port uint32, quit chan struct{}) {
   go func () {
     err := srv.ListenAndServe()
     if err != nil && err != http.ErrServerClosed {
+      close(quit)
       log.Fatal("Server died:", err)
     }
-    close(quit)
   }()
 
   <-quit
