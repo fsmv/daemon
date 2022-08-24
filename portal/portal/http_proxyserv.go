@@ -179,7 +179,7 @@ func (p *HTTPProxy) ServeHTTP(w http.ResponseWriter, req *http.Request) {
     fwd := p.selectForwarder(req.URL.Path)
     // No handler for this path, 404
     if fwd == nil {
-        log.Print("Forwarder not found for path: ", req.URL.Path)
+        log.Print("%v requested unregistered path: ", req.RemoteAddr, req.URL.Path)
         http.NotFound(w, req)
         return
     }
@@ -187,7 +187,7 @@ func (p *HTTPProxy) ServeHTTP(w http.ResponseWriter, req *http.Request) {
     // If the pattern ends in /, redirect so the url ends in / so relative paths
     // in the html work right
     if fwd.Pattern[len(fwd.Pattern)-1] == '/' && req.URL.Path == fwd.Pattern[:len(fwd.Pattern)-1] {
-        log.Print("Redirecting...")
+        log.Print("Redirecting to clean path...")
         req.URL.Path += "/"
         http.Redirect(w, req, req.URL.String(), http.StatusSeeOther)
         return

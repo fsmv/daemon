@@ -21,8 +21,8 @@ func RunHTTPServer(port uint32, quit chan struct{}) {
   }()
 
   <-quit
-  log.Print("Shutting down...")
-  log.Print("Waiting 10 seconds for connections to close.")
+  log.Print("Shutting down HTTP Server...")
+  log.Print("Waiting 10 seconds for HTTP connections to close.")
   ttl, _ := context.WithTimeout(context.Background(), 10 * time.Second)
   code := srv.Shutdown(ttl)
   log.Print("HTTP server exit status:", code)
