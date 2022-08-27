@@ -179,7 +179,7 @@ func (p *HTTPProxy) ServeHTTP(w http.ResponseWriter, req *http.Request) {
     fwd := p.selectForwarder(req.URL.Path)
     // No handler for this path, 404
     if fwd == nil {
-        log.Print("%v requested unregistered path: ", req.RemoteAddr, req.URL.Path)
+        log.Printf("%v requested unregistered path: %v", req.RemoteAddr, req.URL.Path)
         http.NotFound(w, req)
         return
     }
