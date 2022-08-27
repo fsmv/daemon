@@ -118,8 +118,8 @@ func startTCPProxy(tlsListener net.Listener, serverAddress string, quit chan str
         for {
             publicConn, err := tlsListener.Accept()
             if err != nil {
-                log.Printf("Failed to listen on TCP Proxy (user: %v -> backend: %v): %v",
-                    publicConn.RemoteAddr(), serverAddress, err)
+                log.Printf("Failed to accept user connection on TCP Proxy (backend: %v): %v",
+                    serverAddress, err)
                 break
             }
             // Use a goroutine just to not wait until the Dial is done before we
