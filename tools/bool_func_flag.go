@@ -3,20 +3,20 @@ package tools
 // Use this to define a flag that has a callback like with flag.Func but label
 // it as a boolean flag to the go flag parser. Use flag.Func for non-bool flags.
 //
-// Main usecase is to define flags in this tools library that have a callback
-// function when flag.Parse() is called.
+// This means you can invoke the flag by -foobar instead of -foobar=true, and
+// the callback will be called by flag.Parse().
 //
-// Ex: flag.Var(tools.BoolFlagFunc(myCallback), "name", "usage")
-type BoolFunc func(string) error
+// Ex: func init() { flag.Var(tools.BoolFuncFlag(myCallback), "name", "usage") }
+type BoolFuncFlag func(string) error
 
-func (b BoolFunc) String() string {
+func (b BoolFuncFlag) String() string {
   return ""
 }
 
-func (b BoolFunc) Set(s string) error {
+func (b BoolFuncFlag) Set(s string) error {
   return b(s)
 }
 
-func (b BoolFunc) IsBoolFlag() bool {
+func (b BoolFuncFlag) IsBoolFlag() bool {
   return true
 }

@@ -17,6 +17,8 @@ import (
   "path/filepath"
   "encoding/json"
 
+  _ "ask.systems/daemon/tools/flags"
+
   "ask.systems/daemon/tools"
 )
 

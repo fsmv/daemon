@@ -1,4 +1,4 @@
-package tools
+package flags
 
 import (
   "os"
@@ -6,10 +6,12 @@ import (
   "flag"
   "strings"
   "runtime/debug"
+
+  "ask.systems/daemon/tools"
 )
 
 func init() {
-  flag.Var(BoolFunc(handleVersionFlag), "version",
+  flag.Var(tools.BoolFuncFlag(handleVersionFlag), "version",
     "If set, print version info and exit")
 }
 

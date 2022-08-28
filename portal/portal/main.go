@@ -11,6 +11,8 @@ import (
     "io/ioutil"
     "strconv"
 
+    _ "ask.systems/daemon/tools/flags"
+
     "ask.systems/daemon/tools"
 )
 

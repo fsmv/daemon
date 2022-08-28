@@ -6,6 +6,8 @@ import (
     "sync"
     "context"
 
+    _ "ask.systems/daemon/tools/flags"
+
     "ask.systems/daemon/portal"
     "ask.systems/daemon/tools"
 )
