@@ -134,17 +134,28 @@ func (p *HTTPProxy) saveForwarder(clientAddr string, lease *portal.Lease, stripP
 }
 
 // urlMatchesPattern returns whether or not the url matches the pattern string.
-//
-// Similar to http.ServeMux.pathMatch, see https://golang.org/LICENSE
-func urlMatchesPattern(url, pattern string) bool{
-    if len(pattern) == 0 {
-        return false
-    }
-    n := len(pattern) - 1
-    if pattern[n] != '/' {
-        return pattern == url
-    }
-    return len(url) >= n && url[0:n] == pattern[0:n]
+func urlMatchesPattern(url, pattern string) bool {
+  if len(pattern) == 0 {
+    return false
+  }
+  // Take the slash out of url if it has one
+  if url[len(url)-1] == '/' {
+    url = url[0:len(url)-1]
+  }
+  if pattern[len(pattern)-1] != '/' {
+    // If the pattern does not end in /, exact match only
+    return pattern == url
+  }
+  // Since we passed above we know pattern ends in /
+  if len(url) == len(pattern)-1 {
+    // Exact match for patterns that end in /
+    return pattern[0:len(pattern)-1] == url
+  }
+  if len(url) >= len(pattern) {
+    // Match subdirectories of the pattern (url must contain the / at the end of pattern)
+    return strings.HasPrefix(url, pattern)
+  }
+  return false
 }
 
 // selectForwarder finds the appropriate forwarder for the given url.
