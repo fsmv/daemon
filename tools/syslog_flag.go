@@ -25,13 +25,17 @@ func init () {
     "To use this in a chroot configure syslogd with the -l flag to create the <chroot>/dev/log file.")
 }
 
-type timestampWriter struct {
+type TimestampWriter struct {
     io.Writer
     // Don't forget to include whitespace at the end to separate the message
     TimeFormat string
 }
 
-func (w *timestampWriter) Write(in []byte) (int, error) {
+func NewTimestampWriter(w io.Writer) *TimestampWriter {
+    return &TimestampWriter{w, "2006/01/02 15:04:05 "}
+}
+
+func (w *TimestampWriter) Write(in []byte) (int, error) {
   // Use a stack buffer if the format size is small enough
   // Copied from https://cs.opensource.google/go/go/+/refs/tags/go1.18.1:src/time/format.go;l=587;drc=293ecd87c10eb5eed777d220394ed63a935b2c20
   const bufSize = 64
@@ -68,6 +72,6 @@ func handleSyslogFlag(value string) error {
   }
   log.SetFlags(0) // Just use the syslog built in timestamp
   log.SetOutput(io.MultiWriter(Syslog,
-    &timestampWriter{os.Stdout, "2006/01/02 15:04:05 "}))
+    NewTimestampWriter(os.Stdout)))
   return nil
 }

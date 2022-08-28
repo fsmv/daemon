@@ -72,6 +72,14 @@ type Command struct {
   WorkingDir  string
 }
 
+func (cmd *Command) FullName() string {
+  name := filepath.Base(cmd.Filepath)
+  if cmd.Name != "" {
+    name = fmt.Sprintf("%v-%v", name, cmd.Name)
+  }
+  return name
+}
+
 type Child struct {
   Up      bool
   Message error
@@ -89,19 +97,31 @@ type Children struct {
 }
 
 func NewChildren(quit chan struct{}) *Children {
-  return &Children {
+  c := &Children {
     &sync.Mutex{},
     NewLogHandler(quit),
     make(map[int]*Child),
     make(map[string]*Child),
   }
+  r, w, err := os.Pipe()
+  if err != nil {
+    log.Print("Failed to create logs pipe: ", err)
+  } else {
+    log.SetOutput(io.MultiWriter(log.Writer(), tools.NewTimestampWriter(w)))
+    go c.HandleLogs(r, "spawn")
+  }
+  return c
 }
 
 func (c *Children) Store(child *Child) {
   c.Lock()
+  c.unsafeStore(child)
+  c.Unlock()
+}
+
+func (c *Children) unsafeStore(child *Child) {
   c.ByPID[child.Proc.Pid] = child
   c.ByName[child.Name] = child
-  c.Unlock()
 }
 
 func (c *Children) RestartChild(name string) {
@@ -128,6 +148,30 @@ func (c *Children) RestartChild(name string) {
     log.Print("Down after being killed: ", name)
   }
   c.StartProgram(cmd)
+}
+
+func (c *Children) ReloadConfig() {
+  commands, err := ReadConfig(*configFilename)
+  if err != nil {
+    log.Print("Failed to reload config: ", err)
+    return
+  }
+  c.Lock()
+  defer c.Unlock()
+  for _, cmd := range commands {
+    name := cmd.FullName()
+    child, ok := c.ByName[name]
+    if ok {
+      child.Cmd = cmd
+    } else {
+      log.Print("New server: ", name)
+      c.unsafeStore(&Child{
+        Cmd: cmd,
+        Name: name,
+        Up: false,
+      })
+    }
+  }
 }
 
 func (c *Children) ReportDown(pid int, message error) {
@@ -383,10 +427,7 @@ func (children *Children) StartProgram(cmd *Command) error {
   if len(cmd.Filepath) == 0 {
     return fmt.Errorf("Filepath is required")
   }
-  name := filepath.Base(cmd.Filepath)
-  if cmd.Name != "" {
-    name = fmt.Sprintf("%v-%v", name, cmd.Name)
-  }
+  name := cmd.FullName()
   log.Print("Starting ", name)
   // Set up stdout and stderr piping
   r, w, err := os.Pipe()
@@ -536,7 +577,7 @@ func ResolveRelativePaths(path string, commands []*Command) error {
     return nil
 }
 
-func readConfig(filename string) ([]*Command, error) {
+func ReadConfig(filename string) ([]*Command, error) {
     f, err := os.Open(filename)
     if err != nil {
         return nil, err
@@ -558,19 +599,15 @@ func readConfig(filename string) ([]*Command, error) {
         return nil, fmt.Errorf(
             "no commands found in config file. filepath: %v", filename)
     }
-    return ret, nil
+    err = ResolveRelativePaths(*path, ret)
+    return ret, err
 }
 
 func main() {
     flag.Parse()
-    commands, err := readConfig(*configFilename)
+    commands, err := ReadConfig(*configFilename)
     if err != nil {
         log.Fatalf("Failed to read config file. error: \"%v\"", err)
-    }
-
-    err = ResolveRelativePaths(*path, commands)
-    if err != nil {
-        log.Fatal(err)
     }
 
     quit := make(chan struct{})

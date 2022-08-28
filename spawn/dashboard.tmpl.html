@@ -62,6 +62,14 @@ li.server {
   </head>
   <body onload="Setup();">
     <ul class="server-list">
+      <li class="server">
+        <span class="status" style="color:darkgreen">UP</span>
+        <span class="name">spawn</span>
+        <form method="post">
+          <button type="submit" name="submit" value="reload-config">Reload Config</button>
+        </form>
+        <pre class="logs" id="logs-spawn"></pre>
+      </li>
       {{range .}}
       <li class="server">
         {{if .Up}}

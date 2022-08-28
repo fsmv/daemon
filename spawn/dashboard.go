@@ -110,10 +110,14 @@ func (d *dashboard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
       http.Error(w, "Invalid form data", http.StatusBadRequest)
       return
     }
-    if r.Form.Get("submit") == "restart" {
+    switch r.Form.Get("submit") {
+    case "restart":
       name := r.Form.Get("name")
       log.Print("Restart request for ", name)
       go d.Children.RestartChild(name)
+    case "reload-config":
+      log.Print("Reloading config")
+      go d.Children.ReloadConfig()
     }
   }
 
