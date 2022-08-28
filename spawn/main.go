@@ -388,12 +388,11 @@ func openFiles(files []string) ([]*os.File, error) {
     return ret, nil
 }
 
-// Returns the new filepath of the binary
-func copyBinary(oldName string, newDir string, uid, gid int) (string, error) {
-  newName := filepath.Join(newDir, filepath.Base(oldName))
+// Returns the new filepath of the binary (empty string if the file was not created)
+func copyBinary(oldName string, newName string, uid, gid int) (string, error) {
   oldf, err := os.Open(oldName)
   if err != nil {
-    return newName, err
+    return "", err
   }
   defer oldf.Close()
   newf, err := os.OpenFile(newName, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0550)
@@ -503,7 +502,7 @@ func (children *Children) StartProgram(cmd *Command) error {
     workingDir = u.HomeDir
   }
   // Copy the binary into the home dir and give the user access
-  binaryCopy, err := copyBinary(cmd.Filepath, workingDir, uid, gid)
+  binaryCopy, err := copyBinary(cmd.Filepath, filepath.Join(workingDir, name), uid, gid)
   // Don't leave a dangling binary copy
   defer func() {
     if binaryCopy != "" {
@@ -522,7 +521,7 @@ func (children *Children) StartProgram(cmd *Command) error {
     attr.Dir = "/"
     attr.Sys.Chroot = workingDir
     // The copy we'll run is at /binary in the chroot
-    binpath = "/"+filepath.Base(cmd.Filepath)
+    binpath = "/"+filepath.Base(binaryCopy)
   }
   // Finalize the argv
   var jsonArgs []string
