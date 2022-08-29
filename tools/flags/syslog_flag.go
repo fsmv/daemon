@@ -32,7 +32,9 @@ func init () {
   flag.Func("syslog_remote",
     "Set to your url or ip for UDP remote logging. Optionally prefix with\n"+
     "tcp:// or any other https://pkg.go.dev/net#Dial supported protocols to connect\n"+
-    "to syslog servers that support other protocols.\n"+
+    "to syslog servers that support other protocols. For syslogd configuration, make\n"+
+    "sure to use :* in your -a option for example -a 192.168.1.1/24:*\n"+
+
     "\nIf you're using -syslog_remote, do not set -syslog.",
     handleSyslogFlag)
 }

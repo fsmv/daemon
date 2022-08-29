@@ -389,7 +389,7 @@ func openFiles(files []string) ([]*os.File, error) {
 }
 
 // Returns the new filepath of the binary (empty string if the file was not created)
-func copyBinary(oldName string, newName string, uid, gid int) (string, error) {
+func copyFile(oldName string, newName string, uid, gid int) (string, error) {
   oldf, err := os.Open(oldName)
   if err != nil {
     return "", err
@@ -502,7 +502,7 @@ func (children *Children) StartProgram(cmd *Command) error {
     workingDir = u.HomeDir
   }
   // Copy the binary into the home dir and give the user access
-  binaryCopy, err := copyBinary(cmd.Filepath, filepath.Join(workingDir, name), uid, gid)
+  binaryCopy, err := copyFile(cmd.Filepath, filepath.Join(workingDir, name), uid, gid)
   // Don't leave a dangling binary copy
   defer func() {
     if binaryCopy != "" {
@@ -535,6 +535,29 @@ func (children *Children) StartProgram(cmd *Command) error {
   }
   argv := append([]string{binpath}, cmd.Args...)
   argv = append(argv, jsonArgs...)
+
+  // For chroots copy timezone info into the home dir and give the user access
+  if !cmd.NoChroot {
+    err := os.Mkdir(filepath.Join(workingDir, "/etc/"), 0777)
+    if err != nil {
+      log.Printf("Failed to mkdir for /etc/localtime: %v", err)
+    } else {
+      timezoneFile, err := copyFile("/etc/localtime",
+        filepath.Join(workingDir, "/etc/localtime"), uid, gid)
+      // Don't leave a dangling file
+      go func() {
+        time.Sleep(30*time.Second) // Give the binary time to load it
+        if timezoneFile != "" {
+          _ = os.Remove(timezoneFile) // remove the file
+          _ = os.Remove(filepath.Dir(timezoneFile)) // remove the etc folder
+        }
+      }()
+      if err != nil {
+        // Not worth returning over this, it will just be UTC log times
+        log.Printf("Failed to copy /etc/localtime into the chroot dir: %v", err)
+      }
+    }
+  }
 
   // Start the process
   proc, err := os.StartProcess(binpath, argv, attr)

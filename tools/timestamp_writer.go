@@ -5,6 +5,12 @@ import (
   "time"
 )
 
+func init() {
+  // Force load the /etc/localtime file before spawn deletes it for chroots.
+  // Not really related to TimestampWriter but I wanted it somewhere in tools.
+  _ = time.Local.String()
+}
+
 type TimestampWriter struct {
     io.Writer
     // Don't forget to include whitespace at the end to separate the message
