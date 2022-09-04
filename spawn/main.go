@@ -149,7 +149,10 @@ func (c *Children) RestartChild(name string) {
     c.ReportDown(proc.Pid, fmt.Errorf("Killed for restart"))
     log.Print("Down after being killed: ", name)
   }
-  c.StartProgram(cmd)
+  err := c.StartProgram(cmd)
+  if err != nil {
+    log.Print("Failed to restart child: ", err)
+  }
 }
 
 func (c *Children) ReloadConfig() {
