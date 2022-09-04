@@ -374,6 +374,7 @@ func listenPortsTCP(ports []uint16) ([]*os.File, error) {
                 port, err)
         }
         ret = append(ret, f)
+        l.Close()
     }
     return ret, nil
 }
@@ -439,19 +440,27 @@ func (children *Children) StartProgram(cmd *Command) error {
     return fmt.Errorf("failed to create pipe: %v", err)
   }
   files := []*os.File{nil, w, w}
+  var portsErr, filesErr error
   if len(cmd.Ports) != 0 {
-    socketFiles, err := listenPortsTCP(cmd.Ports)
-    if err != nil {
-      return err
-    }
+    var socketFiles []*os.File
+    socketFiles, portsErr = listenPortsTCP(cmd.Ports)
     files = append(files, socketFiles...)
   }
   if len(cmd.Files) != 0 {
-    openedFiles, err := openFiles(cmd.Files)
-    if err != nil {
-      return err
-    }
+    var openedFiles []*os.File
+    openedFiles, filesErr = openFiles(cmd.Files)
     files = append(files, openedFiles...)
+  }
+  defer func() {
+    for _, file := range files {
+      file.Close()
+    }
+  }()
+  if portsErr != nil {
+    return portsErr
+  }
+  if filesErr != nil {
+    return filesErr
   }
   attr := &os.ProcAttr{
     Env: []string{""},
