@@ -52,10 +52,8 @@ func (p *TCPProxy) Register(clientAddr string, request *portal.RegisterRequest) 
           return
         }
     }()
-    lease, err := p.leasor.Register(&portal.Lease{
-        Pattern: request.Pattern,
-        Port: request.FixedPort,
-    }, func () { close(cancelLease) })
+    lease, err := p.leasor.Register(clientAddr, request,
+      func () { close(cancelLease) })
     if err != nil {
         return nil, err
     }

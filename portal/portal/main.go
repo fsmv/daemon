@@ -38,6 +38,9 @@ var (
         "If positive, the port to bind to for https traffic or\n" +
         "if negative, the file descriptor id for a socket to listen on\n" +
         "shared by the parent process.")
+    saveFilepath = flag.String("save_file", "active_leases.protodata",
+        "The path to the file to store active lease information in so that\n" +
+        "the portal server can safely restart without disrupting proxy service.")
 )
 
 func openFilePathOrFD(pathOrFD string) (*os.File, error) {
@@ -104,7 +107,7 @@ func main() {
         log.Fatalf("Failed to listen on https port (%v): %v", *httpsPortSpec, err)
     }
 
-    l := StartPortLeasor(portRangeStart, portRangeEnd, leaseTTL, quit)
+    l := StartPortLeasor(portRangeStart, portRangeEnd, leaseTTL, *saveFilepath, quit)
     tcpProxy := StartTCPProxy(l, tlsConfig, quit)
     httpProxy, err := StartHTTPProxy(l, tlsConfig, httpListener, httpsListener, quit)
     log.Print("Started HTTP proxy server")
@@ -112,7 +115,7 @@ func main() {
         log.Fatalf("Failed to start HTTP proxy server: %v", err)
     }
 
-    _, err = StartRPCServer(l, tcpProxy, httpProxy, rpcPort, quit)
+    _, err = StartRPCServer(l, tcpProxy, httpProxy, rpcPort, *saveFilepath, quit)
     log.Print("Started rpc server on port ", rpcPort)
     if err != nil {
         log.Fatal("Failed to start RPC server:", err)

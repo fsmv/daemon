@@ -1,0 +1,14 @@
+syntax = "proto3";
+option go_package = "ask.systems/daemon/portal/main";
+
+import "service.proto";
+
+message Registration {
+  RegisterRequest request = 1;
+  Lease lease = 2;
+  string client_addr = 3;
+}
+
+message State {
+  repeated Registration registrations = 1;
+}

@@ -1,6 +1,7 @@
 package main
 
 import (
+    "os"
     "fmt"
     "log"
     "net"
@@ -9,6 +10,7 @@ import (
     "strconv"
 
     "ask.systems/daemon/portal"
+    "google.golang.org/protobuf/proto"
     "google.golang.org/protobuf/types/known/timestamppb"
     "google.golang.org/grpc"
     "google.golang.org/grpc/peer"
@@ -29,25 +31,50 @@ func hostname(address string) string {
     return address[:portIdx]
 }
 
+func (s *RPCServ) loadSavedRegistrations(saveFilepath string) {
+  // Load the data from the file
+  saveData, err := os.ReadFile(saveFilepath)
+  if err != nil {
+    log.Print("Save state file not read: ", err)
+    return
+  }
+  state := &State{}
+  if err := proto.Unmarshal(saveData, state); err != nil {
+    log.Print("Failed to unmarshal save state file: ", err)
+    return
+  }
+
+  // Register the saved registrations
+  loaded := 0
+  for _, registration := range state.Registrations {
+    // Note: Don't check for expired leases, if we restart everyone gets an
+    // extension on their leases. We will remove leases from the file as the
+    // expire while we're online.
+    _, err := s.internalRegister(registration.ClientAddr, registration.Request)
+    if err != nil {
+      log.Printf("Failed to recreate registration: %v\n%v", err, registration)
+      continue
+    }
+    loaded += 1
+  }
+  log.Printf("Successfully loaded %v/%v saved registrations", loaded, len(state.Registrations))
+}
+
 // Register registers a new forwarding rule to the rpc client's ip address.
 // Randomly assigns port for the client to listen on
 func (s *RPCServ) Register(ctx context.Context, request *portal.RegisterRequest) (*portal.Lease, error) {
-    // Get the RPC client's address (without the port) from gRPC
-    p, _ := peer.FromContext(ctx)
-    client := hostname(p.Addr.String())
+  // Get the RPC client's address (without the port) from gRPC
+  p, _ := peer.FromContext(ctx)
+  client := hostname(p.Addr.String())
+  return s.internalRegister(client, request)
+}
 
-    var lease *portal.Lease
-    var err error
-    if strings.HasPrefix(request.Pattern, tcpProxyPrefix) {
-        lease, err = s.tcpProxy.Register(client, request)
-    } else {
-        lease, err = s.httpProxy.Register(client, request)
-    }
-    if err != nil {
-        log.Print(err)
-        return nil, err
-    }
-    return lease, nil
+func (s *RPCServ) internalRegister(client string, request *portal.RegisterRequest) (*portal.Lease, error) {
+  if strings.HasPrefix(request.Pattern, tcpProxyPrefix) {
+    return s.tcpProxy.Register(client, request)
+  } else {
+    return s.httpProxy.Register(client, request)
+  }
 }
 
 // Unregister unregisters the forwarding rule with the given pattern
@@ -76,14 +103,15 @@ func (s *RPCServ) Renew(ctx context.Context, lease *portal.Lease) (*portal.Lease
 
 // StartNew creates a new RPCServ and starts it
 func StartRPCServer(leasor *PortLeasor, tcpProxy *TCPProxy, httpProxy *HTTPProxy,
-    port uint16, quit chan struct{}) (*RPCServ, error) {
+    port uint16, saveFilepath string, quit chan struct{}) (*RPCServ, error) {
 
     s := &RPCServ{
         leasor: leasor,
         tcpProxy: tcpProxy,
         httpProxy: httpProxy,
-        quit:      quit,
+        quit: quit,
     }
+    s.loadSavedRegistrations(saveFilepath)
     server := grpc.NewServer()
     portal.RegisterPortalServer(server, s)
     l, err := net.Listen("tcp", ":" + strconv.Itoa(int(port)))

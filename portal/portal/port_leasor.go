@@ -1,6 +1,7 @@
 package main
 
 import (
+    "os"
     "fmt"
     "log"
     "time"
@@ -27,6 +28,7 @@ var FixedPortTakenErr = errors.New("Requested fixed port is already taken!")
 type PortLeasor struct {
     mut    *sync.Mutex // Everything in this struct needs the lock
     leases map[uint32]lease // maps the port to the lease
+    saveFilepath string
 
     // List of automatic ports to be leased out, in a random order.
     // Always has values between 0 and n, see unusedPortOffset.
@@ -40,10 +42,11 @@ type PortLeasor struct {
 
 type lease struct {
     *portal.Lease
+    registration *Registration
     cancel func() // call this function to cancel the lease`
 }
 
-func StartPortLeasor(startPort, endPort uint16, ttl time.Duration, quit chan struct{}) *PortLeasor {
+func StartPortLeasor(startPort, endPort uint16, ttl time.Duration, saveFilepath string, quit chan struct{}) *PortLeasor {
     if endPort < startPort {
         startPort, endPort = endPort, startPort
     }
@@ -54,6 +57,7 @@ func StartPortLeasor(startPort, endPort uint16, ttl time.Duration, quit chan str
         endPort: endPort,
         ttl: ttl,
         leases: make(map[uint32]lease),
+        saveFilepath: saveFilepath,
         unusedPortOffset: startPort,
         unusedPorts: r.Perm(int(endPort - startPort)),
     }
@@ -61,37 +65,76 @@ func StartPortLeasor(startPort, endPort uint16, ttl time.Duration, quit chan str
     return l
 }
 
-func (l *PortLeasor) Register(request *portal.Lease, canceler func()) (*portal.Lease, error) {
+func (l *PortLeasor) saveStateFileUnsafe() {
+  // Build the save state proto from the current in memory state
+  state := &State{}
+  for _, lease := range l.leases {
+    state.Registrations = append(state.Registrations, lease.registration)
+  }
+
+  saveData, err := proto.Marshal(state)
+  if err != nil {
+    log.Print("Failed to marshal save state to store leases: ", err)
+    return
+  }
+  if err := os.WriteFile(l.saveFilepath, saveData, 0660); err != nil {
+    log.Print("Failed to write save state file to store leases: ", err)
+    return
+  }
+  log.Print("Saved leases state file")
+}
+
+// Register a port exclusively for limited time. If the FixedPort is 0, you will
+// get a random port in the pre-configured range. Otherwise you will get a lease
+// for the requested port if it is not already taken.
+//
+// Accepts a cancelation callback function to close connections in proxy
+// backends and the Registration proto which is saved to a file to persist
+// leases.
+//
+// The client string is simply stored in the state save file so that proxy
+// backends can reconnect to the address on restart.
+func (l *PortLeasor) Register(client string, request *portal.RegisterRequest, canceler func()) (*portal.Lease, error) {
     l.mut.Lock()
     defer l.mut.Unlock()
 
+    newLease := &portal.Lease{
+      Pattern: request.Pattern,
+    }
+
     // Either use the fixed port or select a port automatically
-    if request.Port != 0 {
-        if (request.Port >= uint32(l.startPort) && request.Port <= uint32(l.endPort)) {
+    if request.FixedPort != 0 {
+        if (request.FixedPort >= 1 << 16) {
             canceler()
-            return nil, fmt.Errorf("Fixed port %v must not be in the reserved portal client range: [%v, %v]", request.Port, l.startPort, l.endPort)
+            return nil, fmt.Errorf("Error port out of range. Ports only go up to 65535. Requested Port: %v", request.FixedPort)
         }
-        if (request.Port >= 1 << 16) {
+        if oldLease, ok := l.leases[request.FixedPort]; ok {
             canceler()
-            return nil, fmt.Errorf("%w Requested Port: %v", FixedPortTakenErr, request.Port)
+            return oldLease.Lease, fmt.Errorf("%w Requested Port: %v", FixedPortTakenErr, request.FixedPort)
         }
-        if oldLease, ok := l.leases[request.Port]; ok {
-            canceler()
-            return oldLease.Lease, fmt.Errorf("Fixed port (%v) already taken.", request.Port)
-        }
+        newLease.Port = request.FixedPort
     } else {
         port, err := l.reservePortUnsafe()
         if err != nil {
             canceler()
             return nil, err
         }
-        request.Port = port
+        newLease.Port = port
+        // Modify the request for saving the state so that when we reload the
+        // request it will get a lease for the same port as we are returning now
+        request = proto.Clone(request).(*portal.RegisterRequest)
+        request.FixedPort = port
     }
+    newLease.Timeout = timestamppb.New(time.Now().Add(l.ttl))
 
-    request.Timeout = timestamppb.New(time.Now().Add(l.ttl))
-    l.leases[request.Port] = lease{request, canceler}
-    log.Print("New lease registered: ", request)
-    return request, nil
+    l.leases[newLease.Port] = lease{newLease, &Registration{
+      ClientAddr: client,
+      Lease: newLease,
+      Request: request,
+    }, canceler}
+    log.Print("New lease registered: ", newLease)
+    l.saveStateFileUnsafe()
+    return proto.Clone(newLease).(*portal.Lease), nil
 }
 
 func (l *PortLeasor) Renew(lease *portal.Lease) (*portal.Lease, error) {
@@ -108,6 +151,7 @@ func (l *PortLeasor) Renew(lease *portal.Lease) (*portal.Lease, error) {
 
     foundLease.Timeout = timestamppb.New(time.Now().Add(l.ttl))
     log.Print("Lease renewed: ", foundLease)
+    l.saveStateFileUnsafe()
     return foundLease.Lease, nil
 }
 
@@ -119,12 +163,13 @@ func (l *PortLeasor) Unregister(lease *portal.Lease) error {
     if foundLease.Lease == nil {
         return errors.New("Not registered")// TODO: unregistered error
     }
-    if !proto.Equal(foundLease.Lease, lease) {
+    if foundLease.Lease.GetPattern() != lease.GetPattern() {
         return errors.New("The lease you requested to renew doesn't match our records for that port.")
     }
 
     log.Print("Lease unregistered: ", foundLease)
     l.deleteLeaseUnsafe(foundLease)
+    l.saveStateFileUnsafe()
     return nil
 }
 
@@ -139,6 +184,7 @@ func (l *PortLeasor) UnregisterPort(port uint32) error {
 
     log.Print("Lease unregistered: ", foundLease)
     l.deleteLeaseUnsafe(foundLease)
+    l.saveStateFileUnsafe()
     return nil
 }
 
@@ -147,12 +193,18 @@ func (l *PortLeasor) UnregisterPort(port uint32) error {
 //
 // You must have a (write) lock on mut before calling.
 func (l *PortLeasor) reservePortUnsafe() (uint32, error) {
+  for {
     if len(l.unusedPorts) == 0 {
         return 0, fmt.Errorf("No remaining ports to lease. Active leases: %v", len(l.leases))
     }
-    port := uint16(l.unusedPorts[0]) + l.unusedPortOffset
+    port := uint32(uint16(l.unusedPorts[0]) + l.unusedPortOffset)
     l.unusedPorts = l.unusedPorts[1:]
-    return uint32(port), nil
+    if _, ok := l.leases[port]; !ok {
+      // Only return the port if it wasn't already registered. If it was
+      // registered just pop another random port off the list.
+      return uint32(port), nil
+    }
+  }
 }
 
 // You must have a (write) lock on mut before calling.
@@ -178,11 +230,16 @@ func (l *PortLeasor) monitorTTLs(quit chan struct{}) {
         case <-ticker.C: // on next tick
             l.mut.Lock()
             now := time.Now()
+            deletedAny := false
             for _, lease := range l.leases {
                 if now.After(lease.Timeout.AsTime()) {
                     log.Print("Lease expired: ", lease)
                     l.deleteLeaseUnsafe(lease)
+                    deletedAny = true
                 }
+            }
+            if deletedAny {
+              l.saveStateFileUnsafe()
             }
             l.mut.Unlock()
         case <-quit: // on quit
