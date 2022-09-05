@@ -590,7 +590,8 @@ func ReadConfig(filename string) ([]*Command, error) {
   if err := prototext.Unmarshal(configText, config); err != nil {
     return nil, err
   }
-  return config.Command, nil
+  err = ResolveRelativePaths(*path, config.Command)
+  return config.Command, err
 }
 
 func main() {
