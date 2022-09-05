@@ -15,11 +15,12 @@ import (
   "os/user"
   "os/signal"
   "path/filepath"
-  "encoding/json"
 
+  _ "embed"
   _ "ask.systems/daemon/tools/flags"
 
   "ask.systems/daemon/tools"
+  "google.golang.org/protobuf/encoding/prototext"
 )
 
 const (
@@ -29,7 +30,7 @@ const (
 )
 
 var (
-  configFilename = flag.String("config", "config",
+  configFilename = flag.String("config", "config.pbtxt",
     "The path to the config file")
   path = flag.String("path", "",
     "A single path to use for relative paths in the config file")
@@ -39,39 +40,16 @@ var (
     "to start up so others can connect.")
 )
 
-// Command is one executable to run with options
-type Command struct {
-  // Filepath is the absolute path to the executable file or the relative
-  // path within the directory provided in the --path flag.
-  //
-  // Required.
-  Filepath    string
-  // Additional name to show in the dashboard to keep logs separate
-  // Optional.
-  Name        string
-  // User to run the process as. Cannot be root.
-  //
-  // Required.
-  User        string
-  // Args is the arguments to pass to the executable
-  Args        []string
-  JsonArgs    map[string]interface{}
-  // Ports to listen on (with tcp) and pass to the process as files.
-  // Useful for accessing the privelaged ports (<1024).
-  //
-  // In the child process, the sockets will have fd = 3 + i, where Ports[i] is
-  // the port to bind
-  Ports       []uint16
-  // Files to open and pass to the process
-  //
-  // In the child process, the files will have fd = 3 + len(Ports) + i, where
-  // Files[i] is the file
-  Files       []string
-  // Set to true if you don't want a chroot to the home dir, which is the
-  // default
-  NoChroot    bool
-  // If unset, cd and/or chroot into $HOME, otherwise use this directory
-  WorkingDir  string
+//go:embed config.proto
+var configSchema string
+
+func init() {
+  flag.Var(tools.BoolFuncFlag(func(string) error {
+      fmt.Print(configSchema)
+      os.Exit(2)
+      return nil
+    }), "config_schema",
+    "Print the config schema in proto format, for reference, and exit.")
 }
 
 func (cmd *Command) FullName() string {
@@ -360,7 +338,7 @@ func (c *Children) MonitorDeaths(quit chan struct{}) {
   }
 }
 
-func listenPortsTCP(ports []uint16) ([]*os.File, error) {
+func listenPortsTCP(ports []uint32) ([]*os.File, error) {
     var ret []*os.File
     for _, port := range ports {
         l, err := net.ListenTCP("tcp", &net.TCPAddr{Port:int(port)})
@@ -536,17 +514,7 @@ func (children *Children) StartProgram(cmd *Command) error {
     binpath = "/"+filepath.Base(binaryCopy)
   }
   // Finalize the argv
-  var jsonArgs []string
-  for argName, value := range cmd.JsonArgs {
-    argVal, err := json.Marshal(value)
-    if err != nil {
-      return fmt.Errorf("error in json arg %v, message: %v",
-        argName, err)
-    }
-    jsonArgs = append(jsonArgs, fmt.Sprintf("--%v=%v", argName, string(argVal)))
-  }
   argv := append([]string{binpath}, cmd.Args...)
-  argv = append(argv, jsonArgs...)
 
   // For chroots copy timezone info into the home dir and give the user access
   if !cmd.NoChroot {
@@ -614,29 +582,15 @@ func ResolveRelativePaths(path string, commands []*Command) error {
 }
 
 func ReadConfig(filename string) ([]*Command, error) {
-    f, err := os.Open(filename)
-    if err != nil {
-        return nil, err
-    }
-    var ret []*Command
-    // TODO: make a reader wrapper that skips comments
-    dec := json.NewDecoder(f)
-    for dec.More() {
-        cmd := new(Command)
-        err = dec.Decode(cmd)
-        if err != nil {
-            return nil, fmt.Errorf(
-                "parsing error. filepath: %v, command #%v, error: \"%v\"",
-                filename, len(ret)+1, err)
-        }
-        ret = append(ret, cmd)
-    }
-    if len(ret) == 0 {
-        return nil, fmt.Errorf(
-            "no commands found in config file. filepath: %v", filename)
-    }
-    err = ResolveRelativePaths(*path, ret)
-    return ret, err
+  configText, err := os.ReadFile(filename)
+  if err != nil {
+    return nil, err
+  }
+  config := &Config{}
+  if err := prototext.Unmarshal(configText, config); err != nil {
+    return nil, err
+  }
+  return config.Command, nil
 }
 
 func main() {

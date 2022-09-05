@@ -1,0 +1,55 @@
+syntax = "proto3";
+option go_package = "ask.systems/daemon/spawn/main";
+
+// The schema of the config file
+//
+// Write the file in proto text format which is documented here:
+// https://developers.google.com/protocol-buffers/docs/text-format-spec
+/*
+# Example config file (by the way textproto supports comments)
+command {
+  filepath: "host"
+  user: "www"
+  no_chroot: true
+  args: [
+    "--web_root /home/www/",
+    "--url_path /files/"
+  ]
+}
+*/
+message Config {
+  repeated Command command = 1;
+}
+
+message Command  {
+  // Filepath is the absolute path to the executable file or the relative
+  // path within the directory provided in the --path flag.
+  //
+  // Required.
+  string filepath = 1;
+  // Additional name to show in the dashboard to keep logs separate
+  // Optional.
+  string name = 2;
+  // User to run the process as. Cannot be root.
+  //
+  // Required.
+  string user = 3;
+  // Args is the arguments to pass to the executable
+  repeated string args = 4;
+  // Ports to listen on (with tcp) and pass to the process as files.
+  // Useful for accessing the privelaged ports (<1024).
+  //
+  // In the child process, the sockets will have fd = 3 + i, where Ports[i] is
+  // the port to bind
+  repeated uint32 ports = 5;
+  // Files to open and pass to the process
+  //
+  // In the child process, the files will have fd = 3 + len(Ports) + i, where
+  // Files[i] is the file
+  repeated string files = 6;
+  // Set to true if you don't want a chroot to the home dir, which is the
+  // default
+  bool no_chroot = 7;
+  // If unset, cd and/or chroot into $HOME, otherwise use this directory
+  string working_dir = 8;
+}
