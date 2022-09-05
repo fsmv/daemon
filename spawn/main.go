@@ -66,6 +66,7 @@ type Child struct {
   Name    string
   Cmd     *Command
   Proc    *os.Process
+  quitFileRefresh chan struct{}
 }
 
 type Children struct {
@@ -83,13 +84,9 @@ func NewChildren(quit chan struct{}) *Children {
     make(map[int]*Child),
     make(map[string]*Child),
   }
-  r, w, err := os.Pipe()
-  if err != nil {
-    log.Print("Failed to create logs pipe: ", err)
-  } else {
-    log.SetOutput(io.MultiWriter(log.Writer(), tools.NewTimestampWriter(w)))
-    go c.HandleLogs(r, "spawn")
-  }
+  r, w := io.Pipe()
+  log.SetOutput(io.MultiWriter(log.Writer(), tools.NewTimestampWriter(w)))
+  go c.HandleLogs(r, "spawn")
   return c
 }
 
@@ -167,6 +164,9 @@ func (c *Children) ReportDown(pid int, message error) {
   }
   child.Up = false
   child.Message = message
+  if child.quitFileRefresh != nil {
+    close(child.quitFileRefresh)
+  }
   log.Printf("%v (pid: %v)\n\n%v", child.Cmd.Filepath, pid, message)
 }
 
@@ -264,7 +264,7 @@ func (h *logHandler) run() {
 }
 
 // Publish a logs file or pipe to all of the subscribers of the handler
-func (h *logHandler) HandleLogs(logs *os.File, tag string) {
+func (h *logHandler) HandleLogs(logs io.ReadCloser, tag string) {
   defer logs.Close()
   r := bufio.NewReader(logs)
   for {
@@ -362,12 +362,86 @@ func openFiles(files []string) ([]*os.File, error) {
     for _, fileName := range files {
         f, err := os.Open(fileName)
         if err != nil {
-            return nil, fmt.Errorf("error opening file (%v): %v",
-                fileName, err)
+            return nil, fmt.Errorf("error opening file %#v: %w", fileName, err)
         }
         ret = append(ret, f)
     }
     return ret, nil
+}
+
+type refreshFile struct {
+  writePipe *os.File
+  fileName string
+}
+
+type fileRefresher []refreshFile
+
+func (f fileRefresher) refreshOnSignal(quit chan struct{}) {
+  sigs := make(chan os.Signal, 1)
+  sigs<-syscall.SIGUSR1 // trigger the initial run (buffered)
+  signal.Notify(sigs, syscall.SIGUSR1)
+  // Close in a goroutine because we might block on writing to the pipe and we
+  // need to close it asynchronously to unblock that this parent goroutine
+  go func () {
+    <-quit
+    close(sigs)
+    for _, file := range f {
+      file.writePipe.Close()
+    }
+  }()
+  for {
+    select {
+    case <-quit:
+      return
+    case <-sigs:
+      log.Print("Starting TLS certificate refresh...")
+      for _, refresh := range f {
+        dataFile, err := os.Open(refresh.fileName)
+        if err != nil {
+          log.Print("Error opening file for refresh %#v: %w", refresh.fileName, err)
+          dataFile.Close()
+          continue
+        }
+        if _, err := io.Copy(refresh.writePipe, dataFile); err != nil {
+          log.Print("Failed to refresh file on write to the OS pipe for %#v: %w",
+            refresh.fileName, err)
+        }
+        refresh.writePipe.WriteString("\x04") // EOT
+        refresh.writePipe.Sync()
+        dataFile.Close()
+        continue
+      }
+      log.Print("Successfully refreshed TLS certificate...")
+    }
+  }
+}
+
+func startFileRefresh(files []string, quit chan struct{}) ([]*os.File, error) {
+  var ret []*os.File
+
+  var refresher fileRefresher
+  for _, fileName := range files {
+    // Test if we can open the file
+    f, err := os.Open(fileName)
+    f.Close()
+    if err != nil {
+      return nil, fmt.Errorf("error opening file %#v: %w", fileName, err)
+    }
+
+    r, w, err := os.Pipe()
+    if err != nil {
+      return nil, fmt.Errorf("failed to create OS pipe to refresh file %#v: %w",
+        fileName, err)
+    }
+    ret = append(ret, r)
+    refresher = append(refresher, refreshFile{
+      writePipe: w,
+      fileName: fileName,
+    })
+  }
+  go refresher.refreshOnSignal(quit)
+  log.Print("Started -auto_tls_certs pipe")
+  return ret, nil
 }
 
 // Returns the new filepath of the binary (empty string if the file was not created)
@@ -418,27 +492,38 @@ func (children *Children) StartProgram(cmd *Command) error {
     return fmt.Errorf("failed to create pipe: %v", err)
   }
   files := []*os.File{nil, w, w}
-  var portsErr, filesErr error
-  if len(cmd.Ports) != 0 {
-    var socketFiles []*os.File
-    socketFiles, portsErr = listenPortsTCP(cmd.Ports)
-    files = append(files, socketFiles...)
-  }
-  if len(cmd.Files) != 0 {
-    var openedFiles []*os.File
-    openedFiles, filesErr = openFiles(cmd.Files)
-    files = append(files, openedFiles...)
-  }
-  defer func() {
-    for _, file := range files {
+  // Takes a pointer so we can append to it and this will still see everything
+  defer func(filesPtr *[]*os.File) {
+    for _, file := range *filesPtr {
       file.Close()
     }
-  }()
-  if portsErr != nil {
-    return portsErr
+  }(&files)
+  if len(cmd.Ports) != 0 {
+    socketFiles, err := listenPortsTCP(cmd.Ports)
+    if err != nil {
+      return err
+    }
+    files = append(files, socketFiles...)
   }
-  if filesErr != nil {
-    return filesErr
+  var quitFileRefresh chan struct{}
+  if len(cmd.Files) != 0 {
+    var openedFiles []*os.File
+    var filesErr error
+    if cmd.AutoTlsCerts && len(cmd.Files) >= 2 {
+      quitFileRefresh = make(chan struct{})
+      refreshFiles, err := startFileRefresh(cmd.Files[:2], quitFileRefresh)
+      if err != nil {
+        return err
+      }
+      files = append(files, refreshFiles...)
+      openedFiles, filesErr = openFiles(cmd.Files[2:])
+    } else {
+      openedFiles, filesErr = openFiles(cmd.Files)
+    }
+    if filesErr != nil {
+      return filesErr
+    }
+    files = append(files, openedFiles...)
   }
   attr := &os.ProcAttr{
     Env: []string{""},
@@ -545,6 +630,7 @@ func (children *Children) StartProgram(cmd *Command) error {
     Cmd: cmd,
     Proc: proc,
     Name: name,
+    quitFileRefresh: quitFileRefresh,
   }
   go children.HandleLogs(r, name)
   if err != nil {

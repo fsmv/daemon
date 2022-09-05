@@ -8,20 +8,24 @@
 package main
 
 import (
-    "crypto/tls"
+    "os"
     "fmt"
     "log"
-    "net"
-    "net/http"
-    "net/http/httputil"
-    "net/url"
+    "sync"
     "strconv"
     "strings"
-    "sync"
-    "time"
+    "net"
+    "net/url"
+    "net/http"
+    "net/http/httputil"
+    "crypto/tls"
+    "path/filepath"
 
     "ask.systems/daemon/portal"
 )
+
+// The path for the let's encrypt web-root cert challenge
+const certChallengePattern = "/.well-known/acme-challenge/"
 
 // HTTPProxy implements http.Handler to handle requests using a pool of
 // forwarding rules registered at runtime
@@ -34,22 +38,25 @@ type HTTPProxy struct {
 // forwarder holds the data for a forwarding rule registered with HTTPProxy
 type forwarder struct {
     Handler http.Handler
-    Timeout time.Time
-    Pattern string
-    Port    uint32
+    Lease   *portal.Lease
 }
 
 // Register leases a new forwarder for the given pattern.
 // Returns an error if the server has no more ports to lease.
 func (p *HTTPProxy) Register(clientAddr string, request *portal.RegisterRequest) (*portal.Lease, error) {
     if oldFwd := p.selectForwarder(request.Pattern); oldFwd != nil {
-        if oldFwd.Pattern != request.Pattern {
-            err := fmt.Errorf("Another pattern %#v already covers your requested pattern %#v", oldFwd.Pattern, request.Pattern)
+        if oldFwd.Lease.Pattern == certChallengePattern {
+            err := fmt.Errorf("Clients cannot register the cert challenge path %#v which covers your requested pattern %#v", certChallengePattern, request.Pattern)
+            log.Print("Error registering: ", err)
+            return nil, err
+        }
+        if oldFwd.Lease.Pattern != request.Pattern {
+            err := fmt.Errorf("Another pattern %#v already covers your requested pattern %#v", oldFwd.Lease.Pattern, request.Pattern)
             log.Print("Error registering: ", err)
             return nil, err
         }
         log.Printf("Replacing existing lease with the same pattern: %#v", request.Pattern)
-        p.leasor.UnregisterPort(oldFwd.Port) // ignore not registered error
+        p.leasor.Unregister(oldFwd.Lease) // ignore not registered error
     }
     lease, err := p.leasor.Register(clientAddr, request,
       func() { p.forwarders.Delete(request.Pattern) })
@@ -62,8 +69,8 @@ func (p *HTTPProxy) Register(clientAddr string, request *portal.RegisterRequest)
     if err != nil {
         return nil, err
     }
-    log.Printf("Registered forwarder to %v:%v, Pattern: %v, Timeout: %v",
-        clientAddr, lease.Port, request.Pattern, lease.Timeout.AsTime())
+    log.Printf("Registered forwarder to %v:%v, Pattern: %#v, Timeout: %v",
+        clientAddr, lease.Port, lease.Pattern, lease.Timeout.AsTime())
     return lease, nil
 }
 
@@ -123,9 +130,7 @@ func (p *HTTPProxy) saveForwarder(clientAddr string, lease *portal.Lease, stripP
     }
     fwd := &forwarder{
         Handler: proxy,
-        Pattern: pattern,
-        Port:    lease.Port,
-        Timeout: lease.Timeout.AsTime(),
+        Lease: lease,
     }
     p.forwarders.Store(pattern, fwd)
     return nil
@@ -186,7 +191,6 @@ func (p *HTTPProxy) selectForwarder(url string) *forwarder {
 // forwarder to handle the request based on the forwarder's pattern
 func (p *HTTPProxy) ServeHTTP(w http.ResponseWriter, req *http.Request) {
     fwd := p.selectForwarder(req.URL.Path)
-    // No handler for this path, 404
     if fwd == nil {
         log.Printf("%v requested unregistered path: %v", req.RemoteAddr, req.URL.Path)
         http.NotFound(w, req)
@@ -195,8 +199,8 @@ func (p *HTTPProxy) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
     // If the pattern ends in /, redirect so the url ends in / so relative paths
     // in the html work right
-    if fwd.Pattern[len(fwd.Pattern)-1] == '/' && req.URL.Path == fwd.Pattern[:len(fwd.Pattern)-1] {
-        log.Print("Redirecting to clean path...")
+    pattern := fwd.Lease.Pattern
+    if pattern[len(pattern)-1] == '/' && req.URL.Path == pattern[:len(pattern)-1] {
         req.URL.Path += "/"
         http.Redirect(w, req, req.URL.String(), http.StatusSeeOther)
         return
@@ -231,25 +235,65 @@ func runServer(quit chan struct{}, name string,
     }
 }
 
+func makeChallengeHandler(webRoot string) (http.Handler, error) {
+  if err := os.MkdirAll(webRoot, 0775); err != nil {
+    return nil, err
+  }
+  dir := http.Dir(webRoot)
+  // Make sure the webRoot dir is readable
+  f, err := dir.Open("/")
+  defer f.Close()
+  if err != nil {
+    return nil, err
+  }
+  if _, err := f.Stat(); err != nil {
+    return nil, err
+  }
+  fileServer := http.StripPrefix(certChallengePattern, http.FileServer(dir))
+  return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+    log.Printf("%v requested %v", req.RemoteAddr, req.URL)
+    if filepath.Base(req.URL.Path) == filepath.Base(certChallengePattern) {
+      http.NotFound(w, req)
+      return // Don't allow the directory listing page
+    }
+    fileServer.ServeHTTP(w, req)
+  }), nil
+}
+
 // StartNew creates a new HTTPProxy and starts the server.
 //
 // Arguments:
 //  - tlsCert and tlsKey are file handles for the TLS certificate and key files
 //  - httpList and httpsList are listeners for the http and https ports
-//  - startPort and endPort set the range of ports this server offer for lease
-//  - leaseTTL is the duration of the life of a lease
+//  - certChallengeWebRoot if non-empty start the file server for tls cert challenges
 //  - quit is a channel that will be closed when the server should quit
 func StartHTTPProxy(l *PortLeasor, tlsConfig *tls.Config,
-    httpList, httpsList net.Listener, quit chan struct{}) (*HTTPProxy, error) {
-    // Start the TLS server
-    p := &HTTPProxy{
+    httpList, httpsList net.Listener,
+    certChallengeWebRoot string, quit chan struct{}) (*HTTPProxy, error) {
+    ret := &HTTPProxy{
         leasor: l,
     }
-    tlsServer := &http.Server{
-        Handler: p,
-        TLSConfig: tlsConfig.Clone(),
+
+    // Set up serving cert challenges
+    if certChallengeWebRoot != "" {
+      handler, err := makeChallengeHandler(certChallengeWebRoot)
+      if err != nil {
+        log.Print("Failed to start cert challenge webroot: ", err)
+      } else {
+        ret.forwarders.Store(certChallengePattern, &forwarder{
+            Handler: handler,
+            Lease: &portal.Lease{
+              Pattern: certChallengePattern,
+            },
+        })
+        log.Print("Started serving cert challenge path.")
+      }
     }
-    // also start the TTL monitoring thread
+
+    // Start the TLS server
+    tlsServer := &http.Server{
+        Handler: ret,
+    }
     go runServer(quit, "TLS", tlsServer, tls.NewListener(httpsList, tlsConfig))
     // Start the HTTP server to redirect to HTTPS
     httpServer := &http.Server{
@@ -263,5 +307,5 @@ func StartHTTPProxy(l *PortLeasor, tlsConfig *tls.Config,
         tlsServer.Close()
         fmt.Print("Got quit signal, killed servers")
     }()
-    return p, nil
+    return ret, nil
 }

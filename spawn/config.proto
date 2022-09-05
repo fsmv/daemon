@@ -21,6 +21,7 @@ message Config {
   repeated Command command = 1;
 }
 
+// Next ID: 10
 message Command  {
   // Filepath is the absolute path to the executable file or the relative
   // path within the directory provided in the --path flag.
@@ -47,6 +48,15 @@ message Command  {
   // In the child process, the files will have fd = 3 + len(Ports) + i, where
   // Files[i] is the file
   repeated string files = 6;
+  // Set to true if the first two files are tls certs you want to keep
+  // autoupdated. Portal reads this when the -auto_update_certs flag is set.
+  //
+  // This makes the first two files in the above array a pipe that will be
+  // updated with the file contents on startup and when spawn in sent the
+  // SIGUSR1 signal.
+  //
+  // If this is true and there are less than 2 files then nothing happens.
+  bool auto_tls_certs = 9;
   // Set to true if you don't want a chroot to the home dir, which is the
   // default
   bool no_chroot = 7;

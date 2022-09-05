@@ -173,21 +173,6 @@ func (l *PortLeasor) Unregister(lease *portal.Lease) error {
     return nil
 }
 
-func (l *PortLeasor) UnregisterPort(port uint32) error {
-    l.mut.Lock()
-    defer l.mut.Unlock()
-
-    foundLease := l.leases[port]
-    if foundLease.Lease == nil {
-        return errors.New("Not registered")// TODO: unregistered error
-    }
-
-    log.Print("Lease unregistered: ", foundLease)
-    l.deleteLeaseUnsafe(foundLease)
-    l.saveStateFileUnsafe()
-    return nil
-}
-
 // reservePort retuns a random unused port and marks it as used.
 // Returns an error if the server has no more ports to lease.
 //
