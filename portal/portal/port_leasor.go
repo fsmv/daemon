@@ -145,7 +145,7 @@ func (l *PortLeasor) Renew(lease *portal.Lease) (*portal.Lease, error) {
     if !ok || foundLease.Lease == nil {
         return nil, errors.New("Not registered")// TODO: unregistered error
     }
-    if !proto.Equal(foundLease.Lease, lease) {
+    if foundLease.Lease.Pattern != lease.Pattern {
         return nil, errors.New("The lease you requested to renew doesn't match our records for that port.")
     }
 
@@ -163,7 +163,7 @@ func (l *PortLeasor) Unregister(lease *portal.Lease) error {
     if foundLease.Lease == nil {
         return errors.New("Not registered")// TODO: unregistered error
     }
-    if foundLease.Lease.GetPattern() != lease.GetPattern() {
+    if foundLease.Lease.Pattern != lease.GetPattern() {
         return errors.New("The lease you requested to renew doesn't match our records for that port.")
     }
 
