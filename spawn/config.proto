@@ -23,18 +23,23 @@ message Config {
 
 // Next ID: 10
 message Command  {
-  // Filepath is the absolute path to the executable file or the relative
-  // path within the directory provided in the --path flag.
+  // Binary is the absolute path to the executable file or the relative
+  // path within the directory provided in the -path flag.
   //
   // Required.
-  string filepath = 1;
-  // Additional name to show in the dashboard to keep logs separate
-  // Optional.
-  string name = 2;
+  string binary = 1;
   // User to run the process as. Cannot be root.
   //
   // Required.
   string user = 3;
+
+  // Additional name to show in the dashboard to keep logs separate
+  string name = 2;
+  // If unset, cd and/or chroot into $HOME, otherwise use this directory
+  string working_dir = 8;
+  // Set to true if you don't want the binary run in chroot at working_dir
+  bool no_chroot = 7;
+
   // Args is the arguments to pass to the executable
   repeated string args = 4;
   // Ports to listen on (with tcp) and pass to the process as files.
@@ -49,17 +54,14 @@ message Command  {
   // Files[i] is the file
   repeated string files = 6;
   // Set to true if the first two files are tls certs you want to keep
-  // autoupdated. Portal reads this when the -auto_update_certs flag is set.
+  // autoupdated. Portal reads this when the -auto_tls_certs flag is set.
+  // If this is true and there are less than 2 files then nothing happens.
   //
   // This makes the first two files in the above array a pipe that will be
   // updated with the file contents on startup and when spawn in sent the
   // SIGUSR1 signal.
   //
-  // If this is true and there are less than 2 files then nothing happens.
+  // To use this run the following command after renewing your cert:
+  //   killall -SIGUSR1 {portal,spawn}
   bool auto_tls_certs = 9;
-  // Set to true if you don't want a chroot to the home dir, which is the
-  // default
-  bool no_chroot = 7;
-  // If unset, cd and/or chroot into $HOME, otherwise use this directory
-  string working_dir = 8;
 }

@@ -46,7 +46,7 @@ func init() {
 }
 
 func (cmd *Command) FullName() string {
-  name := filepath.Base(cmd.Filepath)
+  name := filepath.Base(cmd.Binary)
   if cmd.Name != "" {
     name = fmt.Sprintf("%v-%v", name, cmd.Name)
   }
@@ -56,15 +56,15 @@ func (cmd *Command) FullName() string {
 func ResolveRelativePaths(path string, commands []*Command) error {
     for i, _ := range commands {
         cmd := commands[i]
-        if len(cmd.Filepath) == 0 || cmd.Filepath[0] == '/' {
+        if len(cmd.Binary) == 0 || cmd.Binary[0] == '/' {
             continue
         }
         if len(path) == 0 { // Don't error unless there's actually a go path
             return fmt.Errorf(
                 "--path flag not set which is required by Command #%v, " +
-                "filepath: %v", i, cmd.Filepath)
+                "filepath: %v", i, cmd.Binary)
         }
-        cmd.Filepath = filepath.Join(path, cmd.Filepath)
+        cmd.Binary = filepath.Join(path, cmd.Binary)
     }
     return nil
 }

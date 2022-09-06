@@ -61,8 +61,8 @@ func (c *Children) StartPrograms(programs []*Command) (errCnt int) {
 }
 
 func (children *Children) StartProgram(cmd *Command) error {
-  if len(cmd.Filepath) == 0 {
-    return fmt.Errorf("Filepath is required")
+  if len(cmd.Binary) == 0 {
+    return fmt.Errorf("Binary is required")
   }
   name := cmd.FullName()
   log.Print("Starting ", name)
@@ -157,7 +157,7 @@ func (children *Children) StartProgram(cmd *Command) error {
     workingDir = u.HomeDir
   }
   // Copy the binary into the home dir and give the user access
-  binaryCopy, err := copyFile(cmd.Filepath, filepath.Join(workingDir, name), uid, gid)
+  binaryCopy, err := copyFile(cmd.Binary, filepath.Join(workingDir, name), uid, gid)
   // Don't leave a dangling binary copy
   defer func() {
     if binaryCopy != "" {
@@ -297,7 +297,7 @@ func (c *Children) ReportDown(pid int, message error) {
   if child.quitFileRefresh != nil {
     close(child.quitFileRefresh)
   }
-  log.Printf("%v (pid: %v)\n\n%v", child.Cmd.Filepath, pid, message)
+  log.Printf("%v (pid: %v)\n\n%v", child.Cmd.Binary, pid, message)
 }
 
 func makeDeadChildMessage(status syscall.WaitStatus,
