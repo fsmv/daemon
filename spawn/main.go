@@ -34,6 +34,7 @@ var (
 
 //go:embed config.proto
 var configSchema string
+//go:generate protoc config.proto --go_out ./ --go_opt=paths=source_relative
 
 func init() {
   flag.Var(tools.BoolFuncFlag(func(string) error {
