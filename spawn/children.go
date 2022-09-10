@@ -315,7 +315,7 @@ func makeDeadChildMessage(status syscall.WaitStatus,
 }
 
 func (c *Children) MonitorDeaths(quit chan struct{}) {
-  child := make(chan os.Signal)
+  child := make(chan os.Signal, 16)
   signal.Notify(child, syscall.SIGCHLD)
   for {
     select{

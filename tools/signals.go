@@ -8,7 +8,7 @@ import (
 )
 
 func CloseOnSignals(quit chan struct{}) {
-  sigs := make(chan os.Signal, 2)
+  sigs := make(chan os.Signal, 1)
   signal.Notify(sigs, os.Interrupt, os.Kill, syscall.SIGTERM)
   go func() {
     switch <-sigs {
@@ -20,5 +20,7 @@ func CloseOnSignals(quit chan struct{}) {
       log.Print("Recieved term signal")
     }
     close(quit)
+    signal.Stop(sigs)
+    close(sigs)
   }()
 }
