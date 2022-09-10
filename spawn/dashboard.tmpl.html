@@ -1,97 +1,98 @@
 <!doctype html>
 <html>
-  <head>
+	<head>
 <style>
 .server-list span {
-  display: inline-block;
+	display: inline-block;
 }
 .status {
-  width: 3.5em;
-  text-align: center;
+	width: 3.5em;
+	text-align: center;
 }
 .name {
-  min-width: 13em;
-  overflow: hidden;
+	min-width: 13em;
+	overflow: hidden;
 }
 .server-list p {
-  margin-top: 0.5em;
-  margin-bottom: 0;
+	margin-top: 0.5em;
+	margin-bottom: 0;
 }
 .server-list form {
-  display: inline;
+	display: inline;
 }
 pre.logs {
-  background-color: #EEE;
-  margin: 0.5em 4.5em 0;
-  overflow: auto;
-  max-height: 15em;
-  min-height: 1.5em;
+	background-color: #EEE;
+	margin: 0.5em 4.5em 0;
+	overflow: auto;
+	max-height: 15em;
+	min-height: 1.5em;
 
-  /* Make the text stay scrolled at the bottom when appending */
-  display: flex;
-  flex-direction: column-reverse;
+	/* Make the text stay scrolled at the bottom when appending */
+	display: flex;
+	flex-direction: column-reverse;
 }
 ul.server-list {
-  list-style: none;
-  margin: 0 auto;
-  padding: 0;
-  max-width: 80em;
+	list-style: none;
+	margin: 0 auto;
+	padding: 0;
+	max-width: 80em;
 }
 li.server {
-  margin-bottom: 0.5em;
+	margin-bottom: 0.5em;
 }
 </style>
 <script>
-  const eventSource= new EventSource(`./logs`);
-  var streams = new Map()
+	const eventSource= new EventSource(`./logs`);
+	var streams = new Map()
 
-  function Setup() {
-    [...document.getElementsByClassName("name")].forEach(elm => {
-        StreamLogs(elm.innerHTML)
-      })
-  }
+	function Setup() {
+		[...document.getElementsByClassName("name")].forEach(elm => {
+				StreamLogs(elm.innerHTML)
+			})
+	}
 
-  function StreamLogs(serverName) {
-    const logsElm = document.getElementById(`logs-${serverName}`);
-    eventSource.addEventListener(serverName, function(event) {
-        text = document.createTextNode(event.data+"\n");
-        logsElm.appendChild(text);
-      });
-  }
+	function StreamLogs(serverName) {
+		const logsElm = document.getElementById(`logs-${serverName}`);
+		eventSource.addEventListener(serverName, function(event) {
+				text = document.createTextNode(event.data+"\n");
+				logsElm.appendChild(text);
+			});
+	}
 </script>
-  </head>
-  <body onload="Setup();">
-    <ul class="server-list">
-      <li class="server">
-        <span class="status" style="color:darkgreen">UP</span>
-        <span class="name">spawn</span>
-        <form method="post">
-          <button type="submit" name="submit" value="reload-config">Reload Config</button>
-        </form>
-        <pre class="logs" id="logs-spawn"></pre>
-      </li>
-      {{range .}}
-      <li class="server">
-        {{if .Up}}
-        <span class="status" style="color:darkgreen">UP</span>
-        {{else}}
-        <span class="status" style="color:red">DOWN</span>
-        {{end}}
+	</head>
+	<body onload="Setup();">
+		<ul class="server-list">
+			<li class="server">
+				<span class="status" style="color:darkgreen">UP</span>
+				<span class="name">spawn</span>
+				<form method="post">
+					<button type="submit" name="submit" value="reload-config">Reload Config</button>
+				</form>
+				<pre class="logs" id="logs-spawn"></pre>
+			</li>
+			{{range .}}
+			<li class="server">
+				{{if .Up}}
+				<span class="status" style="color:darkgreen">UP</span>
+				{{else}}
+				<span class="status" style="color:red">DOWN</span>
+				{{end}}
 
-        <span class="name">{{.Name}}</span>
+				<span class="name">{{.Name}}</span>
 
-        <form method="post">
-          <input type="hidden" name="name" value="{{.Name}}" />
-          <button type="submit" name="submit" value="restart">Restart Server</button>
-        </form>
+				<form method="post">
+					<input type="hidden" name="name" value="{{.Name}}" />
+					<button type="submit" name="submit" value="restart">Restart Server</button>
+				</form>
 
-        <pre class="logs" id="logs-{{.Name}}"></pre>
+				<pre class="logs" id="logs-{{.Name}}"></pre>
 
-        {{if not .Up }}
-        <p>{{.Message}}</p>
-        {{end}}
-      </li>
-      {{end}}
-    </ul>
-  </body>
+				{{if not .Up }}
+				<p>{{.Message}}</p>
+				{{end}}
+			</li>
+			{{end}}
+		</ul>
+	</body>
 </html>
+{{- /* vim: set noexpandtab: */ -}}

@@ -10,13 +10,13 @@ package tools
 type BoolFuncFlag func(string) error
 
 func (b BoolFuncFlag) String() string {
-  return ""
+	return ""
 }
 
 func (b BoolFuncFlag) Set(s string) error {
-  return b(s)
+	return b(s)
 }
 
 func (b BoolFuncFlag) IsBoolFlag() bool {
-  return true
+	return true
 }

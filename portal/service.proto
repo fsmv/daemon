@@ -4,28 +4,30 @@ option go_package = "ask.systems/daemon/portal";
 import "google/protobuf/timestamp.proto";
 
 service Portal {
-    rpc Register(RegisterRequest) returns (Lease) {}
-    rpc Renew(Lease) returns (Lease) {}
-    rpc Unregister(Lease) returns (Lease) {}
+	rpc Register(RegisterRequest) returns (Lease) {}
+	rpc Renew(Lease) returns (Lease) {}
+	rpc Unregister(Lease) returns (Lease) {}
 }
 
 message RegisterRequest {
-    // For HTTP: A url pattern that works with http.DefaultServMux
-    // For TCP: ":tcp:port" for the port number portal should listen on
-    string pattern = 1; // TODO: maybe support multiple patterns for the same IP/port
-    // Set for third party web interfaces (or TCP proxy backends) that can't
-    // use an random lease port.
-    // Must be outside the range of portal's automatic ports.
-    uint32 fixed_port = 2;
-    // If true, remove the pattern in the URL of HTTP requests we forward to the
-    // backend to hide that it is behind a reverse proxy.
-    //
-    // Ignored for TCP proxies.
-    bool strip_pattern = 3;
+	// For HTTP: A url pattern that works with http.DefaultServMux
+	// For TCP: ":tcp:port" for the port number portal should listen on
+	string pattern = 1; // TODO: maybe support multiple patterns for the same IP/port
+	// Set for third party web interfaces (or TCP proxy backends) that can't
+	// use an random lease port.
+	// Must be outside the range of portal's automatic ports.
+	uint32 fixed_port = 2;
+	// If true, remove the pattern in the URL of HTTP requests we forward to the
+	// backend to hide that it is behind a reverse proxy.
+	//
+	// Ignored for TCP proxies.
+	bool strip_pattern = 3;
 }
 
 message Lease {
-    string pattern = 1;
-    uint32 port = 2;
-    google.protobuf.Timestamp timeout = 3;
+	string pattern = 1;
+	uint32 port = 2;
+	google.protobuf.Timestamp timeout = 3;
 }
+
+// vim: set noexpandtab:

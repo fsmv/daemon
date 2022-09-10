@@ -8,60 +8,62 @@ option go_package = "ask.systems/daemon/spawn/main";
 /*
 # Example config file (by the way textproto supports comments)
 command {
-  filepath: "host"
-  user: "www"
-  no_chroot: true
-  args: [
-    "--web_root /home/www/",
-    "--url_path /files/"
-  ]
+	filepath: "host"
+	user: "www"
+	no_chroot: true
+	args: [
+		"--web_root /home/www/",
+		"--url_path /files/"
+	]
 }
 */
 message Config {
-  repeated Command command = 1;
+	repeated Command command = 1;
 }
 
 // Next ID: 10
-message Command  {
-  // Binary is the absolute path to the executable file or the relative
-  // path within the directory provided in the -path flag.
-  //
-  // Required.
-  string binary = 1;
-  // User to run the process as. Cannot be root.
-  //
-  // Required.
-  string user = 3;
+message Command {
+	// Binary is the absolute path to the executable file or the relative
+	// path within the directory provided in the -path flag.
+	//
+	// Required.
+	string binary = 1;
+	// User to run the process as. Cannot be root.
+	//
+	// Required.
+	string user = 3;
 
-  // Additional name to show in the dashboard to keep logs separate
-  string name = 2;
-  // If unset, cd and/or chroot into $HOME, otherwise use this directory
-  string working_dir = 8;
-  // Set to true if you don't want the binary run in chroot at working_dir
-  bool no_chroot = 7;
+	// Additional name to show in the dashboard to keep logs separate
+	string name = 2;
+	// If unset, cd and/or chroot into $HOME, otherwise use this directory
+	string working_dir = 8;
+	// Set to true if you don't want the binary run in chroot at working_dir
+	bool no_chroot = 7;
 
-  // Args is the arguments to pass to the executable
-  repeated string args = 4;
-  // Ports to listen on (with tcp) and pass to the process as files.
-  // Useful for accessing the privelaged ports (<1024).
-  //
-  // In the child process, the sockets will have fd = 3 + i, where Ports[i] is
-  // the port to bind
-  repeated uint32 ports = 5;
-  // Files to open and pass to the process
-  //
-  // In the child process, the files will have fd = 3 + len(Ports) + i, where
-  // Files[i] is the file
-  repeated string files = 6;
-  // Set to true if the first two files are tls certs you want to keep
-  // autoupdated. Portal reads this when the -auto_tls_certs flag is set.
-  // If this is true and there are less than 2 files then nothing happens.
-  //
-  // This makes the first two files in the above array a pipe that will be
-  // updated with the file contents on startup and when spawn in sent the
-  // SIGUSR1 signal.
-  //
-  // To use this run the following command after renewing your cert:
-  //   killall -SIGUSR1 {portal,spawn}
-  bool auto_tls_certs = 9;
+	// Args is the arguments to pass to the executable
+	repeated string args = 4;
+	// Ports to listen on (with tcp) and pass to the process as files.
+	// Useful for accessing the privelaged ports (<1024).
+	//
+	// In the child process, the sockets will have fd = 3 + i, where Ports[i] is
+	// the port to bind
+	repeated uint32 ports = 5;
+	// Files to open and pass to the process
+	//
+	// In the child process, the files will have fd = 3 + len(Ports) + i, where
+	// Files[i] is the file
+	repeated string files = 6;
+	// Set to true if the first two files are tls certs you want to keep
+	// autoupdated. Portal reads this when the -auto_tls_certs flag is set.
+	// If this is true and there are less than 2 files then nothing happens.
+	//
+	// This makes the first two files in the above array a pipe that will be
+	// updated with the file contents on startup and when spawn in sent the
+	// SIGUSR1 signal.
+	//
+	// To use this run the following command after renewing your cert:
+	//		killall -SIGUSR1 {portal,spawn}
+	bool auto_tls_certs = 9;
 }
+
+// vim: set noexpandtab:
