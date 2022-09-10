@@ -100,21 +100,26 @@ func StartTLSRefresher(tlsCert, tlsKey *os.File, quit chan struct{}) *tlsRefresh
 }
 
 func (t *tlsRefresher) refreshCert() {
-  sig := make(chan os.Signal, 1)
-  sig<-syscall.SIGUSR1 // Do the first load immidately (store in the chan buffer)
-  signal.Notify(sig, syscall.SIGUSR1)
-
   var certScanner, keyScanner *bufio.Scanner
   if t.pipes {
     certScanner = bufio.NewScanner(t.cert)
     certScanner.Split(scanEOT)
     keyScanner = bufio.NewScanner(t.key)
     keyScanner.Split(scanEOT)
+  } else {
+    // Close the files because we will reopen in the refresh loop
+    t.cert.Close()
+    t.key.Close()
   }
+
+  sig := make(chan os.Signal, 1)
+  sig<-syscall.SIGUSR1 // Do the first load immidately (store in the chan buffer)
+  signal.Notify(sig, syscall.SIGUSR1)
 
   // Close in a separete go routine in case we're blocked on pipe read
   go func (){
     <-t.quit
+    signal.Stop(sig)
     close(sig)
     t.cert.Close()
     t.key.Close()
@@ -131,19 +136,25 @@ func (t *tlsRefresher) refreshCert() {
         newCertFile, err := os.Open(t.cert.Name())
         if err != nil {
           log.Print("Failed to reopen TLS cert for refresh: ", err)
+          newCertFile.Close()
+          continue
         }
         t.cert = newCertFile
         newKeyFile, err := os.Open(t.key.Name())
         if err != nil {
           log.Print("Failed to reopen TLS key for refresh: ", err)
+          newCertFile.Close()
+          newKeyFile.Close()
+          continue
         }
         t.key = newKeyFile
-        newCert, err = loadTLSCertFiles(t.cert, t.key)
+        newCert, err = loadTLSCertFiles(t.cert, t.key) // closes the files
       } else {
         newCert, err = loadTLSCertScanner(certScanner, keyScanner)
       }
       if err != nil {
         log.Print("Failed to load TLS cert for refresh: ", err)
+        continue
       }
       t.cache.Store(newCert)
       log.Print("Sucessfully refreshed TLS certificate.")

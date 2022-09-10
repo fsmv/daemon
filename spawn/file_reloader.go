@@ -24,6 +24,7 @@ func (f fileRefresher) refreshOnSignal(quit chan struct{}) {
   // need to close it asynchronously to unblock that this parent goroutine
   go func () {
     <-quit
+    signal.Stop(sigs)
     close(sigs)
     for _, file := range f {
       file.writePipe.Close()
@@ -35,23 +36,27 @@ func (f fileRefresher) refreshOnSignal(quit chan struct{}) {
       return
     case <-sigs:
       log.Print("Starting TLS certificate refresh...")
+      errCount := 0
       for _, refresh := range f {
         dataFile, err := os.Open(refresh.fileName)
         if err != nil {
-          log.Print("Error opening file for refresh %#v: %w", refresh.fileName, err)
+          log.Print("Failed opening file for refresh %#v. You can send another SIGUSR1 to this binary to retry. Error message: %w", refresh.fileName, err)
           dataFile.Close()
+          errCount++
           continue
         }
-        if _, err := io.Copy(refresh.writePipe, dataFile); err != nil {
-          log.Print("Failed to refresh file on write to the OS pipe for %#v: %w",
-            refresh.fileName, err)
+        if n, err := io.Copy(refresh.writePipe, dataFile); err != nil {
+          log.Print("Failed to refresh file on write to the OS pipe for %#v (wrote %v bytes): %w",
+            refresh.fileName, n, err)
+          errCount++
         }
         refresh.writePipe.WriteString("\x04") // EOT
         refresh.writePipe.Sync()
         dataFile.Close()
-        continue
       }
-      log.Print("Successfully refreshed TLS certificate...")
+      if errCount == 0 {
+        log.Print("Successfully refreshed TLS certificate...")
+      }
     }
   }
 }
