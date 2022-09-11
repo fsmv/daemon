@@ -152,6 +152,9 @@ func (children *Children) StartProgram(cmd *Command) error {
 			Groups: groups,
 		},
 	}
+	if !*dontKillChildren {
+		attr.Sys.Pdeathsig = syscall.SIGHUP
+	}
 	workingDir := cmd.WorkingDir
 	if workingDir == "" {
 		workingDir = u.HomeDir

@@ -31,6 +31,9 @@ var (
 		"The amount of time to wait between starting processes.\n"+
 			"Useful especially for feproxy which should go first and be given time\n"+
 			"to start up so others can connect.")
+	dontKillChildren = flag.Bool("dont_kill_children", false,
+		"When not set, send a SIGHUP to child processes when this process dies. This is\n"+
+			"on by default so that it is easy to setup restarting your daemon with an init system.")
 )
 
 //go:embed config.proto

@@ -9,7 +9,7 @@ import (
 
 func CloseOnSignals(quit chan struct{}) {
 	sigs := make(chan os.Signal, 1)
-	signal.Notify(sigs, os.Interrupt, os.Kill, syscall.SIGTERM)
+	signal.Notify(sigs, os.Interrupt, os.Kill, syscall.SIGTERM, syscall.SIGHUP)
 	go func() {
 		switch <-sigs {
 		case os.Interrupt:
@@ -18,6 +18,8 @@ func CloseOnSignals(quit chan struct{}) {
 			log.Print("Recieved kill signal")
 		case syscall.SIGTERM:
 			log.Print("Recieved term signal")
+		case syscall.SIGHUP:
+			log.Print("Recieved hang up signal (parent process died)")
 		}
 		close(quit)
 		signal.Stop(sigs)
