@@ -24,10 +24,10 @@ var (
 		"Address and port for the portal server")
 	passwordHash = flag.String("password_hash", "set me",
 		"sha256sum hash of the 'admin' user's basic auth password.")
-	dashboardUrlFlag = flag.String("dashboard_url", "/daemon/",
+	dashboardUrlFlag = flag.String("dashboard_url", "/daemon/", ""+
 		"The url to serve the dashboard for this spawn instance. If you have\n"+
-			"multiple servers running spawn, they need different URLs.\n"+
-			"Slashes are optional.")
+		"multiple servers running spawn, they need different URLs.\n"+
+		"Slashes are optional.")
 	wantUsernameHash = sha256.Sum256([]byte("admin"))
 	wantPasswordHash []byte
 	//go:embed *.tmpl.html

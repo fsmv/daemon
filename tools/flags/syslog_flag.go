@@ -22,19 +22,19 @@ var (
 )
 
 func init() {
-	flag.Var(tools.BoolFuncFlag(handleSyslogFlag), "syslog",
+	flag.Var(tools.BoolFuncFlag(handleSyslogFlag), "syslog", ""+
 		"If set, log to the syslog service in addition to stdout when using the go\n"+
-			"log package. Logs under user.info (facility.severity). See also: man syslog.\n"+
+		"log package. Logs under user.info (facility.severity). See also: man syslog.\n\n"+
 
-			"\nTo use this in a chroot you can setup networking and use the -syslog_remote flag\n"+
-			"or configure syslogd with the -l flag to create the <chroot>/dev/log file.")
-	flag.Func("syslog_remote",
+		"To use this in a chroot you can setup networking and use the -syslog_remote flag\n"+
+		"or configure syslogd with the -l flag to create the <chroot>/dev/log file.")
+	flag.Func("syslog_remote", ""+
 		"Set to your url or ip for UDP remote logging. Optionally prefix with\n"+
-			"tcp:// or any other https://pkg.go.dev/net#Dial supported protocols to connect\n"+
-			"to syslog servers that support other protocols. For syslogd configuration, make\n"+
-			"sure to use :* in your -a option for example -a 192.168.1.1/24:*\n"+
+		"tcp:// or any other https://pkg.go.dev/net#Dial supported protocols to connect\n"+
+		"to syslog servers that support other protocols. For syslogd configuration, make\n"+
+		"sure to use :* in your -a option for example -a 192.168.1.1/24:*\n\n"+
 
-			"\nIf you're using -syslog_remote, do not set -syslog.",
+		"If you're using -syslog_remote, do not set -syslog.",
 		handleSyslogFlag)
 }
 

@@ -18,10 +18,10 @@ var (
 		"Address and port for the portal server")
 	webRoot = flag.String("web_root", "",
 		"Directory to serve files from")
-	urlPath = flag.String("url_path", "/",
+	urlPath = flag.String("url_path", "/", ""+
 		"Url path to serve files under. A leading slash (/) is required and if you\n"+
-			"don't specify a tailing slash only the single named file will be served\n"+
-			"(out of the web_root directory).")
+		"don't specify a tailing slash only the single named file will be served\n"+
+		"(out of the web_root directory).")
 )
 
 func main() {

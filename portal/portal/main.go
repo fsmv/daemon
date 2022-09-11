@@ -35,30 +35,30 @@ const (
 )
 
 var (
-	tlsCertPath = flag.String("tls_cert", "",
+	tlsCertPath = flag.String("tls_cert", "", ""+
 		"Either the filepath to the tls cert file (fullchain.pem) or\n"+
-			"the file descriptor id number shared by the parent process")
-	tlsKeyPath = flag.String("tls_key", "",
+		"the file descriptor id number shared by the parent process")
+	tlsKeyPath = flag.String("tls_key", "", ""+
 		"Either the filepath to the tls key file (privkey.pem) or\n"+
-			"the file descriptor id number shared by the parent process")
-	autoTLSCerts = flag.Bool("auto_tls_certs", false,
+		"the file descriptor id number shared by the parent process")
+	autoTLSCerts = flag.Bool("auto_tls_certs", false, ""+
 		"If true update the tls files when SIGUSR1 is received. The\n"+
-			"-tls_cert and -tls_key paths must either both be file paths or both be\n"+
-			"OS pipe fd numbers produced by the auto_tls_certs spawn config option.")
-	certChallengeWebRoot = flag.String("cert_challenge_webroot", "",
+		"-tls_cert and -tls_key paths must either both be file paths or both be\n"+
+		"OS pipe fd numbers produced by the auto_tls_certs spawn config option.")
+	certChallengeWebRoot = flag.String("cert_challenge_webroot", "", ""+
 		"Set to a local folder path to enable hosting the let's encrypt webroot\n"+
-			"challenge path ("+certChallengePattern+") so you can auto-renew with certbot.")
-	httpPortSpec = flag.Int("http_port", 80,
+		"challenge path ("+certChallengePattern+") so you can auto-renew with certbot.")
+	httpPortSpec = flag.Int("http_port", 80, ""+
 		"If positive, the port to bind to for http traffic or\n"+
-			"if negative, the file descriptor id for a socket to listen on\n"+
-			"shared by the parent process.")
-	httpsPortSpec = flag.Int("https_port", 443,
+		"if negative, the file descriptor id for a socket to listen on\n"+
+		"shared by the parent process.")
+	httpsPortSpec = flag.Int("https_port", 443, ""+
 		"If positive, the port to bind to for https traffic or\n"+
-			"if negative, the file descriptor id for a socket to listen on\n"+
-			"shared by the parent process.")
-	saveFilepath = flag.String("save_file", "active_leases.protodata",
+		"if negative, the file descriptor id for a socket to listen on\n"+
+		"shared by the parent process.")
+	saveFilepath = flag.String("save_file", "active_leases.protodata", ""+
 		"The path to the file to store active lease information in so that\n"+
-			"the portal server can safely restart without disrupting proxy service.")
+		"the portal server can safely restart without disrupting proxy service.")
 )
 
 func openFilePathOrFD(pathOrFD string) (*os.File, error) {

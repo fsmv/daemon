@@ -31,10 +31,10 @@ func init() {
 	flag.Usage = func() {
 		fmt.Fprintf(flag.CommandLine.Output(),
 			"Usage: %s [flags] \"[textproto portal.RegisterRequest]\"...\n", os.Args[0])
-		fmt.Fprintf(flag.CommandLine.Output(),
+		fmt.Fprintf(flag.CommandLine.Output(), ""+
 			"Example:\n"+
-				"  %v -portal_addr localhost:9999 \"pattern: '/test/' fixed_port: 8080 strip_pattern: true\" \\\n"+
-				"    \"pattern: ':tcp:8181' fixed_port: 1337\"\n\n", os.Args[0])
+			"  %v -portal_addr localhost:9999 \"pattern: '/test/' fixed_port: 8080 strip_pattern: true\" \\\n"+
+			"    \"pattern: ':tcp:8181' fixed_port: 1337\"\n\n", os.Args[0])
 		flag.PrintDefaults()
 	}
 	flag.Var(

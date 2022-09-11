@@ -27,13 +27,13 @@ var (
 		"The path to the config file")
 	path = flag.String("path", "",
 		"A single path to use for relative paths in the config file")
-	spawningDelay = flag.Duration("spawning_delay", 2*time.Second,
+	spawningDelay = flag.Duration("spawning_delay", 2*time.Second, ""+
 		"The amount of time to wait between starting processes.\n"+
-			"Useful especially for feproxy which should go first and be given time\n"+
-			"to start up so others can connect.")
-	dontKillChildren = flag.Bool("dont_kill_children", false,
+		"Useful especially for feproxy which should go first and be given time\n"+
+		"to start up so others can connect.")
+	dontKillChildren = flag.Bool("dont_kill_children", false, ""+
 		"When not set, send a SIGHUP to child processes when this process dies. This is\n"+
-			"on by default so that it is easy to setup restarting your daemon with an init system.")
+		"on by default so that it is easy to setup restarting your daemon with an init system.")
 )
 
 //go:embed config.proto
