@@ -66,6 +66,9 @@ func (c Client) Close() {
 
 // Run a loop to call the Renew RPC for the given lease before the lease expires
 // until the quit channel is closed. Intended to be run in a goroutine.
+//
+// When the quit channel is closed this function unregisters the lease and
+// closes the client.
 func (c Client) KeepLeaseRenewed(quit <-chan struct{}, lease *Lease) {
 	defer func() {
 		c.RPC.Unregister(context.Background(), lease)
@@ -101,74 +104,6 @@ func (c Client) KeepLeaseRenewed(quit <-chan struct{}, lease *Lease) {
 		log.Printf("Renewed lease, port: %v, ttl: %v", lease.Port, timeout)
 		timer.Reset(time.Until(timeout) - bufferTime)
 	}
-}
-
-// Deprecated: Use StartRegistration instead
-type ThirdPartyArgs struct {
-	Port    uint16
-	Pattern string
-}
-
-// Deprecated: Use StartRegistration instead
-// Calls Register with {Pattern: pattern, FixedPort: thirdPartyPort, StripPattern: true}
-func ConnectAndRegisterThirdParty(portalAddr string, thirdPartyPort uint16, pattern string) (Client, *Lease, error) {
-	c, err := Connect(portalAddr)
-	if err != nil {
-		return c, nil, err
-	}
-	lease, err := c.RPC.Register(context.Background(), &RegisterRequest{
-		Pattern:      pattern,
-		FixedPort:    uint32(thirdPartyPort),
-		StripPattern: true,
-	})
-	if err != nil {
-		return c, nil, fmt.Errorf(
-			"Failed to obtain lease from portal: %v", err)
-	}
-	log.Printf("Obtained lease for %#v, port: %v, timeout: %v",
-		lease.Pattern, lease.Port, lease.Timeout.AsTime())
-	return c, lease, nil
-}
-
-// Deprecated: Use StartRegistration instead
-func ConnectAndRegister(portalAddr, pattern string) (Client, *Lease, error) {
-	c, err := Connect(portalAddr)
-	if err != nil {
-		return c, nil, err
-	}
-	lease, err := c.RPC.Register(context.Background(), &RegisterRequest{Pattern: pattern})
-	if err != nil {
-		return c, nil, fmt.Errorf(
-			"Failed to obtain lease from portal: %v", err)
-	}
-	log.Printf("Obtained lease for %#v, port: %v, ttl: %v",
-		lease.Pattern, lease.Port, lease.Timeout.AsTime())
-	return c, lease, nil
-}
-
-// Deprecated: Use StartRegistration instead
-func MustConnectAndRegister(portalAddr, pattern string) (Client, *Lease) {
-	c, l, err := ConnectAndRegister(portalAddr, pattern)
-	if err != nil {
-		log.Fatal(err)
-	}
-	return c, l
-}
-
-// Deprecated: Use StartRegistration instead.
-// See the ConnectAndRegisterThirdParty comment for the arguments to use.
-func MustConnectAndRegisterThirdParty(portalAddr string, thirdPartyPort uint16, pattern string) (Client, *Lease) {
-	c, l, err := ConnectAndRegisterThirdParty(portalAddr, thirdPartyPort, pattern)
-	if err != nil {
-		log.Fatal(err)
-	}
-	return c, l
-}
-
-// Deprecated: Use c.RPC.Unregister instead
-func (c Client) Unregister(pattern string) error {
-	_, err := c.RPC.Unregister(context.Background(), &Lease{Pattern: pattern})
-	return err
 }
 
 // Adds slashes to the beginning and end of a given path so that the given path
