@@ -27,7 +27,7 @@ var (
 func main() {
 	flag.Parse()
 	quit := make(chan struct{})
-	tools.CloseOnSignals(quit)
+	tools.CloseOnQuitSignals(quit)
 
 	url := *urlPath
 	lease := portal.MustStartRegistration(*portalAddr, &portal.RegisterRequest{

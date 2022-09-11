@@ -236,7 +236,7 @@ func loadTLSConfig(tlsCert, tlsKey *os.File, quit chan struct{}) (*tls.Config, e
 func main() {
 	flag.Parse()
 	quit := make(chan struct{})
-	tools.CloseOnSignals(quit)
+	tools.CloseOnQuitSignals(quit)
 
 	tlsCert, err := openFilePathOrFD(*tlsCertPath)
 	if err != nil {

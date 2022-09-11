@@ -98,7 +98,7 @@ func main() {
 	}
 
 	quit := make(chan struct{})
-	tools.CloseOnSignals(quit)
+	tools.CloseOnQuitSignals(quit)
 
 	children := NewChildren(quit)
 	go children.MonitorDeaths(quit)

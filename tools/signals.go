@@ -7,7 +7,7 @@ import (
 	"syscall"
 )
 
-func CloseOnSignals(quit chan struct{}) {
+func CloseOnQuitSignals(quit chan struct{}) {
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, os.Interrupt, os.Kill, syscall.SIGTERM, syscall.SIGHUP)
 	go func() {

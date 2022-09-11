@@ -87,7 +87,7 @@ func main() {
 		log.Fatal("None of the registrations were successful.")
 	}
 
-	tools.CloseOnSignals(quit)
+	tools.CloseOnQuitSignals(quit)
 	<-quit
 	wg.Wait()
 	log.Print("Goodbye.")
