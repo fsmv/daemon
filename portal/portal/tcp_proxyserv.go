@@ -19,19 +19,26 @@ type TCPProxy struct {
 	leasor    *PortLeasor
 	tlsConfig *tls.Config
 	quit      chan struct{}
-	leases    sync.Map
+	cancelers sync.Map
 }
 
 func StartTCPProxy(l *PortLeasor, tlsConfig *tls.Config, quit chan struct{}) *TCPProxy {
-	return &TCPProxy{
+	p := &TCPProxy{
 		leasor:    l,
 		tlsConfig: tlsConfig,
 		quit:      quit,
 	}
+	l.OnTTL(p.Unregister)
+	return p
+}
+
+func (p *TCPProxy) Unregister(lease *portal.Lease) {
+	canceler, _ := p.cancelers.Load(lease.Pattern)
+	close(canceler.(chan struct{}))
 }
 
 func (p *TCPProxy) Register(clientAddr string, request *portal.RegisterRequest) (*portal.Lease, error) {
-	oldLease, loaded := p.leases.LoadOrStore(request.Pattern, nil)
+	oldLease, loaded := p.cancelers.LoadOrStore(request.Pattern, nil)
 	if loaded {
 		if oldLease == nil {
 			// This can happen when two different RPC clients simultaneously
@@ -52,8 +59,7 @@ func (p *TCPProxy) Register(clientAddr string, request *portal.RegisterRequest) 
 			return
 		}
 	}()
-	lease, err := p.leasor.Register(clientAddr, request,
-		func() { close(cancelLease) })
+	lease, err := p.leasor.Register(request)
 	if err != nil {
 		return nil, err
 	}
@@ -65,7 +71,7 @@ func (p *TCPProxy) Register(clientAddr string, request *portal.RegisterRequest) 
 	serverAddress := fmt.Sprintf("%v:%v", clientAddr, lease.Port)
 	startTCPProxy(listener, serverAddress, cancelLease)
 	log.Printf("Registered a TCP proxy forwarding %v to %v.", port, serverAddress)
-	p.leases.Store(request.Pattern, lease)
+	p.cancelers.Store(request.Pattern, cancelLease)
 	return lease, nil
 }
 

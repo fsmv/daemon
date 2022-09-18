@@ -220,9 +220,7 @@ func loadTLSConfig(tlsCert, tlsKey *os.File, quit chan struct{}) (*tls.Config, e
 	if *autoTLSCerts {
 		refresher := StartTLSRefresher(tlsCert, tlsKey, quit)
 		return &tls.Config{
-			GetCertificate: func(hi *tls.ClientHelloInfo) (*tls.Certificate, error) {
-				return refresher.GetCertificate(hi)
-			},
+			GetCertificate: refresher.GetCertificate,
 		}, nil
 	} else {
 		cert, err := loadTLSCertFiles(tlsCert, tlsKey)
@@ -260,7 +258,7 @@ func main() {
 		log.Fatalf("Failed to listen on https port (%v): %v", *httpsPortSpec, err)
 	}
 
-	l := StartPortLeasor(portRangeStart, portRangeEnd, leaseTTL, *saveFilepath, quit)
+	l := StartPortLeasor(portRangeStart, portRangeEnd, leaseTTL, quit)
 	tcpProxy := StartTCPProxy(l, tlsConfig, quit)
 	httpProxy, err := StartHTTPProxy(
 		l, tlsConfig, httpListener, httpsListener, *certChallengeWebRoot, quit)

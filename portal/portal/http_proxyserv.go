@@ -41,9 +41,15 @@ type forwarder struct {
 	Lease   *portal.Lease
 }
 
+func (p *HTTPProxy) Unregister(lease *portal.Lease) {
+	p.forwarders.Delete(lease.Pattern)
+}
+
 // Register leases a new forwarder for the given pattern.
 // Returns an error if the server has no more ports to lease.
-func (p *HTTPProxy) Register(clientAddr string, request *portal.RegisterRequest) (*portal.Lease, error) {
+func (p *HTTPProxy) Register(
+	clientAddr string, request *portal.RegisterRequest) (*portal.Lease, error) {
+
 	if oldFwd := p.selectForwarder(request.Pattern); oldFwd != nil {
 		if oldFwd.Lease.Pattern == certChallengePattern {
 			err := fmt.Errorf("Clients cannot register the cert challenge path %#v which covers your requested pattern %#v", certChallengePattern, request.Pattern)
@@ -58,8 +64,7 @@ func (p *HTTPProxy) Register(clientAddr string, request *portal.RegisterRequest)
 		log.Printf("Replacing existing lease with the same pattern: %#v", request.Pattern)
 		p.leasor.Unregister(oldFwd.Lease) // ignore not registered error
 	}
-	lease, err := p.leasor.Register(clientAddr, request,
-		func() { p.forwarders.Delete(request.Pattern) })
+	lease, err := p.leasor.Register(request)
 	if err != nil {
 		log.Print("Error registering: ", err)
 		return nil, err
@@ -271,8 +276,9 @@ func StartHTTPProxy(l *PortLeasor, tlsConfig *tls.Config,
 	httpList, httpsList net.Listener,
 	certChallengeWebRoot string, quit chan struct{}) (*HTTPProxy, error) {
 	ret := &HTTPProxy{
-		leasor: l,
+		leasor:   l,
 	}
+	l.OnTTL(ret.Unregister)
 
 	// Set up serving cert challenges
 	if certChallengeWebRoot != "" {

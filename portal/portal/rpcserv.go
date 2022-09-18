@@ -23,6 +23,7 @@ type RPCServ struct {
 	leasor    *PortLeasor
 	tcpProxy  *TCPProxy
 	httpProxy *HTTPProxy
+	state     *StateManager
 	quit      chan struct{}
 }
 
@@ -47,6 +48,11 @@ func (s *RPCServ) loadSavedRegistrations(saveFilepath string) {
 	// Register the saved registrations
 	loaded := 0
 	for _, registration := range state.Registrations {
+		if registration.Request.FixedPort == 0 {
+			// Request a new lease for the port we had before if the original request
+			// was for a random port
+			registration.Request.FixedPort = registration.Lease.Port
+		}
 		// Note: Don't check for expired leases, if we restart everyone gets an
 		// extension on their leases. We will remove leases from the file as the
 		// expire while we're online.
@@ -69,12 +75,20 @@ func (s *RPCServ) Register(ctx context.Context, request *portal.RegisterRequest)
 	return s.internalRegister(client, request)
 }
 
-func (s *RPCServ) internalRegister(client string, request *portal.RegisterRequest) (*portal.Lease, error) {
+func (s *RPCServ) internalRegister(client string, request *portal.RegisterRequest) (lease *portal.Lease, err error) {
 	if strings.HasPrefix(request.Pattern, tcpProxyPrefix) {
-		return s.tcpProxy.Register(client, request)
+		lease, err = s.tcpProxy.Register(client, request)
 	} else {
-		return s.httpProxy.Register(client, request)
+		lease, err = s.httpProxy.Register(client, request)
 	}
+	if err == nil {
+		s.state.NewRegistration(&Registration{
+			ClientAddr: client,
+			Request:    request,
+			Lease:      lease,
+		})
+	}
+	return
 }
 
 // Unregister unregisters the forwarding rule with the given pattern
@@ -85,20 +99,23 @@ func (s *RPCServ) Unregister(ctx context.Context, lease *portal.Lease) (*portal.
 		return lease, err
 	}
 	log.Printf("Unregistered rule with pattern: %v", lease.Pattern)
+	s.state.Unregister(lease)
 	lease.Timeout = timestamppb.Now()
 	return lease, nil
 }
 
 // Renew renews the lease on a currently registered pattern
 func (s *RPCServ) Renew(ctx context.Context, lease *portal.Lease) (*portal.Lease, error) {
-	lease, err := s.leasor.Renew(lease)
+	newLease, err := s.leasor.Renew(lease)
 	if err != nil {
 		log.Print(err)
 		return nil, err
 	}
+
+	s.state.RenewRegistration(newLease)
 	log.Printf("Renewed lease on pattern: %v. Port: %v, Timeout: %v",
-		lease.Pattern, lease.Port, lease.Timeout.AsTime())
-	return lease, nil
+		newLease.Pattern, newLease.Port, newLease.Timeout.AsTime())
+	return newLease, nil
 }
 
 // StartNew creates a new RPCServ and starts it
@@ -107,10 +124,12 @@ func StartRPCServer(leasor *PortLeasor, tcpProxy *TCPProxy, httpProxy *HTTPProxy
 
 	s := &RPCServ{
 		leasor:    leasor,
+		state:     NewStateManager(saveFilepath),
 		tcpProxy:  tcpProxy,
 		httpProxy: httpProxy,
 		quit:      quit,
 	}
+	leasor.OnTTL(s.state.Unregister)
 	s.loadSavedRegistrations(saveFilepath)
 	server := grpc.NewServer()
 	portal.RegisterPortalServer(server, s)
