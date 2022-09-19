@@ -146,7 +146,7 @@ func StartDashboard(children *Children, quit chan struct{}) (dashboardQuit chan 
 		<-quit
 		close(dashboardQuit)
 	}()
-	lease, err := portal.StartRegistration(*portalAddr, &portal.RegisterRequest{
+	lease, tlsConf, err := portal.StartTLSRegistration(*portalAddr, &portal.RegisterRequest{
 		Pattern: dashboardUrl,
 	}, dashboardQuit)
 	if err != nil {
@@ -168,6 +168,6 @@ func StartDashboard(children *Children, quit chan struct{}) (dashboardQuit chan 
 	http.Handle(dashboardUrl, &dashboard{children, templates})
 	http.Handle(logsUrl, &logStream{children})
 
-	go tools.RunHTTPServer(lease.Port, dashboardQuit)
+	go tools.RunHTTPServerTLS(lease.Port, tlsConf, dashboardQuit)
 	return dashboardQuit, nil
 }

@@ -11,6 +11,7 @@ import (
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"
 	status "google.golang.org/grpc/status"
+	emptypb "google.golang.org/protobuf/types/known/emptypb"
 )
 
 // This is a compile-time assertion to ensure that this generated file
@@ -25,6 +26,10 @@ type PortalClient interface {
 	Register(ctx context.Context, in *RegisterRequest, opts ...grpc.CallOption) (*Lease, error)
 	Renew(ctx context.Context, in *Lease, opts ...grpc.CallOption) (*Lease, error)
 	Unregister(ctx context.Context, in *Lease, opts ...grpc.CallOption) (*Lease, error)
+	// Returns the address that will be used to connect to your server if
+	// registered. It is necessary to register the correct hostname in the TLS
+	// certificate signed by portal.
+	MyHostname(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*Hostname, error)
 }
 
 type portalClient struct {
@@ -62,6 +67,15 @@ func (c *portalClient) Unregister(ctx context.Context, in *Lease, opts ...grpc.C
 	return out, nil
 }
 
+func (c *portalClient) MyHostname(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*Hostname, error) {
+	out := new(Hostname)
+	err := c.cc.Invoke(ctx, "/Portal/MyHostname", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // PortalServer is the server API for Portal service.
 // All implementations must embed UnimplementedPortalServer
 // for forward compatibility
@@ -69,6 +83,10 @@ type PortalServer interface {
 	Register(context.Context, *RegisterRequest) (*Lease, error)
 	Renew(context.Context, *Lease) (*Lease, error)
 	Unregister(context.Context, *Lease) (*Lease, error)
+	// Returns the address that will be used to connect to your server if
+	// registered. It is necessary to register the correct hostname in the TLS
+	// certificate signed by portal.
+	MyHostname(context.Context, *emptypb.Empty) (*Hostname, error)
 	mustEmbedUnimplementedPortalServer()
 }
 
@@ -84,6 +102,9 @@ func (UnimplementedPortalServer) Renew(context.Context, *Lease) (*Lease, error) 
 }
 func (UnimplementedPortalServer) Unregister(context.Context, *Lease) (*Lease, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Unregister not implemented")
+}
+func (UnimplementedPortalServer) MyHostname(context.Context, *emptypb.Empty) (*Hostname, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method MyHostname not implemented")
 }
 func (UnimplementedPortalServer) mustEmbedUnimplementedPortalServer() {}
 
@@ -152,6 +173,24 @@ func _Portal_Unregister_Handler(srv interface{}, ctx context.Context, dec func(i
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Portal_MyHostname_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(emptypb.Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PortalServer).MyHostname(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/Portal/MyHostname",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PortalServer).MyHostname(ctx, req.(*emptypb.Empty))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Portal_ServiceDesc is the grpc.ServiceDesc for Portal service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -170,6 +209,10 @@ var Portal_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Unregister",
 			Handler:    _Portal_Unregister_Handler,
+		},
+		{
+			MethodName: "MyHostname",
+			Handler:    _Portal_MyHostname_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

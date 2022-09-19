@@ -30,9 +30,10 @@ func main() {
 	tools.CloseOnQuitSignals(quit)
 
 	url := *urlPath
-	lease := portal.MustStartRegistration(*portalAddr, &portal.RegisterRequest{
-		Pattern: url,
-	}, quit)
+	lease, tlsConf := portal.MustStartTLSRegistration(*portalAddr,
+		&portal.RegisterRequest{
+			Pattern: url,
+		}, quit)
 
 	// Setup the server handler
 	dir := http.Dir(*webRoot)
@@ -55,6 +56,6 @@ func main() {
 	log.Printf("Test stat: %v", err)
 	f.Close()
 
-	tools.RunHTTPServer(lease.Port, quit)
+	tools.RunHTTPServerTLS(lease.Port, tlsConf, quit)
 	log.Print("Goodbye.")
 }

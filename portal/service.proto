@@ -2,11 +2,21 @@ syntax = "proto3";
 option go_package = "ask.systems/daemon/portal";
 
 import "google/protobuf/timestamp.proto";
+import "google/protobuf/empty.proto";
 
 service Portal {
 	rpc Register(RegisterRequest) returns (Lease) {}
 	rpc Renew(Lease) returns (Lease) {}
 	rpc Unregister(Lease) returns (Lease) {}
+
+	// Returns the address that will be used to connect to your server if
+	// registered. It is necessary to register the correct hostname in the TLS
+	// certificate signed by portal.
+	rpc MyHostname(google.protobuf.Empty) returns (Hostname) {}
+}
+
+message Hostname {
+	string hostname = 1;
 }
 
 message RegisterRequest {
@@ -22,12 +32,21 @@ message RegisterRequest {
 	//
 	// Ignored for TCP proxies.
 	bool strip_pattern = 3;
+
+	// If set, the server will sign the certificate request with portal's
+	// certificate as the root and accept connections to the signed cert. This way
+	// network traffic behind the reverse proxy can be encrypted.
+	bytes certificate_request = 4;
 }
 
 message Lease {
 	string pattern = 1;
 	uint32 port = 2;
 	google.protobuf.Timestamp timeout = 3;
+
+	// If generate_certificate was set in the request, this is the signed x509
+	// certificate to use for your server. It will be renewed with the lease.
+	bytes Certificate = 4;
 }
 
 // vim: set noexpandtab:

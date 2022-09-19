@@ -8,6 +8,7 @@
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"fmt"
 	"log"
@@ -22,6 +23,7 @@ import (
 	"sync"
 
 	"ask.systems/daemon/portal"
+	"ask.systems/daemon/tools"
 )
 
 // The path for the let's encrypt web-root cert challenge
@@ -33,6 +35,8 @@ type HTTPProxy struct {
 	leasor *PortLeasor
 	// Map from pattern to *forwarder, which must not be modified
 	forwarders sync.Map
+	rootCert   *tools.AutorenewCertificate
+	state      *StateManager
 }
 
 // forwarder holds the data for a forwarding rule registered with HTTPProxy
@@ -70,7 +74,8 @@ func (p *HTTPProxy) Register(
 		return nil, err
 	}
 
-	err = p.saveForwarder(clientAddr, lease, request.StripPattern)
+	useTLS := len(request.CertificateRequest) != 0
+	err = p.saveForwarder(clientAddr, lease, request.StripPattern, useTLS)
 	if err != nil {
 		return nil, err
 	}
@@ -85,15 +90,47 @@ func (p *HTTPProxy) Register(
 // if stripPattern is true, the pattern will be removed from the prefix of the
 // http request paths. This is needed for third party applications that expect
 // to get requests for / not /pattern/
-func (p *HTTPProxy) saveForwarder(clientAddr string, lease *portal.Lease, stripPattern bool) error {
-	backend, err := url.Parse("http://" + clientAddr + ":" + strconv.Itoa(int(lease.Port)))
+func (p *HTTPProxy) saveForwarder(clientAddr string, lease *portal.Lease,
+	stripPattern bool, useTLS bool) error {
+
+	var protocol string
+	if useTLS {
+		protocol = "https://"
+	} else {
+		protocol = "http://"
+	}
+	backend, err := url.Parse(protocol + clientAddr + ":" + strconv.Itoa(int(lease.Port)))
 	if err != nil {
 		return err
 	}
 	// Store the forwarder
 	backendQuery := backend.RawQuery
 	pattern := lease.Pattern
+
+	// Accept certificates signed by the latest portal cert
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.DialTLSContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		roots := p.state.RootCAs()
+		dialConf := &tls.Config{
+			RootCAs:   roots,
+			ClientCAs: roots,
+			// Use the server cert for client auth
+			GetClientCertificate: func(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
+				return p.rootCert.Certificate(), nil
+			},
+		}
+
+		// TODO: Use dialConf.VerifyPeerCertificate to only allow talking to client
+		// that we registered with.
+		//
+		// That means we have to keep track of the cert as it gets renewed and pipe
+		// it in here.
+		dialer := &tls.Dialer{Config: dialConf}
+		return dialer.DialContext(ctx, network, addr)
+	}
+
 	proxy := &httputil.ReverseProxy{
+		Transport: transport,
 		Director: func(req *http.Request) {
 			// TODO: does this help anything???
 			//req.Header.Add("X-Forwarded-Host", req.Host)
@@ -273,10 +310,13 @@ func makeChallengeHandler(webRoot string) (http.Handler, error) {
 //   - certChallengeWebRoot if non-empty start the file server for tls cert challenges
 //   - quit is a channel that will be closed when the server should quit
 func StartHTTPProxy(l *PortLeasor, tlsConfig *tls.Config,
-	httpList, httpsList net.Listener,
-	certChallengeWebRoot string, quit chan struct{}) (*HTTPProxy, error) {
+	httpList, httpsList net.Listener, certChallengeWebRoot string,
+	state *StateManager, rootCert *tools.AutorenewCertificate,
+	quit chan struct{}) (*HTTPProxy, error) {
 	ret := &HTTPProxy{
 		leasor:   l,
+		rootCert: rootCert,
+		state:    state,
 	}
 	l.OnTTL(ret.Unregister)
 

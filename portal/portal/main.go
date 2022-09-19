@@ -75,6 +75,7 @@ func listenerFromPortOrFD(portOrFD int) (net.Listener, error) {
 	return net.Listen("tcp", fmt.Sprintf(":%v", portOrFD))
 }
 
+// TODO: if there was no TLS cert specfied, use the self signed cert for web
 type tlsRefresher struct {
 	cert  *os.File
 	key   *os.File
@@ -258,16 +259,38 @@ func main() {
 		log.Fatalf("Failed to listen on https port (%v): %v", *httpsPortSpec, err)
 	}
 
+	// Load the previous save data from the file before we overwrite it
+	saveData, err := os.ReadFile(*saveFilepath)
+	if err != nil {
+		log.Print("Save state file not read: ", err)
+		return
+	}
+
+	state := NewStateManager(*saveFilepath)
+	onCertRenew := func(cert *tls.Certificate) {
+		if err := state.NewRootCA(cert.Certificate[0]); err != nil {
+			log.Print("Error saving new root CA, new backend connections may not work: ", err)
+		}
+	}
+
+	rootCert, err := tools.AutorenewSelfSignedCertificate("portal", 10*leaseTTL, onCertRenew, quit)
+	if err != nil {
+		log.Fatalf("Failed to create a self signed certificate for the RPC server: %v", err)
+	}
+
 	l := StartPortLeasor(portRangeStart, portRangeEnd, leaseTTL, quit)
 	tcpProxy := StartTCPProxy(l, tlsConfig, quit)
-	httpProxy, err := StartHTTPProxy(
-		l, tlsConfig, httpListener, httpsListener, *certChallengeWebRoot, quit)
+	httpProxy, err := StartHTTPProxy(l, tlsConfig,
+		httpListener, httpsListener, *certChallengeWebRoot,
+		state, rootCert, quit)
 	log.Print("Started HTTP proxy server")
 	if err != nil {
 		log.Fatalf("Failed to start HTTP proxy server: %v", err)
 	}
 
-	_, err = StartRPCServer(l, tcpProxy, httpProxy, rpcPort, *saveFilepath, quit)
+	_, err = StartRPCServer(l,
+		tcpProxy, httpProxy, rpcPort,
+		rootCert, saveData, state, quit)
 	log.Print("Started rpc server on port ", rpcPort)
 	if err != nil {
 		log.Fatal("Failed to start RPC server:", err)

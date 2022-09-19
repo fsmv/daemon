@@ -2,13 +2,17 @@ package portal
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"log"
 	"strings"
+	"sync/atomic"
 	"time"
 
+	"ask.systems/daemon/tools"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 var (
@@ -49,9 +53,60 @@ func MustStartRegistration(portalAddr string, request *RegisterRequest, quit <-c
 	return lease
 }
 
+func MustStartTLSRegistration(portalAddr string,
+	request *RegisterRequest, quit <-chan struct{}) (*Lease, *tls.Config) {
+	lease, conf, err := StartTLSRegistration(portalAddr, request, quit)
+	if err != nil {
+		log.Fatal(err)
+	}
+	return lease, conf
+}
+
+func StartTLSRegistration(portalAddr string,
+	request *RegisterRequest, quit <-chan struct{}) (*Lease, *tls.Config, error) {
+
+	c, err := Connect(portalAddr)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Setup the request for a new certificate
+	hostResp, err := c.RPC.MyHostname(context.Background(), &emptypb.Empty{})
+	if err != nil {
+		return nil, nil, fmt.Errorf("Error from MyHostname: %v", err)
+	}
+	csr, privateKey, err := tools.GenerateCertificateRequest(hostResp.Hostname)
+	request.CertificateRequest = csr
+	if err != nil {
+		return nil, nil, fmt.Errorf("Error generating cert request: %v", err)
+	}
+
+	// Do the registration
+	lease, err := c.RPC.Register(context.Background(), request)
+	if err != nil {
+		return nil, nil, fmt.Errorf("Failed to obtain lease from portal: %v", err)
+	}
+	log.Printf("Obtained TLS lease for %#v, port: %v, ttl: %v",
+		lease.Pattern, lease.Port, lease.Timeout.AsTime())
+
+	// Keep the lease renewed and set up a TLS config that uses the auto-renewed
+	// TLS certificate
+	certCache := &atomic.Value{}
+	certCache.Store(lease.Certificate)
+	go c.KeepLeaseRenewedTLS(quit, lease, func(cert []byte) { certCache.Store(cert) })
+	config := &tls.Config{
+		GetCertificate: func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
+			cert := tools.CertificateFromSignedCert(certCache.Load().([]byte), privateKey)
+			return cert, nil
+		},
+	}
+	return lease, config, nil
+}
+
 // Connect to the portal RPC server and don't do anything else. Use this if you
 // want to call the proto RPCs directly.
 func Connect(portalAddr string) (Client, error) {
+	// TODO: TLS grpc server
 	conn, err := grpc.Dial(portalAddr, grpc.WithInsecure())
 	if err != nil {
 		return Client{}, fmt.Errorf("Failed to connect to frontend proxy RPC server: %v", err)
@@ -70,6 +125,10 @@ func (c Client) Close() {
 // When the quit channel is closed this function unregisters the lease and
 // closes the client.
 func (c Client) KeepLeaseRenewed(quit <-chan struct{}, lease *Lease) {
+	c.KeepLeaseRenewedTLS(quit, lease, nil)
+}
+
+func (c Client) KeepLeaseRenewedTLS(quit <-chan struct{}, lease *Lease, newCert func([]byte)) {
 	defer func() {
 		c.RPC.Unregister(context.Background(), lease)
 		c.Close()
@@ -99,6 +158,9 @@ func (c Client) KeepLeaseRenewed(quit <-chan struct{}, lease *Lease) {
 			} else {*/
 			log.Printf("Error from renew: %v", err)
 			//}
+		}
+		if newCert != nil {
+			newCert(lease.Certificate)
 		}
 		timeout := lease.Timeout.AsTime()
 		log.Printf("Renewed lease, port: %v, ttl: %v", lease.Port, timeout)

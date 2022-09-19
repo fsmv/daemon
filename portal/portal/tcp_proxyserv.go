@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -38,18 +39,6 @@ func (p *TCPProxy) Unregister(lease *portal.Lease) {
 }
 
 func (p *TCPProxy) Register(clientAddr string, request *portal.RegisterRequest) (*portal.Lease, error) {
-	oldLease, loaded := p.cancelers.LoadOrStore(request.Pattern, nil)
-	if loaded {
-		if oldLease == nil {
-			// This can happen when two different RPC clients simultaneously
-			// requeust to register the same pattern, because there is time between
-			// the Load above and the Store below.
-			return nil, fmt.Errorf("Another simultaneous request to register this port won the lease. Retry to take over the lease.")
-		}
-		// TODO: can we notify the old lease holder that we kicked them?
-		log.Printf("Replacing an existing lease for the same TCP pattern: %#v", request.Pattern)
-		p.leasor.Unregister(oldLease.(*portal.Lease))
-	}
 	cancelLease := make(chan struct{})
 	go func() {
 		select {
@@ -60,6 +49,14 @@ func (p *TCPProxy) Register(clientAddr string, request *portal.RegisterRequest) 
 		}
 	}()
 	lease, err := p.leasor.Register(request)
+	if err != nil {
+		if errors.Is(err, FixedPortTakenErr) {
+			// TODO: can we notify the old lease holder that we kicked them?
+			log.Printf("Replacing an existing lease for the same TCP pattern: %#v", request.Pattern)
+			p.leasor.Unregister(lease)
+			lease, err = p.leasor.Register(request)
+		}
+	}
 	if err != nil {
 		return nil, err
 	}

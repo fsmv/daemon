@@ -5,14 +5,15 @@ import (
 	"fmt"
 	"log"
 	"net"
-	"os"
 	"strconv"
 	"strings"
 
 	"ask.systems/daemon/portal"
+	"ask.systems/daemon/tools"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/peer"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -23,6 +24,7 @@ type RPCServ struct {
 	leasor    *PortLeasor
 	tcpProxy  *TCPProxy
 	httpProxy *HTTPProxy
+	rootCert  *tools.AutorenewCertificate
 	state     *StateManager
 	quit      chan struct{}
 }
@@ -32,21 +34,25 @@ func hostname(address string) string {
 	return address[:portIdx]
 }
 
-func (s *RPCServ) loadSavedRegistrations(saveFilepath string) {
-	// Load the data from the file
-	saveData, err := os.ReadFile(saveFilepath)
-	if err != nil {
-		log.Print("Save state file not read: ", err)
-		return
-	}
+func (s *RPCServ) loadState(saveData []byte) {
 	state := &State{}
 	if err := proto.Unmarshal(saveData, state); err != nil {
 		log.Print("Failed to unmarshal save state file: ", err)
 		return
 	}
 
-	// Register the saved registrations
 	loaded := 0
+	for _, ca := range state.RootCAs {
+		if err := s.state.NewRootCA(ca); err != nil {
+			log.Print("Failed to save root CA: ", err)
+			continue
+		}
+		loaded += 1
+	}
+	log.Printf("Successfully loaded %v/%v saved root CAs", loaded, len(state.RootCAs))
+
+	// Register the saved registrations
+	loaded = 0
 	for _, registration := range state.Registrations {
 		if registration.Request.FixedPort == 0 {
 			// Request a new lease for the port we had before if the original request
@@ -66,13 +72,35 @@ func (s *RPCServ) loadSavedRegistrations(saveFilepath string) {
 	log.Printf("Successfully loaded %v/%v saved registrations", loaded, len(state.Registrations))
 }
 
+func (s *RPCServ) MyHostname(ctx context.Context, empty *emptypb.Empty) (*portal.Hostname, error) {
+	p, _ := peer.FromContext(ctx)
+	client := hostname(p.Addr.String())
+	return &portal.Hostname{Hostname: client}, nil
+}
+
 // Register registers a new forwarding rule to the rpc client's ip address.
 // Randomly assigns port for the client to listen on
 func (s *RPCServ) Register(ctx context.Context, request *portal.RegisterRequest) (*portal.Lease, error) {
 	// Get the RPC client's address (without the port) from gRPC
 	p, _ := peer.FromContext(ctx)
 	client := hostname(p.Addr.String())
-	return s.internalRegister(client, request)
+
+	lease, err := s.internalRegister(client, request)
+	if err != nil {
+		return nil, err
+	}
+
+	var clientCert []byte
+	if len(request.CertificateRequest) != 0 {
+		clientCert, err = tools.SignCertificate(s.rootCert.Certificate(),
+			request.CertificateRequest, lease.Timeout.AsTime(), false)
+		if err != nil {
+			return nil, err
+		}
+	}
+	lease.Certificate = clientCert
+
+	return lease, nil
 }
 
 func (s *RPCServ) internalRegister(client string, request *portal.RegisterRequest) (lease *portal.Lease, err error) {
@@ -112,6 +140,18 @@ func (s *RPCServ) Renew(ctx context.Context, lease *portal.Lease) (*portal.Lease
 		return nil, err
 	}
 
+	registration := s.state.LookupRegistration(lease)
+
+	// Renew the certificate if we had one
+	if len(registration.Request.CertificateRequest) != 0 {
+		newCert, err := tools.SignCertificate(s.rootCert.Certificate(),
+			registration.Request.CertificateRequest, newLease.Timeout.AsTime(), false)
+		if err != nil {
+			return nil, err
+		}
+		newLease.Certificate = newCert
+	}
+
 	s.state.RenewRegistration(newLease)
 	log.Printf("Renewed lease on pattern: %v. Port: %v, Timeout: %v",
 		newLease.Pattern, newLease.Port, newLease.Timeout.AsTime())
@@ -119,18 +159,21 @@ func (s *RPCServ) Renew(ctx context.Context, lease *portal.Lease) (*portal.Lease
 }
 
 // StartNew creates a new RPCServ and starts it
-func StartRPCServer(leasor *PortLeasor, tcpProxy *TCPProxy, httpProxy *HTTPProxy,
-	port uint16, saveFilepath string, quit chan struct{}) (*RPCServ, error) {
+func StartRPCServer(leasor *PortLeasor,
+	tcpProxy *TCPProxy, httpProxy *HTTPProxy,
+	port uint16, rootCert *tools.AutorenewCertificate,
+	saveData []byte, state *StateManager, quit chan struct{}) (*RPCServ, error) {
 
 	s := &RPCServ{
 		leasor:    leasor,
-		state:     NewStateManager(saveFilepath),
+		state:     state,
 		tcpProxy:  tcpProxy,
 		httpProxy: httpProxy,
 		quit:      quit,
+		rootCert:  rootCert,
 	}
 	leasor.OnTTL(s.state.Unregister)
-	s.loadSavedRegistrations(saveFilepath)
+	s.loadState(saveData)
 	server := grpc.NewServer()
 	portal.RegisterPortalServer(server, s)
 	l, err := net.Listen("tcp", ":"+strconv.Itoa(int(port)))

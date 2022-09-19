@@ -1,9 +1,12 @@
 package main
 
 import (
+	"crypto/x509"
 	"log"
 	"os"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"ask.systems/daemon/portal"
 	"google.golang.org/protobuf/proto"
@@ -12,6 +15,9 @@ import (
 type StateManager struct {
 	mut           *sync.Mutex
 	registrations map[uint32]*Registration // lease port key
+	rootCAs       map[*x509.Certificate]struct{}
+	mutCertPool   *x509.CertPool
+	readCertPool  *atomic.Value
 	saveFilepath  string
 }
 
@@ -20,15 +26,25 @@ func NewStateManager(saveFilepath string) *StateManager {
 		mut:           &sync.Mutex{},
 		registrations: make(map[uint32]*Registration),
 		saveFilepath:  saveFilepath,
+		rootCAs:       make(map[*x509.Certificate]struct{}),
+		mutCertPool:   x509.NewCertPool(),
+		readCertPool:  &atomic.Value{},
 	}
 }
 
-// TODO: return error?
 func (s *StateManager) saveUnsafe() {
 	// Build the save state proto from the current in memory state
 	state := &State{}
 	for _, r := range s.registrations {
 		state.Registrations = append(state.Registrations, r)
+	}
+
+	for ca, _ := range s.rootCAs {
+		if time.Now().After(ca.NotAfter) {
+			delete(s.rootCAs, ca)
+			continue // Don't save expired root CAs
+		}
+		state.RootCAs = append(state.RootCAs, ca.Raw)
 	}
 
 	saveData, err := proto.Marshal(state)
@@ -41,6 +57,26 @@ func (s *StateManager) saveUnsafe() {
 		return
 	}
 	log.Print("Saved leases state file")
+}
+
+func (s *StateManager) NewRootCA(rawCert []byte) error {
+	newRoot, err := x509.ParseCertificate(rawCert)
+	if err != nil {
+		return err
+	}
+
+	s.mut.Lock()
+	defer s.mut.Unlock()
+
+	s.rootCAs[newRoot] = struct{}{}
+	s.mutCertPool.AddCert(newRoot)
+	s.readCertPool.Store(s.mutCertPool.Clone())
+	s.saveUnsafe()
+	return nil
+}
+
+func (s *StateManager) RootCAs() *x509.CertPool {
+	return s.readCertPool.Load().(*x509.CertPool)
 }
 
 func (s *StateManager) LookupRegistration(lease *portal.Lease) *Registration {
