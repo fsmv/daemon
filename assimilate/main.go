@@ -11,17 +11,11 @@ import (
 
 	_ "embed"
 
-	_ "ask.systems/daemon/tools/flags"
-
 	"ask.systems/daemon/portal"
 	"ask.systems/daemon/tools"
+	_ "ask.systems/daemon/tools/flags"
 
 	"google.golang.org/protobuf/encoding/prototext"
-)
-
-var (
-	portalAddr = flag.String("portal_addr", "127.0.0.1:2048",
-		"Address and port for the portal server")
 )
 
 // go:embed ../portal/service.proto
@@ -48,13 +42,17 @@ func init() {
 		}),
 		"register_request_schema",
 		"Print the schema for portal.RegisterRequest in proto form and exit.")
-	flag.Parse()
+	portal.DefineFlags()
 }
 
 func main() {
+	flag.Parse()
 	var wg sync.WaitGroup
 	quit := make(chan struct{})
-	fe, err := portal.Connect(*portalAddr)
+	if *portal.Token == "" {
+		log.Fatal("-portal_token is required to connect to portal. The value is printed in the portal logs on startup.")
+	}
+	fe, err := portal.Connect(*portal.Address, *portal.Token)
 	if err != nil {
 		log.Fatal(err)
 	}

@@ -14,8 +14,6 @@ import (
 )
 
 var (
-	portalAddr = flag.String("portal_addr", "127.0.0.1:2048",
-		"Address and port for the portal server")
 	webRoot = flag.String("web_root", "",
 		"Directory to serve files from")
 	urlPath = flag.String("url_path", "/", ""+
@@ -25,15 +23,15 @@ var (
 )
 
 func main() {
+	portal.DefineFlags()
 	flag.Parse()
 	quit := make(chan struct{})
 	tools.CloseOnQuitSignals(quit)
 
 	url := *urlPath
-	lease, tlsConf := portal.MustStartTLSRegistration(*portalAddr,
-		&portal.RegisterRequest{
-			Pattern: url,
-		}, quit)
+	lease, tlsConf := portal.MustStartTLSRegistration(&portal.RegisterRequest{
+		Pattern: url,
+	}, quit)
 
 	// Setup the server handler
 	dir := http.Dir(*webRoot)

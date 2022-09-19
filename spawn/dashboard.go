@@ -20,8 +20,6 @@ import (
 const javascriptStreamDelay = 4 * time.Millisecond
 
 var (
-	portalAddr = flag.String("portal_addr", "127.0.0.1:2048",
-		"Address and port for the portal server")
 	passwordHash = flag.String("password_hash", "set me",
 		"sha256sum hash of the 'admin' user's basic auth password.")
 	dashboardUrlFlag = flag.String("dashboard_url", "/daemon/", ""+
@@ -37,6 +35,10 @@ var (
 	dashboardUrl string
 	logsUrl      string
 )
+
+func init() {
+	portal.DefineFlags()
+}
 
 type logStream struct {
 	Children *Children
@@ -146,7 +148,7 @@ func StartDashboard(children *Children, quit chan struct{}) (dashboardQuit chan 
 		<-quit
 		close(dashboardQuit)
 	}()
-	lease, tlsConf, err := portal.StartTLSRegistration(*portalAddr, &portal.RegisterRequest{
+	lease, tlsConf, err := portal.StartTLSRegistration(&portal.RegisterRequest{
 		Pattern: dashboardUrl,
 	}, dashboardQuit)
 	if err != nil {

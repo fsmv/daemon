@@ -2,7 +2,9 @@ package main
 
 import (
 	"crypto/x509"
+	"encoding/base64"
 	"log"
+	"math/rand"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -13,28 +15,40 @@ import (
 )
 
 type StateManager struct {
-	mut           *sync.Mutex
+	mut          *sync.Mutex
+	saveFilepath string
+
 	registrations map[uint32]*Registration // lease port key
-	rootCAs       map[*x509.Certificate]struct{}
-	mutCertPool   *x509.CertPool
-	readCertPool  *atomic.Value
-	saveFilepath  string
+
+	rootCAs      map[*x509.Certificate]struct{}
+	mutCertPool  *x509.CertPool
+	readCertPool *atomic.Value
+
+	token *atomic.Value
 }
 
 func NewStateManager(saveFilepath string) *StateManager {
 	return &StateManager{
-		mut:           &sync.Mutex{},
+		mut:          &sync.Mutex{},
+		saveFilepath: saveFilepath,
+
 		registrations: make(map[uint32]*Registration),
-		saveFilepath:  saveFilepath,
-		rootCAs:       make(map[*x509.Certificate]struct{}),
-		mutCertPool:   x509.NewCertPool(),
-		readCertPool:  &atomic.Value{},
+
+		rootCAs:      make(map[*x509.Certificate]struct{}),
+		mutCertPool:  x509.NewCertPool(),
+		readCertPool: &atomic.Value{},
+
+		token: &atomic.Value{},
 	}
 }
 
 func (s *StateManager) saveUnsafe() {
 	// Build the save state proto from the current in memory state
 	state := &State{}
+	if token := s.token.Load(); token != nil {
+		state.ApiToken = token.(string)
+	}
+
 	for _, r := range s.registrations {
 		state.Registrations = append(state.Registrations, r)
 	}
@@ -57,6 +71,28 @@ func (s *StateManager) saveUnsafe() {
 		return
 	}
 	log.Print("Saved leases state file")
+}
+
+func (s *StateManager) Token() string {
+	return s.token.Load().(string)
+}
+
+// If empty, generate a new token
+func (s *StateManager) SetToken(token string) {
+	if token == "" {
+		b := make([]byte, 32)
+		_, err := rand.Read(b)
+		if err != nil {
+			log.Fatalf("Failed to generate a random API token: ", err)
+		}
+		token = base64.URLEncoding.EncodeToString(b)
+	}
+
+	log.Printf("**** Portal API token: %v ****", token)
+	s.mut.Lock()
+	defer s.mut.Unlock()
+	s.token.Store(token)
+	s.saveUnsafe()
 }
 
 func (s *StateManager) NewRootCA(rawCert []byte) error {

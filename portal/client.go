@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"flag"
 	"fmt"
 	"log"
 	"strings"
@@ -25,14 +26,40 @@ type Client struct {
 	conn *grpc.ClientConn
 }
 
+var (
+	Address *string
+	Token   *string
+)
+
+func DefineFlags() {
+	Address = flag.String("portal_addr", "127.0.0.1:2048",
+		"Address and port for the portal server")
+	Token = flag.String("portal_token", "", ""+
+		"API Token for authorization with the portal server.\n"+
+		"Printed in the portal logs on startup.")
+}
+
+func checkFlags() error {
+	if Address == nil || Token == nil {
+		return errors.New("Call portal.DefineFlags() any time before flag.Parse() to use these helper functions.")
+	}
+	if *Token == "" {
+		return errors.New("-portal_token is required to connect to portal. The value is printed in the portal logs on startup.")
+	}
+	return nil
+}
+
 // Make a connection to the portal RPC service and send the registration
 // request. Also starts a goroutine to renew the lease (KeepLeaseRenewed) until
 // the quit channel is closed.
 //
 // See service.proto for request documentation.
 // Returns the initial lease or an error if the registration didn't work.
-func StartRegistration(portalAddr string, request *RegisterRequest, quit <-chan struct{}) (*Lease, error) {
-	c, err := Connect(portalAddr)
+func StartRegistration(request *RegisterRequest, quit <-chan struct{}) (*Lease, error) {
+	if err := checkFlags(); err != nil {
+		return nil, err
+	}
+	c, err := Connect(*Address, *Token)
 	if err != nil {
 		return nil, err
 	}
@@ -46,27 +73,28 @@ func StartRegistration(portalAddr string, request *RegisterRequest, quit <-chan 
 	return lease, nil
 }
 
-func MustStartRegistration(portalAddr string, request *RegisterRequest, quit <-chan struct{}) *Lease {
-	lease, err := StartRegistration(portalAddr, request, quit)
+func MustStartRegistration(request *RegisterRequest, quit <-chan struct{}) *Lease {
+	lease, err := StartRegistration(request, quit)
 	if err != nil {
 		log.Fatal(err)
 	}
 	return lease
 }
 
-func MustStartTLSRegistration(portalAddr string,
-	request *RegisterRequest, quit <-chan struct{}) (*Lease, *tls.Config) {
-	lease, conf, err := StartTLSRegistration(portalAddr, request, quit)
+func MustStartTLSRegistration(request *RegisterRequest, quit <-chan struct{}) (*Lease, *tls.Config) {
+	lease, conf, err := StartTLSRegistration(request, quit)
 	if err != nil {
 		log.Fatal(err)
 	}
 	return lease, conf
 }
 
-func StartTLSRegistration(portalAddr string,
-	request *RegisterRequest, quit <-chan struct{}) (*Lease, *tls.Config, error) {
+func StartTLSRegistration(request *RegisterRequest, quit <-chan struct{}) (*Lease, *tls.Config, error) {
 
-	c, err := Connect(portalAddr)
+	if err := checkFlags(); err != nil {
+		return nil, nil, err
+	}
+	c, err := Connect(*Address, *Token)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -104,12 +132,27 @@ func StartTLSRegistration(portalAddr string,
 	return lease, config, nil
 }
 
+type rpcToken string
+
+func (token rpcToken) GetRequestMetadata(ctx context.Context, uri ...string) (map[string]string, error) {
+	return map[string]string{
+		"authorization": string(token),
+	}, nil
+}
+
+func (token rpcToken) RequireTransportSecurity() bool {
+	return true
+}
+
 // Connect to the portal RPC server and don't do anything else. Use this if you
 // want to call the proto RPCs directly.
-func Connect(portalAddr string) (Client, error) {
-	conn, err := grpc.Dial(portalAddr, grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{
-		InsecureSkipVerify: true,
-	})))
+func Connect(portalAddr, token string) (Client, error) {
+	conn, err := grpc.Dial(portalAddr,
+		grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{
+			InsecureSkipVerify: true,
+		})),
+		grpc.WithPerRPCCredentials(rpcToken(token)),
+	)
 	if err != nil {
 		return Client{}, fmt.Errorf("Failed to connect to frontend proxy RPC server: %v", err)
 	}

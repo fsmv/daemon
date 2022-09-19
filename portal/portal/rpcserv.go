@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/subtle"
 	"crypto/tls"
 	"fmt"
 	"log"
@@ -12,7 +13,9 @@ import (
 	"ask.systems/daemon/portal"
 	"ask.systems/daemon/tools"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/peer"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -42,6 +45,8 @@ func (s *RPCServ) loadState(saveData []byte) {
 		log.Print("Failed to unmarshal save state file: ", err)
 		return
 	}
+
+	s.state.SetToken(state.ApiToken) // generates a new token if not set
 
 	loaded := 0
 	for _, ca := range state.RootCAs {
@@ -176,12 +181,29 @@ func StartRPCServer(leasor *PortLeasor,
 	}
 	leasor.OnTTL(s.state.Unregister)
 	s.loadState(saveData)
-	// TODO: require an API token to connect to prevent unauthorized users
-	server := grpc.NewServer(grpc.Creds(credentials.NewTLS(&tls.Config{
-		GetCertificate: func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
-			return rootCert.Certificate(), nil
-		},
-	})))
+	server := grpc.NewServer(
+		grpc.Creds(credentials.NewTLS(&tls.Config{
+			GetCertificate: func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
+				return rootCert.Certificate(), nil
+			},
+		})),
+		grpc.UnaryInterceptor(func(ctx context.Context, req interface{},
+			info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp interface{}, err error) {
+			md, ok := metadata.FromIncomingContext(ctx)
+			noTokenErr := grpc.Errorf(codes.Unauthenticated, "A metadata authorization token must be presented")
+			if !ok {
+				return nil, noTokenErr
+			}
+			clientToken, ok := md["authorization"]
+			if !ok || len(clientToken) != 1 {
+				return nil, noTokenErr
+			}
+			if subtle.ConstantTimeCompare([]byte(clientToken[0]), []byte(state.Token())) == 0 {
+				return nil, grpc.Errorf(codes.Unauthenticated, "Invalid token")
+			}
+			return handler(ctx, req)
+		}),
+	)
 	portal.RegisterPortalServer(server, s)
 	l, err := net.Listen("tcp", ":"+strconv.Itoa(int(port)))
 	if err != nil {

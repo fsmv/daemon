@@ -56,7 +56,7 @@ var (
 		"If positive, the port to bind to for https traffic or\n"+
 		"if negative, the file descriptor id for a socket to listen on\n"+
 		"shared by the parent process.")
-	saveFilepath = flag.String("save_file", "active_leases.protodata", ""+
+	saveFilepath = flag.String("save_file", "state.protodata", ""+
 		"The path to the file to store active lease information in so that\n"+
 		"the portal server can safely restart without disrupting proxy service.")
 )
@@ -262,8 +262,7 @@ func main() {
 	// Load the previous save data from the file before we overwrite it
 	saveData, err := os.ReadFile(*saveFilepath)
 	if err != nil {
-		log.Print("Save state file not read: ", err)
-		return
+		log.Print("No save data: ", err)
 	}
 
 	state := NewStateManager(*saveFilepath)

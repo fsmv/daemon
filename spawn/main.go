@@ -10,9 +10,9 @@ import (
 
 	_ "embed"
 
+	"ask.systems/daemon/tools"
 	_ "ask.systems/daemon/tools/flags"
 
-	"ask.systems/daemon/tools"
 	"google.golang.org/protobuf/encoding/prototext"
 )
 
