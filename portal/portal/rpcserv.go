@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"log"
 	"net"
@@ -11,6 +12,7 @@ import (
 	"ask.systems/daemon/portal"
 	"ask.systems/daemon/tools"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/peer"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -174,7 +176,12 @@ func StartRPCServer(leasor *PortLeasor,
 	}
 	leasor.OnTTL(s.state.Unregister)
 	s.loadState(saveData)
-	server := grpc.NewServer()
+	// TODO: require an API token to connect to prevent unauthorized users
+	server := grpc.NewServer(grpc.Creds(credentials.NewTLS(&tls.Config{
+		GetCertificate: func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
+			return rootCert.Certificate(), nil
+		},
+	})))
 	portal.RegisterPortalServer(server, s)
 	l, err := net.Listen("tcp", ":"+strconv.Itoa(int(port)))
 	if err != nil {

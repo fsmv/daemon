@@ -12,6 +12,7 @@ import (
 
 	"ask.systems/daemon/tools"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
@@ -106,8 +107,9 @@ func StartTLSRegistration(portalAddr string,
 // Connect to the portal RPC server and don't do anything else. Use this if you
 // want to call the proto RPCs directly.
 func Connect(portalAddr string) (Client, error) {
-	// TODO: TLS grpc server
-	conn, err := grpc.Dial(portalAddr, grpc.WithInsecure())
+	conn, err := grpc.Dial(portalAddr, grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{
+		InsecureSkipVerify: true,
+	})))
 	if err != nil {
 		return Client{}, fmt.Errorf("Failed to connect to frontend proxy RPC server: %v", err)
 	}
