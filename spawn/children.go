@@ -221,6 +221,7 @@ func (children *Children) StartProgram(cmd *Command) error {
 		if proc != nil && proc.Pid > 0 {
 			c.Up = false
 			c.Message = msg
+			close(quitFileRefresh)
 			children.Store(c)
 		}
 		return msg
@@ -293,6 +294,10 @@ func (c *Children) ReportDown(pid int, message error) {
 	child, ok := c.ByPID[pid]
 	if !ok {
 		log.Printf("Got death message for unregistered child: %v", message)
+		return
+	}
+	if !child.Up {
+		log.Printf("Got death message for already dead child")
 		return
 	}
 	child.Up = false
