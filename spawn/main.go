@@ -16,12 +16,6 @@ import (
 	"google.golang.org/protobuf/encoding/prototext"
 )
 
-const (
-	kLogLinesBufferSize      = 256 // Per tag
-	kSubscriptionChannelSize = 5 * kLogLinesBufferSize
-	kPublishChannelSize      = 32
-)
-
 var (
 	configFilename = flag.String("config", "config.pbtxt",
 		"The path to the config file")

@@ -7,6 +7,12 @@ import (
 	"log"
 )
 
+const (
+	kLogLinesBufferSize      = 256 // Per tag
+	kSubscriptionChannelSize = 5 * kLogLinesBufferSize
+	kPublishChannelSize      = 32
+)
+
 type logHandler struct {
 	logLines map[string]*ringBuffer
 	// Broadcasting system
@@ -40,6 +46,10 @@ func (h *logHandler) run() {
 				delete(h.subscribers, sub)
 			} else {
 				// New subscribers get the history buffer
+				//
+				// TODO: if we send id: int after the data in the SSE stream then after
+				// reconnecting it will send a Last-Event-ID header so we can restart
+				// from the place we stopped at
 				for tag, log := range h.logLines {
 					log.Write(sub, tag)
 				}
@@ -57,11 +67,13 @@ func (h *logHandler) run() {
 
 			// Push to subscribers
 			for sub, _ := range h.subscribers {
-				// TODO: maybe timeout or non-blocking with select default
-				//   - if we send id: int after the data in the SSE stream then after
-				//     reconnecting it will send a Last-Event-ID header so we can
-				//     restart from the place we stopped at
-				sub <- m
+				// Non-blocking send in case a client somehow blocked and ran out of
+				// buffer so we don't lock up all the other clients. Realistically this
+				// will never happen.
+				select {
+				case sub <- m:
+				default:
+				}
 			}
 		}
 	}
