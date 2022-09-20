@@ -16,7 +16,11 @@ import (
 // How often to look through the Leases and unregister those past TTL
 const ttlCheckFreq = 15 * time.Minute
 
-var FixedPortTakenErr = errors.New("Requested fixed port is already taken!")
+var (
+	FixedPortTakenErr = errors.New("Requested fixed port is already taken!")
+	UnregisteredErr   = errors.New("The requested lease was not previously registered.")
+	InvalidLeaseErr   = errors.New("The requested lease does not match the lease we have on record for this port.")
+)
 
 // Manages a list of leases for ports client servers should listen on.
 // Also handles expiration of the leases.
@@ -107,10 +111,10 @@ func (l *PortLeasor) Renew(lease *portal.Lease) (*portal.Lease, error) {
 
 	foundLease, ok := l.leases[lease.Port]
 	if !ok || foundLease == nil {
-		return nil, errors.New("Not registered") // TODO: unregistered error
+		return nil, UnregisteredErr
 	}
-	if foundLease.Pattern != lease.Pattern {
-		return nil, errors.New("The lease you requested to renew doesn't match our records for that port.")
+	if foundLease.Pattern != lease.GetPattern() {
+		return nil, InvalidLeaseErr
 	}
 
 	foundLease.Timeout = timestamppb.New(time.Now().Add(l.ttl))
@@ -124,10 +128,10 @@ func (l *PortLeasor) Unregister(lease *portal.Lease) error {
 
 	foundLease := l.leases[lease.Port]
 	if foundLease == nil {
-		return errors.New("Not registered") // TODO: unregistered error
+		return UnregisteredErr
 	}
 	if foundLease.Pattern != lease.GetPattern() {
-		return errors.New("The lease you requested to renew doesn't match our records for that port.")
+		return InvalidLeaseErr
 	}
 
 	log.Print("Lease unregistered: ", foundLease)

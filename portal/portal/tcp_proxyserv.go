@@ -78,7 +78,7 @@ func handleConnection(publicConn net.Conn, serverAddress string, quit chan struc
 		log.Printf("Failed to connect to TCP Proxy backend (for client %v): %v",
 			publicConn.RemoteAddr(), err)
 		publicConn.Close()
-		return // TODO: maybe stop listening if we see a lot of these
+		return
 	}
 	go func() {
 		<-quit // when we quit, close all the connections
