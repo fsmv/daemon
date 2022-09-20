@@ -120,11 +120,11 @@ func (p *HTTPProxy) saveForwarder(clientAddr string, lease *portal.Lease,
 			},
 		}
 
-		// TODO: Use dialConf.VerifyPeerCertificate to only allow talking to client
-		// that we registered with.
-		//
-		// That means we have to keep track of the cert as it gets renewed and pipe
-		// it in here.
+		// Note: We can use dialConf.VerifyPeerCertificate to only allow talking to
+		// client that we registered with. This is pointless right now because we
+		// allow any client with a valid token (same as the clients that have a
+		// valid cert signed by us) to replace any lease. We assume validated
+		// clients are not malicious right now.
 		dialer := &tls.Dialer{Config: dialConf}
 		return dialer.DialContext(ctx, network, addr)
 	}
@@ -267,8 +267,6 @@ func RedirectToHTTPS(w http.ResponseWriter, req *http.Request) {
 func runServer(quit chan struct{}, name string,
 	serv *http.Server, list net.Listener) {
 
-	// TODO: probably should call ServeTLS for tls instead of doing our own
-	// I think this doesn't support HTTP/2 currently
 	err := serv.Serve(list)
 	if err != http.ErrServerClosed {
 		log.Printf("Proxy %v server error: %v", name, err)
@@ -340,6 +338,9 @@ func StartHTTPProxy(l *PortLeasor, tlsConfig *tls.Config,
 	tlsServer := &http.Server{
 		Handler: ret,
 	}
+	// Support HTTP/2. See https://pkg.go.dev/net/http#Serve
+	// > HTTP/2 support is only enabled if ... configured with "h2" in the TLS Config.NextProtos.
+	tlsConfig.NextProtos = append(tlsConfig.NextProtos, "h2")
 	go runServer(quit, "TLS", tlsServer, tls.NewListener(httpsList, tlsConfig))
 	// Start the HTTP server to redirect to HTTPS
 	httpServer := &http.Server{
