@@ -43,7 +43,7 @@ func NewChildren(quit chan struct{}) *Children {
 	}
 	r, w := io.Pipe()
 	log.SetOutput(io.MultiWriter(log.Writer(), tools.NewTimestampWriter(w)))
-	go c.HandleLogs(r, "spawn")
+	go c.HandleLogs(r, kLogsTag)
 	return c
 }
 

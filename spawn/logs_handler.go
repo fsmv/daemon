@@ -11,6 +11,8 @@ const (
 	kLogLinesBufferSize      = 256 // Per tag
 	kSubscriptionChannelSize = 5 * kLogLinesBufferSize
 	kPublishChannelSize      = 32
+	// The tag to use for Stdout of this binary
+	kLogsTag = "spawn"
 )
 
 type logHandler struct {
@@ -89,7 +91,13 @@ func (h *logHandler) HandleLogs(logs io.ReadCloser, tag string) {
 			log.Print("Failed reading logs: ", err)
 			return
 		}
-		fmt.Printf("%v: %v", tag, line) // for running spawn on commandline and not using syslog
+		// For running spawn on commandline and not using syslog, print all the
+		// child logs. Also don't print spawn's logs here because the original log
+		// writer is already printing it, which we want to use so syslog works.
+		if tag != kLogsTag {
+			// Use fmt instead of log so we don't syslog the client's logs
+			fmt.Printf("%v: %v", tag, line)
+		}
 		h.publish <- LogMessage{Line: line, Tag: tag}
 		select {
 		case <-h.quit:
