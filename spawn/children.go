@@ -140,9 +140,6 @@ func (children *Children) StartProgram(cmd *Command) error {
 		if err != nil {
 			return fmt.Errorf("Supplimental gid #%v string not an integer. Gid string: %v", i, id)
 		}
-		/*if id == gid {
-		  continue
-		}*/
 		groups = append(groups, uint32(id))
 	}
 	attr.Sys = &syscall.SysProcAttr{
@@ -156,6 +153,10 @@ func (children *Children) StartProgram(cmd *Command) error {
 		attr.Sys.Pdeathsig = syscall.SIGHUP
 	}
 	workingDir := cmd.WorkingDir
+	if workingDir == "/" {
+		// If we did allow it we would delete /etc/localtime!
+		return fmt.Errorf("working_dir: \"/\" is not allowed.")
+	}
 	if workingDir == "" {
 		workingDir = u.HomeDir
 	}
@@ -186,6 +187,8 @@ func (children *Children) StartProgram(cmd *Command) error {
 
 	// For chroots copy timezone info into the home dir and give the user access
 	if !cmd.NoChroot {
+		// TODO: There should be some kind of config for which files we copy in
+		// Also maybe we should use symbolic or hard links
 		err := os.Mkdir(filepath.Join(workingDir, "/etc/"), 0777)
 		if err != nil {
 			log.Printf("Failed to mkdir for /etc/localtime: %v", err)
