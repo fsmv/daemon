@@ -182,6 +182,12 @@ func StartRPCServer(leasor *PortLeasor,
 	leasor.OnTTL(s.state.Unregister)
 	s.loadState(saveData)
 	server := grpc.NewServer(
+		// TODO: Have a flag like -internet_accessable_rpc which makes the RPC
+		// server use the web server cert, and make the portal client library verify
+		// certs if connecting to a URL instead of an IP. Then you will know you are
+		// for sure talking to your portal server when it's not just on a local
+		// network, in which case authenticating the server is good so that we don't
+		// send our auth token to a MITM attacker.
 		grpc.Creds(credentials.NewTLS(&tls.Config{
 			GetCertificate: func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
 				return rootCert.Certificate(), nil
