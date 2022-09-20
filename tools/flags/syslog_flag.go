@@ -34,6 +34,11 @@ func init() {
 		"to syslog servers that support other protocols. For syslogd configuration, make\n"+
 		"sure to use :* in your -a option for example -a 192.168.1.1/24:*\n\n"+
 
+		"Warning: the go syslog package does not support using TLS so these logs are\n"+
+		"not encrypted in transit. So it is only recommened to use this locally for\n"+
+		"servers in chroots. You can then use the syslog service to send to another\n"+
+		"server securely.\n\n"+
+
 		"If you're using -syslog_remote, do not set -syslog.",
 		handleSyslogFlag)
 }
