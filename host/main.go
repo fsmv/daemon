@@ -20,6 +20,12 @@ var (
 		"Url path to serve files under. A leading slash (/) is required and if you\n"+
 		"don't specify a tailing slash only the single named file will be served\n"+
 		"(out of the web_root directory).")
+	directoryListing = flag.Bool("serve_directory_listing", true, ""+
+		"If true serve a file browser page that lists the directory contents for the\n"+
+		"web_root and sub-folders. If false serve 404 for directory paths, but still\n"+
+		"serve index.html.")
+	serveDotfiles = flag.Bool("serve_dotfiles", false, ""+
+		"If true, serve 404 for any files starting with . such as .htaccess")
 )
 
 func main() {
@@ -34,7 +40,11 @@ func main() {
 	}, quit)
 
 	// Setup the server handler
-	dir := http.Dir(*webRoot)
+	dir := tools.SecureHTTPDir{
+		Dir:                   http.Dir(*webRoot),
+		AllowDotfiles:         *serveDotfiles,
+		AllowDirectoryListing: *directoryListing,
+	}
 	fileServer := http.FileServer(dir)
 	if strings.HasSuffix(url, "/") {
 		fileServer = http.StripPrefix(url, fileServer)
@@ -47,12 +57,15 @@ func main() {
 		fileServer.ServeHTTP(w, req)
 	})
 
-	// Debugging info because http.Dir isn't helpful
-	f, err := dir.Open("/")
-	log.Printf("Test open: %v", err)
-	_, err = f.Stat()
-	log.Printf("Test stat: %v", err)
-	f.Close()
+	// Test if we can open the files, http.FileServer doesn't log anything helpful
+	webrootFile, err := dir.Dir.Open("/")
+	if err == nil {
+		_, err = webrootFile.Stat()
+		webrootFile.Close()
+	}
+	if err != nil {
+		log.Print("WARNING: Failed to open and stat web_root directory, we probably can't serve anything. Error: ", err)
+	}
 
 	tools.RunHTTPServerTLS(lease.Port, tlsConf, quit)
 	log.Print("Goodbye.")
