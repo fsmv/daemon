@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	_ "ask.systems/daemon/portal/flags"
 	_ "ask.systems/daemon/tools/flags"
 
 	"ask.systems/daemon/portal"
@@ -31,7 +32,6 @@ var (
 )
 
 func main() {
-	portal.DefineFlags()
 	flag.Parse()
 	quit := make(chan struct{})
 	tools.CloseOnQuitSignals(quit)

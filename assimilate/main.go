@@ -11,9 +11,11 @@ import (
 
 	_ "embed"
 
+	_ "ask.systems/daemon/portal/flags"
+	_ "ask.systems/daemon/tools/flags"
+
 	"ask.systems/daemon/portal"
 	"ask.systems/daemon/tools"
-	_ "ask.systems/daemon/tools/flags"
 
 	"google.golang.org/protobuf/encoding/prototext"
 )
@@ -42,7 +44,6 @@ func init() {
 		}),
 		"register_request_schema",
 		"Print the schema for portal.RegisterRequest in proto form and exit.")
-	portal.DefineFlags()
 }
 
 func main() {

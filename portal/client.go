@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
-	"flag"
 	"fmt"
 	"log"
 	"strings"
@@ -31,17 +30,9 @@ var (
 	Token   *string
 )
 
-func DefineFlags() {
-	Address = flag.String("portal_addr", "127.0.0.1:2048",
-		"Address and port for the portal server")
-	Token = flag.String("portal_token", "", ""+
-		"API Token for authorization with the portal server.\n"+
-		"Printed in the portal logs on startup.")
-}
-
 func checkFlags() error {
 	if Address == nil || Token == nil {
-		return errors.New("Call portal.DefineFlags() any time before flag.Parse() to use these helper functions.")
+		return errors.New("import _ \"ask.systems/daemon/portal/flags\" or set portal.Address and portal.Token from your code to use these helper functions.")
 	}
 	if *Token == "" {
 		return errors.New("-portal_token is required to connect to portal. The value is printed in the portal logs on startup.")

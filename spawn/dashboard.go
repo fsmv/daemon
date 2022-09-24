@@ -13,6 +13,8 @@ import (
 	"net/http"
 	"time"
 
+	_ "ask.systems/daemon/portal/flags"
+
 	"ask.systems/daemon/portal"
 	"ask.systems/daemon/tools"
 )
@@ -35,10 +37,6 @@ var (
 	dashboardUrl string
 	logsUrl      string
 )
-
-func init() {
-	portal.DefineFlags()
-}
 
 type logStream struct {
 	Children *Children
