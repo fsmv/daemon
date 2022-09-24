@@ -26,6 +26,8 @@ var (
 		"serve index.html.")
 	serveDotfiles = flag.Bool("serve_dotfiles", false, ""+
 		"If true, serve 404 for any files starting with . such as .htaccess")
+	logRequests = flag.Bool("log_requests", true, ""+
+		"If true, log all paths requested plus the IP of the client.")
 )
 
 func main() {
@@ -53,7 +55,9 @@ func main() {
 		fileServer = http.StripPrefix(filepath.Dir(url), fileServer)
 	}
 	http.HandleFunc(url, func(w http.ResponseWriter, req *http.Request) {
-		log.Printf("%v requested %v", req.Header.Get("Orig-Address"), req.URL)
+		if *logRequests {
+			log.Printf("%v requested %v", req.Header.Get("Orig-Address"), req.URL)
+		}
 		fileServer.ServeHTTP(w, req)
 	})
 
