@@ -1,5 +1,5 @@
 syntax = "proto3";
-option go_package = "ask.systems/daemon/portal/main";
+option go_package = "ask.systems/daemon/portal/embedportal";
 
 import "service.proto";
 

@@ -1,4 +1,4 @@
-package main
+package embedspawn
 
 import (
 	"bytes"
@@ -6,7 +6,6 @@ import (
 	"crypto/subtle"
 	"embed"
 	"encoding/base64"
-	"flag"
 	"fmt"
 	"html/template"
 	"log"
@@ -22,16 +21,13 @@ import (
 const javascriptStreamDelay = 4 * time.Millisecond
 
 var (
-	passwordHash = flag.String("password_hash", "set me",
-		"sha256sum hash of the 'admin' user's basic auth password.")
-	dashboardUrlFlag = flag.String("dashboard_url", "/daemon/", ""+
-		"The url to serve the dashboard for this spawn instance. If you have\n"+
-		"multiple servers running spawn, they need different URLs.\n"+
-		"Slashes are optional.")
 	wantUsernameHash = sha256.Sum256([]byte("admin"))
 	wantPasswordHash []byte
 	//go:embed *.tmpl.html
 	templatesFS embed.FS
+
+	passwordHash     *string
+	dashboardUrlFlag *string
 
 	// Setup in StartDashboard
 	dashboardUrl string

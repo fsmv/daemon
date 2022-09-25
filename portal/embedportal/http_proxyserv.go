@@ -5,7 +5,7 @@
 // Registration will grant the caller a Lease to the forwarding rule for a time
 // period called the time to live (TTL). After the TTL has expired, the
 // forwarding rule will be automatically unregistered.
-package main
+package embedportal
 
 import (
 	"context"

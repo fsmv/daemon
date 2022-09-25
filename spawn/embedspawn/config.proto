@@ -1,5 +1,5 @@
 syntax = "proto3";
-option go_package = "ask.systems/daemon/spawn/main";
+option go_package = "ask.systems/daemon/spawn/embedspawn";
 
 // The schema of the config file
 //
