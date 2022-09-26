@@ -28,7 +28,8 @@ func Run(flags *flag.FlagSet, args []string) {
 			"Usage: %s [flags] \"[textproto portal.RegisterRequest]\"...\n", flags.Name())
 		fmt.Fprintf(flag.CommandLine.Output(), ""+
 			"Example:\n"+
-			"  %v -portal_addr localhost:9999 \"pattern: '/test/' fixed_port: 8080 strip_pattern: true\" \\\n"+
+			"  %v -portal_addr localhost:9999 \\\n"+
+			"    \"pattern: '/test/' fixed_port: 8080 strip_pattern: true\" \\\n"+
 			"    \"pattern: ':tcp:8181' fixed_port: 1337\"\n\n", flags.Name())
 		flags.PrintDefaults()
 	}
