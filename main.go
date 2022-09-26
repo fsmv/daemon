@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	_ "ask.systems/daemon/portal/flags"
@@ -38,10 +39,23 @@ var commands = []command{
 }
 
 func main() {
+	// If the binary has been renamed to start with one of the subcommand names,
+	// act as if it is just that one binary.
+	binName := filepath.Base(os.Args[0])
+	for _, cmd := range commands {
+		if !strings.HasPrefix(binName, cmd.name) {
+			continue
+		}
+		cmd.run(flag.CommandLine, os.Args)
+		return
+	}
+	// The binary name didn't match, operate in subcommands mode
+
+	// Setup the help text and parse the flags
 	flag.Usage = func() {
 		fmt.Fprintf(flag.CommandLine.Output(), ""+
 			"Usage: %s [global flags] [sub-command] [sub-command flags]\n"+
-			"Run any subcommand with -help for the sub-command's flags.\n\nSub-commands:\n",
+			"Run any subcommand with -help for the sub-command's flags.\n\nSubcommands:\n",
 			flag.CommandLine.Name())
 		for _, cmd := range commands {
 			paddedDescription := strings.ReplaceAll(cmd.description,
@@ -49,23 +63,26 @@ func main() {
 			fmt.Fprintf(flag.CommandLine.Output(),
 				namePadding+"%s\n", cmd.name, paddedDescription)
 		}
-		fmt.Fprintf(flag.CommandLine.Output(), "\nGlobal flags:\n")
+		fmt.Fprintf(flag.CommandLine.Output(), "\nGlobal flags (these apply to all subcommands):\n")
 		flag.PrintDefaults()
 	}
 	flag.Parse()
 	args := flag.Args()
-	if len(args) < 1 {
+	if len(args) < 1 { // print the help if there's no subcommand specified
 		flag.Usage()
-		os.Exit(-2)
+		os.Exit(2)
 	}
-
-	name := args[0]
-	flags := flag.NewFlagSet(name, flag.ExitOnError)
+	// Run the subcommand if it matches
+	subcommand := args[0]
+	flags := flag.NewFlagSet(subcommand, flag.ExitOnError)
 	for _, cmd := range commands {
-		if name != cmd.name {
+		if subcommand != cmd.name {
 			continue
 		}
 		cmd.run(flags, args)
 		return
 	}
+	fmt.Fprintf(flag.CommandLine.Output(), "Invalid subcommand %#v\n\n", subcommand)
+	flag.Usage()
+	os.Exit(1)
 }
