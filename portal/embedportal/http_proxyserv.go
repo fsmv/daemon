@@ -17,7 +17,6 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -279,23 +278,17 @@ func makeChallengeHandler(webRoot string) (http.Handler, error) {
 	if err := os.MkdirAll(webRoot, 0775); err != nil {
 		return nil, err
 	}
-	dir := http.Dir(webRoot)
-	// Make sure the webRoot dir is readable
-	f, err := dir.Open("/")
-	defer f.Close()
-	if err != nil {
-		return nil, err
+	dir := tools.SecureHTTPDir{
+		Dir:                   http.Dir(webRoot),
+		AllowDotfiles:         true,
+		AllowDirectoryListing: false,
 	}
-	if _, err := f.Stat(); err != nil {
+	if err := dir.TestOpen("/"); err != nil {
 		return nil, err
 	}
 	fileServer := http.StripPrefix(certChallengePattern, http.FileServer(dir))
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		log.Printf("%v requested %v", req.RemoteAddr, req.URL)
-		if filepath.Base(req.URL.Path) == filepath.Base(certChallengePattern) {
-			http.NotFound(w, req)
-			return // Don't allow the directory listing page
-		}
 		fileServer.ServeHTTP(w, req)
 	}), nil
 }

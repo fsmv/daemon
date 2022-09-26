@@ -60,12 +60,7 @@ func Run(flags *flag.FlagSet, args []string) {
 	})
 
 	// Test if we can open the files, http.FileServer doesn't log anything helpful
-	webrootFile, err := dir.Dir.Open("/")
-	if err == nil {
-		_, err = webrootFile.Stat()
-		webrootFile.Close()
-	}
-	if err != nil {
+	if err := dir.TestOpen("/"); err != nil {
 		log.Print("WARNING: Failed to open and stat web_root directory, we probably can't serve anything. Error: ", err)
 	}
 

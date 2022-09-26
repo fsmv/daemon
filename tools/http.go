@@ -85,6 +85,16 @@ type SecureHTTPDir struct {
 	AllowDirectoryListing bool
 }
 
+// Test if we can open the files, http.FileServer doesn't log anything helpful
+func (s SecureHTTPDir) TestOpen(path string) error {
+	webrootFile, err := s.Dir.Open(path) // Use the internal to bypass no dir listing
+	if err == nil {
+		_, err = webrootFile.Stat()
+		webrootFile.Close() // if err != nil then the file is nil
+	}
+	return err
+}
+
 func (s SecureHTTPDir) Open(name string) (http.File, error) {
 	filename := filepath.Base(name)
 
