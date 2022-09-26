@@ -29,13 +29,13 @@ func init() {
 		"To use this in a chroot you can setup networking and use the -syslog_remote flag\n"+
 		"or configure syslogd with the -l flag to create the <chroot>/dev/log file.")
 	flag.Func("syslog_remote", ""+
-		"Set to your url or ip for UDP remote logging. Optionally prefix with\n"+
+		"Set to your URL or IP for UDP remote logging. Optionally prefix with\n"+
 		"tcp:// or any other https://pkg.go.dev/net#Dial supported protocols to connect\n"+
 		"to syslog servers that support other protocols. For syslogd configuration, make\n"+
 		"sure to use :* in your -a option for example -a 192.168.1.1/24:*\n\n"+
 
 		"Warning: the go syslog package does not support using TLS so these logs are\n"+
-		"not encrypted in transit. So it is only recommened to use this locally for\n"+
+		"not encrypted in transit. So it is only recommended to use this locally for\n"+
 		"servers in chroots. You can then use the syslog service to send to another\n"+
 		"server securely.\n\n"+
 
