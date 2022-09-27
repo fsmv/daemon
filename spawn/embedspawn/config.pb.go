@@ -111,13 +111,11 @@ type Command struct {
 	// In the child process, the files will have fd = 3 + len(Ports) + i, where
 	// Files[i] is the file
 	Files []string `protobuf:"bytes,6,rep,name=files,proto3" json:"files,omitempty"`
-	// Set to true if the first two files are tls certs you want to keep
-	// autoupdated. Portal reads this when the -auto_tls_certs flag is set.
-	// If this is true and there are less than 2 files then nothing happens.
+	// Set to true if all of the files are tls certs you want to keep
+	// autoupdated. Portal has an -auto_tls_cert fag to support reading this.
 	//
-	// This makes the first two files in the above array a pipe that will be
-	// updated with the file contents on startup and when spawn in sent the
-	// SIGUSR1 signal.
+	// This makes the files in the above array a pipe that will be updated with
+	// the file contents on startup and when spawn in sent the SIGUSR1 signal.
 	//
 	// To use this run the following command after renewing your cert:
 	//

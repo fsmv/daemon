@@ -89,14 +89,13 @@ func (children *Children) StartProgram(cmd *Command) error {
 	if len(cmd.Files) != 0 {
 		var openedFiles []*os.File
 		var filesErr error
-		if cmd.AutoTlsCerts && len(cmd.Files) >= 2 {
+		if cmd.AutoTlsCerts {
 			quitFileRefresh = make(chan struct{})
-			refreshFiles, err := startFileRefresh(cmd.Files[:2], quitFileRefresh)
+			refreshFiles, err := startFileRefresh(cmd.Files, quitFileRefresh)
 			if err != nil {
 				return err
 			}
 			files = append(files, refreshFiles...)
-			openedFiles, filesErr = openFiles(cmd.Files[2:])
 		} else {
 			openedFiles, filesErr = openFiles(cmd.Files)
 		}

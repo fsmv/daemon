@@ -26,16 +26,17 @@ import (
 )
 
 // The path for the let's encrypt web-root cert challenge
-const certChallengePattern = "/.well-known/acme-challenge/"
+const certChallengePattern = "*/.well-known/acme-challenge/"
 
 // HTTPProxy implements http.Handler to handle requests using a pool of
 // forwarding rules registered at runtime
 type HTTPProxy struct {
 	leasor *PortLeasor
 	// Map from pattern to *forwarder, which must not be modified
-	forwarders sync.Map
-	rootCert   *tools.AutorenewCertificate
-	state      *StateManager
+	forwarders  sync.Map
+	rootCert    *tools.AutorenewCertificate
+	state       *StateManager
+	defaultHost string
 }
 
 // forwarder holds the data for a forwarding rule registered with HTTPProxy
@@ -53,7 +54,7 @@ func (p *HTTPProxy) Unregister(lease *portal.Lease) {
 func (p *HTTPProxy) Register(
 	clientAddr string, request *portal.RegisterRequest) (*portal.Lease, error) {
 
-	if oldFwd := p.selectForwarder(request.Pattern); oldFwd != nil {
+	if oldFwd := p.selectForwarder(parsePattern(request.Pattern)); oldFwd != nil {
 		if oldFwd.Lease.Pattern == certChallengePattern {
 			err := fmt.Errorf("Clients cannot register the cert challenge path %#v which covers your requested pattern %#v", certChallengePattern, request.Pattern)
 			log.Print("Error registering: ", err)
@@ -177,6 +178,16 @@ func (p *HTTPProxy) saveForwarder(clientAddr string, lease *portal.Lease,
 	return nil
 }
 
+func parsePattern(pattern string) (host, path string) {
+	path = pattern
+	firstSlash := strings.Index(pattern, "/")
+	if firstSlash > 0 {
+		host = pattern[:firstSlash]
+		path = pattern[firstSlash:]
+	}
+	return
+}
+
 // urlMatchesPattern returns whether or not the url matches the pattern string.
 func urlMatchesPattern(url, pattern string) bool {
 	if len(pattern) == 0 {
@@ -211,14 +222,28 @@ func urlMatchesPattern(url, pattern string) bool {
 // returns nil if no matching forwarder is found
 //
 // Similar to http.ServeMux.match, see https://golang.org/LICENSE
-func (p *HTTPProxy) selectForwarder(url string) *forwarder {
+func (p *HTTPProxy) selectForwarder(host, path string) *forwarder {
 	var ret *forwarder = nil
 	var maxPatternLen = 0
 	p.forwarders.Range(func(key, value interface{}) bool {
 		pattern := key.(string)
-		if !urlMatchesPattern(url, pattern) {
+		patternHost, pattern := parsePattern(pattern)
+
+		// If the hostname doesn't match skip this forwarder
+		if patternHost == "" {
+			if p.defaultHost != "" && p.defaultHost != host {
+				return true
+			}
+		} else {
+			if patternHost != "*" && patternHost != host {
+				return true
+			}
+		}
+		// If the pattern doesn't match skip this forwarder
+		if !urlMatchesPattern(path, pattern) {
 			return true
 		}
+		// The pattern matches, find the longest one
 		if ret == nil || len(pattern) > maxPatternLen {
 			maxPatternLen = len(pattern)
 			ret = value.(*forwarder)
@@ -231,7 +256,7 @@ func (p *HTTPProxy) selectForwarder(url string) *forwarder {
 // ServeHTTP is the HTTPProxy net/http handler func which selects a registered
 // forwarder to handle the request based on the forwarder's pattern
 func (p *HTTPProxy) ServeHTTP(w http.ResponseWriter, req *http.Request) {
-	fwd := p.selectForwarder(req.URL.Path)
+	fwd := p.selectForwarder(req.URL.Host, req.URL.Path)
 	if fwd == nil {
 		log.Printf("%v requested unregistered path: %v", req.RemoteAddr, req.URL.Path)
 		http.NotFound(w, req)
@@ -301,13 +326,14 @@ func makeChallengeHandler(webRoot string) (http.Handler, error) {
 //   - certChallengeWebRoot if non-empty start the file server for tls cert challenges
 //   - quit is a channel that will be closed when the server should quit
 func StartHTTPProxy(l *PortLeasor, tlsConfig *tls.Config,
-	httpList, httpsList net.Listener, certChallengeWebRoot string,
+	httpList, httpsList net.Listener, defaultHost, certChallengeWebRoot string,
 	state *StateManager, rootCert *tools.AutorenewCertificate,
 	quit chan struct{}) (*HTTPProxy, error) {
 	ret := &HTTPProxy{
-		leasor:   l,
-		rootCert: rootCert,
-		state:    state,
+		leasor:      l,
+		rootCert:    rootCert,
+		state:       state,
+		defaultHost: defaultHost,
 	}
 	l.OnTTL(ret.Unregister)
 

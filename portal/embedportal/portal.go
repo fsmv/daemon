@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -35,12 +36,19 @@ const (
 )
 
 func Run(flags *flag.FlagSet, args []string) {
-	tlsCertPath := flags.String("tls_cert", "", ""+
+	defaultHost := flags.String("default_hostname", "", ""+
+		"Set this to the domain name that patterns registered without a hostname\n"+
+		"should be served under. If unset, patterns without a hostname will match\n"+
+		"requests for any hostname that arrives at the server.")
+	// TODO: if there was no TLS cert specfied, use the self signed cert for web
+	tlsCertSpec := flags.String("tls_cert", "", ""+
 		"Either the filepath to the tls cert file (fullchain.pem) or\n"+
-		"the file descriptor id number shared by the parent process")
-	tlsKeyPath := flags.String("tls_key", "", ""+
+		"the file descriptor id number shared by the parent process.\n"+
+		"Accepts multiple certificates with a comma separated list.")
+	tlsKeySpec := flags.String("tls_key", "", ""+
 		"Either the filepath to the tls key file (privkey.pem) or\n"+
-		"the file descriptor id number shared by the parent process")
+		"the file descriptor id number shared by the parent process.\n"+
+		"Accepts multiple keys with a comma separated list.")
 	autoTLSCerts := flags.Bool("auto_tls_certs", false, ""+
 		"If true update the tls files when SIGUSR1 is received. The\n"+
 		"-tls_cert and -tls_key paths must either both be file paths or both be\n"+
@@ -64,15 +72,10 @@ func Run(flags *flag.FlagSet, args []string) {
 	quit := make(chan struct{})
 	tools.CloseOnQuitSignals(quit)
 
-	tlsCert, err := openFilePathOrFD(*tlsCertPath)
-	if err != nil {
-		log.Fatalf("Failed to load TLS cert file (%v): %v", *tlsCertPath, err)
-	}
-	tlsKey, err := openFilePathOrFD(*tlsKeyPath)
-	if err != nil {
-		log.Fatalf("Failed to load TLS key file (%v): %v", *tlsKeyPath, err)
-	}
-	tlsConfig, err := loadTLSConfig(tlsCert, tlsKey, *autoTLSCerts, quit)
+	tlsConfig, err := loadTLSConfig(
+		strings.Split(*tlsCertSpec, ","),
+		strings.Split(*tlsKeySpec, ","),
+		*autoTLSCerts, quit)
 	if err != nil {
 		log.Fatalf("failed to load TLS config: %v", err)
 	}
@@ -107,7 +110,8 @@ func Run(flags *flag.FlagSet, args []string) {
 	l := StartPortLeasor(portRangeStart, portRangeEnd, leaseTTL, quit)
 	tcpProxy := StartTCPProxy(l, tlsConfig, quit)
 	httpProxy, err := StartHTTPProxy(l, tlsConfig,
-		httpListener, httpsListener, *certChallengeWebRoot,
+		httpListener, httpsListener,
+		*defaultHost, *certChallengeWebRoot,
 		state, rootCert, quit)
 	log.Print("Started HTTP proxy server")
 	if err != nil {
@@ -139,42 +143,45 @@ func listenerFromPortOrFD(portOrFD int) (net.Listener, error) {
 	return net.Listen("tcp", fmt.Sprintf(":%v", portOrFD))
 }
 
-// TODO: if there was no TLS cert specfied, use the self signed cert for web
 type tlsRefresher struct {
-	cert  *os.File
-	key   *os.File
-	cache *atomic.Value
-	pipes bool
+	cache []*atomic.Value
 	quit  chan struct{}
 }
 
-func StartTLSRefresher(tlsCert, tlsKey *os.File, quit chan struct{}) *tlsRefresher {
+func StartTLSRefresher(tlsCert, tlsKey []*os.File, quit chan struct{}) *tlsRefresher {
 	t := &tlsRefresher{
-		cert:  tlsCert,
-		key:   tlsKey,
 		quit:  quit,
-		cache: &atomic.Value{},
+		cache: make([]*atomic.Value, len(tlsCert)),
 	}
-	if t.cert.Name() != t.key.Name() && (t.cert.Name() == "fd" || t.key.Name() == "fd") {
-		log.Fatal("-tls_cert and -tls_key must being either both paths or both OS pipes for -auto_tls_certs.")
-	} else if t.cert.Name() == "fd" && t.key.Name() == "fd" {
-		t.pipes = true
+	if len(tlsCert) != len(tlsKey) {
+		log.Fatal("-tls_cert and -tls_key must have the same number of entries.")
 	}
-	go t.refreshCert()
+	for i := 0; i < len(tlsCert); i++ {
+		t.cache[i] = &atomic.Value{}
+		cert := tlsCert[i]
+		key := tlsKey[i]
+		pipeFiles := false
+		if cert.Name() != key.Name() && (cert.Name() == "fd" || key.Name() == "fd") {
+			log.Fatalf("Entry #%v: -tls_cert and -tls_key must being either both paths or both OS pipes for -auto_tls_certs.", i)
+		} else if cert.Name() == "fd" && key.Name() == "fd" {
+			pipeFiles = true
+		}
+		go t.refreshCert(i, cert, key, pipeFiles)
+	}
 	return t
 }
 
-func (t *tlsRefresher) refreshCert() {
+func (t *tlsRefresher) refreshCert(idx int, cert, key *os.File, pipes bool) {
 	var certScanner, keyScanner *bufio.Scanner
-	if t.pipes {
-		certScanner = bufio.NewScanner(t.cert)
+	if pipes {
+		certScanner = bufio.NewScanner(cert)
 		certScanner.Split(scanEOT)
-		keyScanner = bufio.NewScanner(t.key)
+		keyScanner = bufio.NewScanner(key)
 		keyScanner.Split(scanEOT)
 	} else {
 		// Close the files because we will reopen in the refresh loop
-		t.cert.Close()
-		t.key.Close()
+		cert.Close()
+		key.Close()
 	}
 
 	sig := make(chan os.Signal, 1)
@@ -186,53 +193,58 @@ func (t *tlsRefresher) refreshCert() {
 		<-t.quit
 		signal.Stop(sig)
 		close(sig)
-		t.cert.Close()
-		t.key.Close()
+		cert.Close()
+		key.Close()
 	}()
 	for {
 		select {
 		case <-t.quit:
 			return
 		case <-sig:
-			log.Print("Starting TLS certificate refresh...")
+			log.Printf("Starting TLS certificate refresh #%v...", idx+1)
 			var newCert *tls.Certificate
 			var err error
-			if !t.pipes { // Handle reopening by filename if we aren't doing pipes
-				newCertFile, err := os.Open(t.cert.Name())
+			if !pipes { // Handle reopening by filename if we aren't doing pipes
+				newCertFile, err := os.Open(cert.Name())
 				if err != nil {
-					log.Print("Failed to reopen TLS cert for refresh: ", err)
+					log.Print("Failed to reopen TLS cert for refresh #%v: ", err, idx+1)
 					newCertFile.Close()
 					continue
 				}
-				t.cert = newCertFile
-				newKeyFile, err := os.Open(t.key.Name())
+				cert = newCertFile
+				newKeyFile, err := os.Open(key.Name())
 				if err != nil {
-					log.Print("Failed to reopen TLS key for refresh: ", err)
+					log.Print("Failed to reopen TLS key for refresh #%v: ", err, idx+1)
 					newCertFile.Close()
 					newKeyFile.Close()
 					continue
 				}
-				t.key = newKeyFile
-				newCert, err = loadTLSCertFiles(t.cert, t.key) // closes the files
+				key = newKeyFile
+				newCert, err = loadTLSCertFiles(cert, key) // closes the files
 			} else {
 				newCert, err = loadTLSCertScanner(certScanner, keyScanner)
 			}
 			if err != nil {
-				log.Print("Failed to load TLS cert for refresh: ", err)
+				log.Print("Failed to load TLS cert for refresh #%v: ", err, idx+1)
 				continue
 			}
-			t.cache.Store(newCert)
-			log.Print("Sucessfully refreshed TLS certificate.")
+			t.cache[idx].Store(newCert)
+			log.Print("Sucessfully refreshed TLS certificate #%v.", idx+1)
 		}
 	}
 }
 
-func (t *tlsRefresher) GetCertificate(*tls.ClientHelloInfo) (*tls.Certificate, error) {
-	cert := t.cache.Load()
-	if cert == nil {
-		return nil, errors.New("Internal error: cannot load certificate")
+func (t *tlsRefresher) GetCertificate(hi *tls.ClientHelloInfo) (*tls.Certificate, error) {
+	for _, c := range t.cache {
+		cert := c.Load().(*tls.Certificate)
+		if cert == nil {
+			return nil, errors.New("Internal error: cannot load certificate")
+		}
+		if err := hi.SupportsCertificate(cert); err == nil {
+			return cert, nil
+		}
 	}
-	return cert.(*tls.Certificate), nil
+	return nil, errors.New("No supported certificate.")
 }
 
 func scanEOT(data []byte, atEOF bool) (advance int, token []byte, err error) {
@@ -281,17 +293,43 @@ func loadTLSCertFiles(tlsCert, tlsKey *os.File) (*tls.Certificate, error) {
 	return &cert, nil
 }
 
-func loadTLSConfig(tlsCert, tlsKey *os.File, autoTLSCerts bool, quit chan struct{}) (*tls.Config, error) {
+func loadTLSConfig(tlsCertSpec, tlsKeySpec []string,
+	autoTLSCerts bool, quit chan struct{}) (*tls.Config, error) {
+	if len(tlsCertSpec) != len(tlsKeySpec) {
+		log.Fatal("-tls_cert and -tls_key must have the same number of entries.")
+	}
+
+	// Open the files
+	var tlsCert, tlsKey []*os.File
+	for i := 0; i < len(tlsCertSpec); i++ {
+		if cert, err := openFilePathOrFD(tlsCertSpec[i]); err != nil {
+			return nil, fmt.Errorf("Failed to load TLS cert file (%v): %w",
+				tlsCertSpec[i], err)
+		} else {
+			tlsCert = append(tlsCert, cert)
+		}
+		if key, err := openFilePathOrFD(tlsKeySpec[i]); err != nil {
+			return nil, fmt.Errorf("Failed to load TLS key file (%v): %w",
+				tlsKeySpec[i], err)
+		} else {
+			tlsKey = append(tlsKey, key)
+		}
+	}
+
 	if autoTLSCerts {
 		refresher := StartTLSRefresher(tlsCert, tlsKey, quit)
 		return &tls.Config{
 			GetCertificate: refresher.GetCertificate,
 		}, nil
-	} else {
-		cert, err := loadTLSCertFiles(tlsCert, tlsKey)
+	}
+	// No auto refresh requested
+	conf := &tls.Config{}
+	for i := 0; i < len(tlsCertSpec); i++ {
+		cert, err := loadTLSCertFiles(tlsCert[i], tlsKey[i])
 		if err != nil {
 			return nil, err
 		}
-		return &tls.Config{Certificates: []tls.Certificate{*cert}}, nil
+		conf.Certificates = append(conf.Certificates, *cert)
 	}
+	return conf, nil
 }
