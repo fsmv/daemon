@@ -2,7 +2,6 @@ package embedportal
 
 import (
 	"crypto/tls"
-	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -49,14 +48,6 @@ func (p *TCPProxy) Register(clientAddr string, request *portal.RegisterRequest) 
 		}
 	}()
 	lease, err := p.leasor.Register(request)
-	if err != nil {
-		if errors.Is(err, FixedPortTakenErr) {
-			// TODO: can we notify the old lease holder that we kicked them?
-			log.Printf("Replacing an existing lease for the same TCP pattern: %#v", request.Pattern)
-			p.leasor.Unregister(lease)
-			lease, err = p.leasor.Register(request)
-		}
-	}
 	if err != nil {
 		return nil, err
 	}

@@ -123,6 +123,16 @@ func StartTLSRegistration(request *RegisterRequest, quit <-chan struct{}) (*Leas
 	return lease, config, nil
 }
 
+func ParsePattern(pattern string) (host, path string) {
+	path = pattern
+	firstSlash := strings.Index(pattern, "/")
+	if firstSlash > 0 {
+		host = pattern[:firstSlash]
+		path = pattern[firstSlash:]
+	}
+	return
+}
+
 type rpcToken string
 
 func (token rpcToken) GetRequestMetadata(ctx context.Context, uri ...string) (map[string]string, error) {

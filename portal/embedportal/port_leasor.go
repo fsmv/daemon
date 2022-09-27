@@ -88,7 +88,9 @@ func (l *PortLeasor) Register(request *portal.RegisterRequest) (*portal.Lease, e
 			return nil, fmt.Errorf("Error port out of range. Ports only go up to 65535. Requested Port: %v", request.FixedPort)
 		}
 		if oldLease, ok := l.leases[request.FixedPort]; ok {
-			return oldLease, fmt.Errorf("%w Requested Port: %v", FixedPortTakenErr, request.FixedPort)
+			// TODO: can we notify the old lease holder that we kicked them?
+			log.Printf("Replacing an existing lease for the same fixed port: %#v", oldLease.Pattern)
+			l.Unregister(oldLease)
 		}
 		newLease.Port = request.FixedPort
 	} else {

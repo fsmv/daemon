@@ -54,7 +54,7 @@ func (p *HTTPProxy) Unregister(lease *portal.Lease) {
 func (p *HTTPProxy) Register(
 	clientAddr string, request *portal.RegisterRequest) (*portal.Lease, error) {
 
-	if oldFwd := p.selectForwarder(parsePattern(request.Pattern)); oldFwd != nil {
+	if oldFwd := p.selectForwarder(portal.ParsePattern(request.Pattern)); oldFwd != nil {
 		if oldFwd.Lease.Pattern == certChallengePattern {
 			err := fmt.Errorf("Clients cannot register the cert challenge path %#v which covers your requested pattern %#v", certChallengePattern, request.Pattern)
 			log.Print("Error registering: ", err)
@@ -178,16 +178,6 @@ func (p *HTTPProxy) saveForwarder(clientAddr string, lease *portal.Lease,
 	return nil
 }
 
-func parsePattern(pattern string) (host, path string) {
-	path = pattern
-	firstSlash := strings.Index(pattern, "/")
-	if firstSlash > 0 {
-		host = pattern[:firstSlash]
-		path = pattern[firstSlash:]
-	}
-	return
-}
-
 // urlMatchesPattern returns whether or not the url matches the pattern string.
 func urlMatchesPattern(url, pattern string) bool {
 	if len(pattern) == 0 {
@@ -227,16 +217,18 @@ func (p *HTTPProxy) selectForwarder(host, path string) *forwarder {
 	var maxPatternLen = 0
 	p.forwarders.Range(func(key, value interface{}) bool {
 		pattern := key.(string)
-		patternHost, pattern := parsePattern(pattern)
+		patternHost, pattern := portal.ParsePattern(pattern)
 
 		// If the hostname doesn't match skip this forwarder
-		if patternHost == "" {
-			if p.defaultHost != "" && p.defaultHost != host {
-				return true
-			}
-		} else {
-			if patternHost != "*" && patternHost != host {
-				return true
+		if host != "" { // for matching patterns that don't have a host
+			if patternHost == "" {
+				if p.defaultHost != "" && p.defaultHost != host {
+					return true
+				}
+			} else {
+				if patternHost != "*" && patternHost != host {
+					return true
+				}
 			}
 		}
 		// If the pattern doesn't match skip this forwarder
@@ -256,9 +248,9 @@ func (p *HTTPProxy) selectForwarder(host, path string) *forwarder {
 // ServeHTTP is the HTTPProxy net/http handler func which selects a registered
 // forwarder to handle the request based on the forwarder's pattern
 func (p *HTTPProxy) ServeHTTP(w http.ResponseWriter, req *http.Request) {
-	fwd := p.selectForwarder(req.URL.Host, req.URL.Path)
+	fwd := p.selectForwarder(req.Host, req.URL.Path)
 	if fwd == nil {
-		log.Printf("%v requested unregistered path: %v", req.RemoteAddr, req.URL.Path)
+		log.Printf("%v requested unregistered path: %v%v", req.RemoteAddr, req.Host, req.URL.Path)
 		http.NotFound(w, req)
 		return
 	}
@@ -311,7 +303,8 @@ func makeChallengeHandler(webRoot string) (http.Handler, error) {
 	if err := dir.TestOpen("/"); err != nil {
 		return nil, err
 	}
-	fileServer := http.StripPrefix(certChallengePattern, http.FileServer(dir))
+	_, pattern := portal.ParsePattern(certChallengePattern)
+	fileServer := http.StripPrefix(pattern, http.FileServer(dir))
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		log.Printf("%v requested %v", req.RemoteAddr, req.URL)
 		fileServer.ServeHTTP(w, req)

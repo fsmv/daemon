@@ -207,14 +207,14 @@ func (t *tlsRefresher) refreshCert(idx int, cert, key *os.File, pipes bool) {
 			if !pipes { // Handle reopening by filename if we aren't doing pipes
 				newCertFile, err := os.Open(cert.Name())
 				if err != nil {
-					log.Print("Failed to reopen TLS cert for refresh #%v: ", err, idx+1)
+					log.Printf("Failed to reopen TLS cert for refresh #%v: %v", idx+1, err)
 					newCertFile.Close()
 					continue
 				}
 				cert = newCertFile
 				newKeyFile, err := os.Open(key.Name())
 				if err != nil {
-					log.Print("Failed to reopen TLS key for refresh #%v: ", err, idx+1)
+					log.Printf("Failed to reopen TLS key for refresh #%v: %v", idx+1, err)
 					newCertFile.Close()
 					newKeyFile.Close()
 					continue
@@ -225,11 +225,11 @@ func (t *tlsRefresher) refreshCert(idx int, cert, key *os.File, pipes bool) {
 				newCert, err = loadTLSCertScanner(certScanner, keyScanner)
 			}
 			if err != nil {
-				log.Print("Failed to load TLS cert for refresh #%v: ", err, idx+1)
+				log.Printf("Failed to load TLS cert for refresh #%v: %v", idx+1, err)
 				continue
 			}
 			t.cache[idx].Store(newCert)
-			log.Print("Sucessfully refreshed TLS certificate #%v.", idx+1)
+			log.Printf("Sucessfully refreshed TLS certificate #%v.", idx+1)
 		}
 	}
 }
