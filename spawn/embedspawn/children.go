@@ -71,50 +71,10 @@ func (children *Children) StartProgram(cmd *Command) error {
 		return fmt.Errorf("Binary is required")
 	}
 	name := cmd.FullName()
-	log.Print("Starting ", name)
-	// Set up stdout and stderr piping
-	r, w, err := os.Pipe()
-	if err != nil {
-		return fmt.Errorf("failed to create pipe: %v", err)
-	}
-	files := []*os.File{nil, w, w}
-	// Takes a pointer so we can append to it and this will still see everything
-	defer func(filesPtr *[]*os.File) {
-		for _, file := range *filesPtr {
-			file.Close()
-		}
-	}(&files)
-	if len(cmd.Ports) != 0 {
-		socketFiles, err := listenPortsTCP(cmd.Ports)
-		if err != nil {
-			return err
-		}
-		files = append(files, socketFiles...)
-	}
-	var quitFileRefresh chan struct{}
-	if len(cmd.Files) != 0 {
-		var openedFiles []*os.File
-		var filesErr error
-		if cmd.AutoTlsCerts {
-			quitFileRefresh = make(chan struct{})
-			refreshFiles, err := startFileRefresh(cmd.Files, quitFileRefresh)
-			if err != nil {
-				return err
-			}
-			files = append(files, refreshFiles...)
-		} else {
-			openedFiles, filesErr = openFiles(cmd.Files)
-		}
-		if filesErr != nil {
-			return filesErr
-		}
-		files = append(files, openedFiles...)
-	}
 	attr := &os.ProcAttr{
-		Env:   []string{""},
-		Files: files,
+		Env: []string{""},
 	}
-
+	log.Print("Starting ", name)
 	if len(cmd.User) == 0 {
 		return fmt.Errorf("you must specify a user to run as.")
 	}
@@ -187,6 +147,47 @@ func (children *Children) StartProgram(cmd *Command) error {
 	if err != nil {
 		return fmt.Errorf("Failed to copy the binary into the working dir: %v", err)
 	}
+	// Set up stdout and stderr piping
+	r, w, err := os.Pipe()
+	if err != nil {
+		return fmt.Errorf("failed to create pipe: %v", err)
+	}
+	// Setup the file descriptors we will pass to the child
+	files := []*os.File{nil, w, w}
+	// Takes a pointer so we can append to it and this will still see everything
+	defer func(filesPtr *[]*os.File) {
+		for _, file := range *filesPtr {
+			file.Close()
+		}
+	}(&files)
+	if len(cmd.Ports) != 0 {
+		socketFiles, err := listenPortsTCP(cmd.Ports)
+		if err != nil {
+			return err
+		}
+		files = append(files, socketFiles...)
+	}
+	var quitFileRefresh chan struct{}
+	if len(cmd.Files) != 0 {
+		var openedFiles []*os.File
+		var filesErr error
+		if cmd.AutoTlsCerts {
+			quitFileRefresh = make(chan struct{})
+			refreshFiles, err := startFileRefresh(cmd.Files, quitFileRefresh)
+			if err != nil {
+				return err
+			}
+			files = append(files, refreshFiles...)
+		} else {
+			openedFiles, filesErr = openFiles(cmd.Files)
+		}
+		if filesErr != nil {
+			return filesErr
+		}
+		files = append(files, openedFiles...)
+	}
+	attr.Files = files
+
 	var binpath string
 	if cmd.NoChroot {
 		attr.Dir = workingDir

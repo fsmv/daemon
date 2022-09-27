@@ -94,10 +94,12 @@ func ResolveRelativePaths(path string, commands []*Command) error {
 		if len(cmd.Binary) == 0 || cmd.Binary[0] == '/' {
 			continue
 		}
-		if len(path) == 0 { // Don't error unless there's actually a go path
-			return fmt.Errorf(
-				"--path flag not set which is required by Command #%v, filepath: %v",
-				i, cmd.Binary)
+		if path == "" {
+			cwd, err := os.Getwd()
+			if err != nil {
+				return fmt.Errorf("Failed to get current working directory: %w", err)
+			}
+			path = cwd
 		}
 		cmd.Binary = filepath.Join(path, cmd.Binary)
 	}
