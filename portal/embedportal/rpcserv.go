@@ -179,7 +179,7 @@ func StartRPCServer(leasor *PortLeasor,
 		quit:      quit,
 		rootCert:  rootCert,
 	}
-	leasor.OnTTL(s.state.Unregister)
+	leasor.OnCancel(s.state.Unregister)
 	s.loadState(saveData)
 	server := grpc.NewServer(
 		// TODO: Have a flag like -internet_accessable_rpc which makes the RPC

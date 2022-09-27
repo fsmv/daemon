@@ -328,7 +328,7 @@ func StartHTTPProxy(l *PortLeasor, tlsConfig *tls.Config,
 		state:       state,
 		defaultHost: defaultHost,
 	}
-	l.OnTTL(ret.Unregister)
+	l.OnCancel(ret.Unregister)
 
 	// Set up serving cert challenges
 	if certChallengeWebRoot != "" {

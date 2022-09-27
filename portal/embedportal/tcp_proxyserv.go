@@ -28,13 +28,15 @@ func StartTCPProxy(l *PortLeasor, tlsConfig *tls.Config, quit chan struct{}) *TC
 		tlsConfig: tlsConfig,
 		quit:      quit,
 	}
-	l.OnTTL(p.Unregister)
+	l.OnCancel(p.Unregister)
 	return p
 }
 
 func (p *TCPProxy) Unregister(lease *portal.Lease) {
 	canceler, _ := p.cancelers.Load(lease.Pattern)
-	close(canceler.(chan struct{}))
+	if canceler != nil {
+		close(canceler.(chan struct{}))
+	}
 }
 
 func (p *TCPProxy) Register(clientAddr string, request *portal.RegisterRequest) (*portal.Lease, error) {

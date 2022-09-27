@@ -30,9 +30,9 @@ var (
 // port list for each machine connecting to portal but there should be enough
 // ports to just have one list.
 type PortLeasor struct {
-	mut    *sync.Mutex              // Everything in this struct needs the lock
-	leases map[uint32]*portal.Lease // maps the port to the lease
-	onTTL  []func(*portal.Lease)    // All are called when a lease times out
+	mut      *sync.Mutex              // Everything in this struct needs the lock
+	leases   map[uint32]*portal.Lease // maps the port to the lease
+	onCancel []func(*portal.Lease)    // All are called when a lease times out
 
 	// List of automatic ports to be leased out, in a random order.
 	// Always has values between 0 and n, see unusedPortOffset.
@@ -62,10 +62,10 @@ func StartPortLeasor(startPort, endPort uint16, ttl time.Duration, quit chan str
 	return l
 }
 
-func (l *PortLeasor) OnTTL(ttlFunc func(*portal.Lease)) {
+func (l *PortLeasor) OnCancel(cancelFunc func(*portal.Lease)) {
 	l.mut.Lock()
 	defer l.mut.Unlock()
-	l.onTTL = append(l.onTTL, ttlFunc)
+	l.onCancel = append(l.onCancel, cancelFunc)
 }
 
 // Register a port exclusively for limited time. If the FixedPort is 0, you will
@@ -138,6 +138,9 @@ func (l *PortLeasor) Unregister(lease *portal.Lease) error {
 
 	log.Print("Lease unregistered: ", foundLease)
 	l.deleteLeaseUnsafe(foundLease)
+	for _, onCancel := range l.onCancel {
+		onCancel(foundLease)
+	}
 	return nil
 }
 
@@ -186,8 +189,8 @@ func (l *PortLeasor) monitorTTLs(quit chan struct{}) {
 				if now.After(lease.Timeout.AsTime()) {
 					log.Print("Lease expired: ", lease)
 					l.deleteLeaseUnsafe(lease)
-					for _, onTTL := range l.onTTL {
-						onTTL(lease)
+					for _, onCancel := range l.onCancel {
+						onCancel(lease)
 					}
 				}
 			}
