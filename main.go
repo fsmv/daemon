@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	_ "ask.systems/daemon/portal/flags"
@@ -22,8 +23,6 @@ type command struct {
 	description string
 }
 
-const namePadding = "  %-10s  "
-
 var commands = []command{
 	{"spawn", embedspawn.Run, "" +
 		"Launches other processes in a chroot and as different users. Manages\n" +
@@ -36,6 +35,21 @@ var commands = []command{
 		"don't have the client library."},
 	{"host", embedhost.Run,
 		"Hosts a file server for a local folder registered on any path with portal."},
+}
+
+var namePadding string
+
+func init() {
+	maxLen := 0
+	for _, cmd := range commands {
+		// Tell spawn what commands it can use in case we are running spawn
+		embedspawn.MegabinaryCommands = append(embedspawn.MegabinaryCommands, cmd.name)
+		if len(cmd.name) > maxLen {
+			maxLen = len(cmd.name)
+		}
+	}
+	// Set the field width to the longest command name
+	namePadding = "  %-" + strconv.Itoa(maxLen) + "s  "
 }
 
 func main() {

@@ -1,8 +1,10 @@
 package embedspawn
 
 import (
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"net"
 	"os"
@@ -15,6 +17,10 @@ import (
 	"time"
 
 	"ask.systems/daemon/tools"
+)
+
+var (
+	MegabinaryCommands []string
 )
 
 type Child struct {
@@ -161,6 +167,17 @@ func (children *Children) StartProgram(cmd *Command) error {
 	}
 	// Copy the binary into the home dir and give the user access
 	binaryCopy, err := copyFile(cmd.Binary, filepath.Join(workingDir, name), uid, gid)
+	// If it's a megabinary, and there wasn't a user-provided binary load the
+	// command from the megabinary if it's there
+	if err != nil && len(MegabinaryCommands) > 0 && errors.Is(err, fs.ErrNotExist) {
+		subCommand := filepath.Base(cmd.Binary)
+		for _, supported := range MegabinaryCommands {
+			if subCommand != supported {
+				continue
+			}
+			binaryCopy, err = copyFile(os.Args[0], filepath.Join(workingDir, name), uid, gid)
+		}
+	}
 	// Don't leave a dangling binary copy
 	defer func() {
 		if binaryCopy != "" {
