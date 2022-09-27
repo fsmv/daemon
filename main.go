@@ -68,8 +68,8 @@ func main() {
 	// Setup the help text and parse the flags
 	flag.Usage = func() {
 		fmt.Fprintf(flag.CommandLine.Output(), ""+
-			"Usage: %s [global flags] [sub-command] [sub-command flags]\n"+
-			"Run any subcommand with -help for the sub-command's flags.\n\nSubcommands:\n",
+			"Usage: %s [global flags] [subcommand] [subcommand flags]\n"+
+			"Run any subcommand with -help for the subcommand's flags.\n\nSubcommands:\n",
 			flag.CommandLine.Name())
 		for _, cmd := range commands {
 			paddedDescription := strings.ReplaceAll(cmd.description,
