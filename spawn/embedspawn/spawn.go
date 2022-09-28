@@ -45,7 +45,7 @@ func Run(flags *flag.FlagSet, args []string) {
 	dashboardUrlFlag = flags.String("dashboard_url", "/daemon/", ""+
 		"The url to serve the dashboard for this spawn instance. If you have\n"+
 		"multiple servers running spawn, they need different URLs.\n"+
-		"Slashes are optional.")
+		"Slashes are required.")
 	flags.Var(
 		tools.BoolFuncFlag(func(string) error {
 			fmt.Print(configSchema)

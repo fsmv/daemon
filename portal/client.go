@@ -213,18 +213,3 @@ func (c Client) KeepLeaseRenewedTLS(quit <-chan struct{}, lease *Lease, newCert 
 		timer.Reset(time.Until(timeout) - bufferTime)
 	}
 }
-
-// Adds slashes to the beginning and end of a given path so that the given path
-// will match all subpaths in serving
-func MakeFullPattern(path string) string {
-	var b strings.Builder
-	b.Grow(len(path) + 2)
-	if path[0] != '/' {
-		b.WriteRune('/')
-	}
-	b.WriteString(path)
-	if path[len(path)-1] != '/' {
-		b.WriteRune('/')
-	}
-	return b.String()
-}

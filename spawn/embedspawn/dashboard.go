@@ -132,7 +132,8 @@ func (d *dashboard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func StartDashboard(children *Children, quit chan struct{}) (dashboardQuit chan struct{}, err error) {
-	dashboardUrl = portal.MakeFullPattern(*dashboardUrlFlag)
+	pattern := *dashboardUrlFlag
+	_, dashboardUrl = portal.ParsePattern(pattern)
 	logsUrl = dashboardUrl + "logs"
 
 	// If the main  quit closes, shut down the dashboard. But, if the dashboard
@@ -143,7 +144,7 @@ func StartDashboard(children *Children, quit chan struct{}) (dashboardQuit chan 
 		close(dashboardQuit)
 	}()
 	lease, tlsConf, err := portal.StartTLSRegistration(&portal.RegisterRequest{
-		Pattern: dashboardUrl,
+		Pattern: pattern,
 	}, dashboardQuit)
 	if err != nil {
 		close(dashboardQuit)

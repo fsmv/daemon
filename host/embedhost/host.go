@@ -34,9 +34,10 @@ func Run(flags *flag.FlagSet, args []string) {
 	quit := make(chan struct{})
 	tools.CloseOnQuitSignals(quit)
 
-	url := *urlPath
+	pattern := *urlPath
+	_, path := portal.ParsePattern(pattern)
 	lease, tlsConf := portal.MustStartTLSRegistration(&portal.RegisterRequest{
-		Pattern: url,
+		Pattern: pattern,
 	}, quit)
 
 	// Setup the server handler
@@ -46,13 +47,13 @@ func Run(flags *flag.FlagSet, args []string) {
 		AllowDirectoryListing: *directoryListing,
 	}
 	fileServer := http.FileServer(dir)
-	if strings.HasSuffix(url, "/") {
-		fileServer = http.StripPrefix(url, fileServer)
+	if strings.HasSuffix(path, "/") {
+		fileServer = http.StripPrefix(path, fileServer)
 	} else {
 		// Don't strip off the filename if we're serving a single file
-		fileServer = http.StripPrefix(filepath.Dir(url), fileServer)
+		fileServer = http.StripPrefix(filepath.Dir(path), fileServer)
 	}
-	http.HandleFunc(url, func(w http.ResponseWriter, req *http.Request) {
+	http.HandleFunc(path, func(w http.ResponseWriter, req *http.Request) {
 		if *logRequests {
 			log.Printf("%v requested %v", req.Header.Get("Orig-Address"), req.URL)
 		}
