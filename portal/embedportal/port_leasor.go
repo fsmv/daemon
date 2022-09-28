@@ -90,7 +90,7 @@ func (l *PortLeasor) Register(request *portal.RegisterRequest) (*portal.Lease, e
 		if oldLease, ok := l.leases[request.FixedPort]; ok {
 			// TODO: can we notify the old lease holder that we kicked them?
 			log.Printf("Replacing an existing lease for the same fixed port: %#v", oldLease.Pattern)
-			l.Unregister(oldLease)
+			l.deleteLeaseUnsafe(oldLease)
 		}
 		newLease.Port = request.FixedPort
 	} else {
@@ -138,9 +138,6 @@ func (l *PortLeasor) Unregister(lease *portal.Lease) error {
 
 	log.Print("Lease unregistered: ", foundLease)
 	l.deleteLeaseUnsafe(foundLease)
-	for _, onCancel := range l.onCancel {
-		onCancel(foundLease)
-	}
 	return nil
 }
 
@@ -171,6 +168,10 @@ func (l *PortLeasor) deleteLeaseUnsafe(lease *portal.Lease) {
 		l.unusedPorts = append(l.unusedPorts, int(port-l.unusedPortOffset))
 	}
 	delete(l.leases, lease.Port)
+
+	for _, onCancel := range l.onCancel {
+		onCancel(lease)
+	}
 }
 
 // monitorTTLs monitors the list of leases and removes the expired ones.
@@ -189,9 +190,6 @@ func (l *PortLeasor) monitorTTLs(quit chan struct{}) {
 				if now.After(lease.Timeout.AsTime()) {
 					log.Print("Lease expired: ", lease)
 					l.deleteLeaseUnsafe(lease)
-					for _, onCancel := range l.onCancel {
-						onCancel(lease)
-					}
 				}
 			}
 			l.mut.Unlock()
