@@ -30,19 +30,36 @@ func handleVersionFlag(value string) error {
 		fmt.Fprintln(out, "Failed to read build info.")
 		os.Exit(1)
 	}
+
+	// Print the main version info with copyright notice
 	if CopyrightNotice != "" {
 		CopyrightNotice = "\n" + CopyrightNotice
 	}
-	fmt.Fprintf(out, "%v %v%v\n\n",
-		buildInfo.Main.Path, buildInfo.Main.Version, CopyrightNotice)
-	format := "%12v:  %v\n"
-	fmt.Fprintf(out, format, "Go Version", buildInfo.GoVersion)
+	fmt.Fprintf(out, "%v %v\tCompiler: %v%v\n",
+		buildInfo.Path, buildInfo.Main.Version, buildInfo.GoVersion, CopyrightNotice)
+
+	// Print the version control info if it's available with nice formatting
+	if len(buildInfo.Settings) > 0 {
+		fmt.Fprintf(out, "\n")
+	}
+	maxLen := 0 // find the maximum key length to pad the spaces correctly
+	const prefix = "vcs."
 	for _, setting := range buildInfo.Settings {
-		if !strings.HasPrefix(setting.Key, "vcs.") {
+		if !strings.HasPrefix(setting.Key, prefix) {
 			continue
 		}
-		fmt.Fprintf(out, format, setting.Key, setting.Value)
+		if l := len(setting.Key); l > maxLen {
+			maxLen = l
+		}
 	}
+	format := fmt.Sprintf("  %%%dv:  %%v\n", maxLen-len(prefix))
+	for _, setting := range buildInfo.Settings {
+		if !strings.HasPrefix(setting.Key, prefix) {
+			continue
+		}
+		fmt.Fprintf(out, format, setting.Key[len(prefix):], setting.Value)
+	}
+
 	os.Exit(0)
 	return nil
 }
