@@ -220,15 +220,18 @@ func (p *HTTPProxy) selectForwarder(host, path string) *forwarder {
 		patternHost, pattern := portal.ParsePattern(pattern)
 
 		// If the hostname doesn't match skip this forwarder
-		if host != "" { // for matching patterns that don't have a host
-			if patternHost == "" {
-				if p.defaultHost != "" && p.defaultHost != host {
-					return true
-				}
-			} else {
-				if patternHost != "*" && patternHost != host {
-					return true
-				}
+		if patternHost == "" {
+			if host != "" && p.defaultHost != "" && p.defaultHost != host {
+				return true
+			}
+		} else {
+			if host != "" && patternHost != "*" && patternHost != host {
+				return true
+			}
+			// If we are matching a pattern that doesn't have a host (host == ""), and
+			// a default host is setup, then match as if host was p.defaultHost
+			if host == "" && p.defaultHost != "" && p.defaultHost != patternHost {
+				return true
 			}
 		}
 		// If the pattern doesn't match skip this forwarder
