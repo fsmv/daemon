@@ -39,9 +39,6 @@ func handleVersionFlag(value string) error {
 		buildInfo.Path, buildInfo.Main.Version, buildInfo.GoVersion, CopyrightNotice)
 
 	// Print the version control info if it's available with nice formatting
-	if len(buildInfo.Settings) > 0 {
-		fmt.Fprintf(out, "\n")
-	}
 	maxLen := 0 // find the maximum key length to pad the spaces correctly
 	const prefix = "vcs."
 	for _, setting := range buildInfo.Settings {
@@ -51,6 +48,9 @@ func handleVersionFlag(value string) error {
 		if l := len(setting.Key); l > maxLen {
 			maxLen = l
 		}
+	}
+	if maxLen > 0 {
+		fmt.Fprintf(out, "\n")
 	}
 	format := fmt.Sprintf("  %%%dv:  %%v\n", maxLen-len(prefix))
 	for _, setting := range buildInfo.Settings {
