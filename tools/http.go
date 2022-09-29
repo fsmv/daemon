@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -93,6 +94,40 @@ func (s SecureHTTPDir) TestOpen(path string) error {
 		webrootFile.Close() // if err != nil then the file is nil
 	}
 	return err
+}
+
+// Returns the file size in bytes that will be served for a given request path.
+// This means that if it's a directory with index.html we return the size of
+// index.html. Without the index, directories get size 0.
+//
+// You can safely ignore the error, it's just there in case you want to know why
+// we returned 0
+func (s SecureHTTPDir) FileSize(request string) (int64, error) {
+	if !strings.HasPrefix(request, "/") {
+		request = "/" + request
+	}
+	f, err := s.Open(path.Clean(request))
+	if err != nil {
+		return 0, err
+	}
+	defer f.Close()
+	stat, err := f.Stat()
+	if err != nil {
+		return 0, err
+	}
+	if !stat.IsDir() {
+		return stat.Size(), nil
+	}
+	idx, err := s.Open(path.Join(request, "/index.html"))
+	if err != nil {
+		return 0, err
+	}
+	defer idx.Close()
+	iStat, err := idx.Stat()
+	if err != nil {
+		return 0, err
+	}
+	return iStat.Size(), nil
 }
 
 func (s SecureHTTPDir) Open(name string) (http.File, error) {

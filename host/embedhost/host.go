@@ -35,7 +35,7 @@ func Run(flags *flag.FlagSet, args []string) {
 	tools.CloseOnQuitSignals(quit)
 
 	pattern := *urlPath
-	_, path := portal.ParsePattern(pattern)
+	_, servePath := portal.ParsePattern(pattern)
 	lease, tlsConf := portal.MustStartTLSRegistration(&portal.RegisterRequest{
 		Pattern: pattern,
 	}, quit)
@@ -47,18 +47,23 @@ func Run(flags *flag.FlagSet, args []string) {
 		AllowDirectoryListing: *directoryListing,
 	}
 	fileServer := http.FileServer(dir)
-	if strings.HasSuffix(path, "/") {
-		fileServer = http.StripPrefix(path, fileServer)
+	var prefix string
+	if strings.HasSuffix(servePath, "/") {
+		prefix = servePath
 	} else {
 		// Don't strip off the filename if we're serving a single file
-		fileServer = http.StripPrefix(filepath.Dir(path), fileServer)
+		prefix = filepath.Dir(servePath)
 	}
-	http.HandleFunc(path, func(w http.ResponseWriter, req *http.Request) {
-		if *logRequests {
-			log.Printf("%v requested %v", req.Header.Get("Orig-Address"), req.URL)
-		}
-		fileServer.ServeHTTP(w, req)
-	})
+	http.Handle(servePath, http.StripPrefix(prefix, http.HandlerFunc(
+		func(w http.ResponseWriter, req *http.Request) {
+			if *logRequests {
+				size, _ := dir.FileSize(req.URL.Path)
+				log.Printf("%v requested %v (%v bytes)",
+					req.Header.Get("Orig-Address"), prefix+req.URL.String(), size)
+			}
+			fileServer.ServeHTTP(w, req)
+		},
+	)))
 
 	// Test if we can open the files, http.FileServer doesn't log anything helpful
 	if err := dir.TestOpen("/"); err != nil {
