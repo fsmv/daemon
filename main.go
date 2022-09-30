@@ -1,3 +1,252 @@
+/*
+Daemon is a webserver that securely organizes any internal webservers under a
+single URL. Internal servers register a path on the URL with the main
+[ask.systems/daemon/portal/portal] server via gRPC. Portal then acts as a
+reverse proxy, accepting all requests to the URL and forwarding requests and
+responses to and from the server that registered for the requested path.
+
+This package is a single binary which combines all of the binaries shipped with
+the daemon system into one simple package using subcommand arguments.
+
+# Installing
+
+	CGO_ENABLED=0 go install ask.systems/daemon@latest
+
+Why turn off cgo?
+
+With the focus on security, daemon supports running servers in chroot, which
+means system libraries are not available to load by dynamic linking. Using the
+`CGO_ENABLED=0` turns off C implementations used by certain go standard library
+packages, this produces a fully static linked binary that works in the chroot.
+
+So you should also compile your own go server binaries with `CGO_ENABLED=0`.
+For more information and options see: https://www.arp242.net/static-go.html
+
+# Setup and Explanation
+
+First you need to purchase a domain name to host your website. Without a domain
+name, you cannot get a TLS certificate signed by a Certificate Authority that is
+accepted by all major web browsers. This means a domain name is required to get
+encryption in transit that works without big scary security warnings in
+browsers. Once you have a domain set up a DNS A record pointing to your server's
+public IP address (search "what is my IP" online if at home) using your
+registrar's interface. Finally, if you're home hosting, set up port forwarding
+in your router settings page (usually accessible at http://192.168.1.1 with
+some manufacturer specfic default username and password) to forward all
+requests to `port 80` and `port 443` to your server's local IP address (it will
+usually look like 192.168.1.xxx and on linux will be printed, among other
+things, by `ifconfig`).
+
+TODO: When portal supports self signed certificates, explain it here
+
+Then the main thing you need is [ask.systems/daemon/portal/portal], the reverse
+proxy server that is configured via gRPC. Portal will accept all connections to
+your domain name, instead of any servers like Apache or NGINX. To encrypt this
+traffic portal needs your TLS cert, the easiest way to get one is using the
+https://letsencrypt.org/ Certificate Authority (CA). Install their `certbot`
+tool with your operating system's package manager then we can use it to get the
+certificate. This next step won't work if you didn't correctly set up your DNS
+and port forwarding settings.
+
+Note: in all examples below I've used my domain name ask.systems, replace this
+with your domain name. It will give you an error if you use mine.
+
+The first time you get your certificate run:
+(and make sure you don't have any server's binding port 80)
+
+	sudo certbot certonly --standalone -d ask.systems
+
+Let's Encrypt will then sign a certificate for your URL and store the two
+certificate and key files in the standard location, which will be printed. Save
+these two filepaths for configuring portal arguments.
+
+These cert files will only be readable by the root user, certbot configures it
+this way because it is critical that no one ever gains access to your cert keys,
+if they did they could impersonate your server and decrypt data in transit.
+However, you do not want to run a web server, like portal, accessible to the
+internet using the root user permissions. If a server running as root had a
+vulnerability, attackers would immediately have root permissions on your server!
+
+To solve this problem, and make it convenient to run many servers, daemon
+includes a launcher program [ask.systems/daemon/spawn]. Spawn uses a [textproto]
+configuration file to list the server binaries to run and the commandline
+arguments to run them with, as well the user to run them as. Most editors
+recognize the `.pbtxt` extension, the default name is `config.pbtxt` in the
+spawn working dir.
+
+Example spawn `config.pbtxt` for running portal only: (change my domain to yours)
+
+	command {
+		binary: "portal"
+		user: "www"
+		ports: [80, 443]
+		files: [
+			"/etc/letsencrypt/live/ask.systems/fullchain.pem",
+			"/etc/letsencrypt/live/ask.systems/privkey.pem"
+		]
+		auto_tls_certs: true
+		args: [
+			"-http_port=-3",
+			"-https_port=-4",
+			"-tls_cert=5",
+			"-tls_key=6",
+			"-auto_tls_certs",
+			"-cert_challenge_webroot=/cert-challenge/"
+		]
+	}
+
+This will tell spawn to, while running as root, bind the priveledged ports
+(linux only allows root to use these ports) and open the root owned cert files,
+then use the OS to securely pass these resources to portal, which we tell portal
+about using the file descriptor numbers in the arguments. Also as a security
+measure by default spawn runs all servers in a chroot so the cannot access
+files outside of the user's home directory (or the working_dir set in the
+config) in the event it did get hacked.
+
+The rest of the config options are for automatically renewing the Let's Encrypt
+TLS certificate. If you don't want to bother you can just restart the portal
+server (from the spawn dashboard page) whenever you renew the cert. To renew
+without any down-time, both spawn and portal need to coordinate to refresh the
+priveledged files and the two `auto_tls_certs` flags set this up on both sides.
+The `-cert_challenge_webroot` flag is a local directory path inside the chroot,
+which means `/` is actually `/home/www/`, this directory
+`/home/www/cert-challenge/` is where you will tell `certbot` to put the
+temporary challenge files to prove you own the domain.
+
+So to renew your TLS certificate you need to put the following commands in an
+executable shell script e.g. `/root/renew-cert.sh`, which we will run
+periodically with `cron`: (change the domain name)
+
+	certbot certonly -n --webroot -w /home/www/cert-challenge/ -d ask.systems
+	killall -SIGUSR1 {spawn,portal}
+
+Then to set it up to run regularly:
+
+ 1. Run `sudo crontab -e` to edit the root crontab file with `$EDITOR`
+ 2. Enter `@weekly /root/renew-cert.sh`
+
+Finally we're ready to run the server. For the first time, simply run it in the
+terminal, assuming your `$GOPATH/bin` in in your `$PATH`, with:
+
+	sudo daemon spawn
+
+This will run spawn as root which will run portal as www and importantly, portal
+will create a save state file (in `/home/www/`) and print the newly generated
+API token for registering paths. You will need to pass this to client binaries
+as an argument.
+
+You can now set up running spawn at boot and enable the spawn dashboard which
+streams logs to the browser and has server restart buttons!
+
+The easiest thing to do is to copy the daemon binary to `/root/daemon`, or you
+could set up a GOPATH for the root user and use `go install` to update daemon.
+Then move the config file to `/root/config.pbtxt` as well. Finally set up
+running spawn at boot. I think the easiest way is using cron again with
+`@reboot`, but you can use your system init service if you like.
+
+To use cron to run spawn run `sudo crontab -e` again and add:
+
+	@reboot /root/daemon -portal_token $TOKEN spawn -password_hash $HASH
+
+The `$HASH` is for the dashboard password protection. You can use
+https://go.dev/play/p/TElqQjpp0z- to generate the hash for your password.
+Currently the username is not configurable, it's `admin`. The default dashboard
+path is example.com/daemon/ you can configure it with -dashboard_url.
+
+TODO: I plan to support authentication more generically so it won't be a spawn
+flag in the future. I think it will be an option in the portal registration
+request.
+
+Optionally I recommend using syslog, which is a service most unix operating
+systems have by default. If you're using chroots read the `-syslog_remote` flag
+comments for information on setting it up and set the flag to `127.0.0.1`. All
+of the daemon binaries support `-syslog` to a file and `-syslog_remote`.
+
+Now it's all done ready! Check out the dashboard page!
+
+# Running built in servers
+
+Daemon includes a basic file server (with index.html serving for directory
+paths) to serve a local path for files and static web pages:
+[ask.systems/daemon/host]. Simply add an entry to your config file. For example
+to serve `favicon.ico` in `/home/www/favicon.ico` add:
+
+	command {
+		binary: "host"
+		user: "www"
+		name: "favicon"
+		args: [
+			"--syslog_remote=127.0.0.1",
+			"--portal_token=YOUR TOKEN HERE",
+			"--web_root=/",
+			"--url_path=/favicon.ico"
+		]
+	}
+
+# Running third party servers
+
+For third party web servers that don't know how to talk to portal, daemon
+includes [ask.systems/daemon/assimilate]. You can add assimilate to your config
+and it accepts arguments for any number of registrations to send to portal for
+a fixed port that the third party server listens on locally. You can then host
+for example a minecraft map listening on :8080/ to example.com/minecraft/ with:
+
+	command {
+		binary: "assimilate"
+		user: "www"
+		args: [
+			"--portal_token=YOUR TOKEN HERE",
+			"--syslog_remote=127.0.0.1",
+
+			"pattern: '/minecraft/' fixed_port: 8080 strip_pattern: true"
+		]
+	}
+
+# Running custom go servers
+
+For servers written in go, you can use the portal client library
+[ask.systems/daemon/portal] to register with portal, automatically select a port
+to listen on that won't conflict and even automatically use a newly generated
+TLS certificate to encrypt local traffic (this time it's easy!). To do this you
+will call [ask.systems/daemon/portal.StartTLSRegistration], set up any
+application handlers with [http.Handle] then call
+[ask.systems/daemon/tools.RunHTTPServerTLS].
+
+Make sure to take a look at the utility functions in [ask.systems/daemon/tools]!
+
+Minimal example:
+
+	import (
+		"net/http"
+
+		"ask.systems/daemon/portal"
+		"ask.systems/daemon/tools"
+		_ "ask.systems/daemon/tools/flags" // for the -version and -syslog flags
+	)
+
+	const pattern = "/hello/"
+	func main() {
+		quit := make(chan struct{})
+		tools.CloseOnQuitSignals(quit) // close the channel when the OS says to stop
+
+		// Register with portal, generate a TLS cert signed by portal, and keep the
+		// registration and cert renewed in the background
+		lease, tlsConf := portal.MustStartTLSRegistration(&portal.RegisterRequest{
+			Pattern: pattern,
+		}, quit)
+
+		// Serve Hello World with standard go server functions
+		http.Handle(pattern, http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			w.Write([]byte("Hello World!"))
+		}))
+
+		// Run the server and stop gracefully using the handlers registered with the
+		// default http global system
+		tools.RunHTTPServerTLS(lease.Port, tlsConf, quit)
+	}
+
+[textproto] https://developers.google.com/protocol-buffers/docs/text-format-spec
+*/
 package main
 
 import (
