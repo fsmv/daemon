@@ -179,10 +179,10 @@ to serve `favicon.ico` in `/home/www/favicon.ico` add:
 		user: "www"
 		name: "favicon"
 		args: [
-			"--syslog_remote=127.0.0.1",
-			"--portal_token=YOUR TOKEN HERE",
-			"--web_root=/",
-			"--url_path=/favicon.ico"
+			"-syslog_remote=127.0.0.1",
+			"-portal_token=YOUR TOKEN HERE",
+			"-web_root=/",
+			"-url_path=/favicon.ico"
 		]
 	}
 
@@ -198,8 +198,8 @@ for example a minecraft map listening on :8080/ to example.com/minecraft/ with:
 		binary: "assimilate"
 		user: "www"
 		args: [
-			"--portal_token=YOUR TOKEN HERE",
-			"--syslog_remote=127.0.0.1",
+			"-portal_token=YOUR TOKEN HERE",
+			"-syslog_remote=127.0.0.1",
 
 			"pattern: '/minecraft/' fixed_port: 8080 strip_pattern: true"
 		]
@@ -219,6 +219,7 @@ Make sure to take a look at the utility functions in [ask.systems/daemon/tools]!
 
 Basic example:
 
+	package main
 	import (
 		"flag"
 		"net/http"
@@ -251,8 +252,12 @@ Basic example:
 		tools.RunHTTPServerTLS(lease.Port, tlsConf, quit)
 	}
 
-Make sure to compile this with `CGO_ENABLED=0 go build` to allow it to run in a
-chroot.
+Write this to a new directory named `hello` then run:
+
+	go mod init hello && go mod tidy && CGO_ENABLED=0 go build
+
+Remember: Make sure to compile your binaries with `CGO_ENABLED=0 go build` to
+allow them to run in a chroot.
 
 You can then copy your binary to `/root/` next to daemon and add an entry to
 your `/root/config.pbtxt` with binary name and arguments. By default spawn
