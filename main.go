@@ -74,6 +74,9 @@ arguments to run them with, as well the user to run them as. Most editors
 recognize the `.pbtxt` extension, the default name is `config.pbtxt` in the
 spawn working dir.
 
+Spawn has a `-config_schema` help argument to print the fields accepted in the
+config file and documentation on the meaning of the options.
+
 Example spawn `config.pbtxt` for running portal only: (change my domain to yours)
 
 	command {
@@ -214,18 +217,21 @@ application handlers with [http.Handle] then call
 
 Make sure to take a look at the utility functions in [ask.systems/daemon/tools]!
 
-Minimal example:
+Basic example:
 
 	import (
+		"flag"
 		"net/http"
 
 		"ask.systems/daemon/portal"
 		"ask.systems/daemon/tools"
+		_ "ask.systems/daemon/portal/flags" // -portal_addr and -portal_token
 		_ "ask.systems/daemon/tools/flags" // for the -version and -syslog flags
 	)
 
 	const pattern = "/hello/"
 	func main() {
+		flag.Parse()
 		quit := make(chan struct{})
 		tools.CloseOnQuitSignals(quit) // close the channel when the OS says to stop
 
@@ -244,6 +250,14 @@ Minimal example:
 		// default http global system
 		tools.RunHTTPServerTLS(lease.Port, tlsConf, quit)
 	}
+
+Make sure to compile this with `CGO_ENABLED=0 go build` to allow it to run in a
+chroot.
+
+You can then copy your binary to `/root/` next to daemon and add an entry to
+your `/root/config.pbtxt` with binary name and arguments. By default spawn
+checks the working dir for binaries named in the config and you can set the
+spawn -path argument to change it.
 
 [textproto] https://developers.google.com/protocol-buffers/docs/text-format-spec
 */
