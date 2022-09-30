@@ -16,13 +16,13 @@ Why turn off cgo?
 
 With the focus on security, daemon supports running servers in chroot, which
 means system libraries are not available to load by dynamic linking. Using the
-`CGO_ENABLED=0` turns off C implementations used by certain go standard library
+CGO_ENABLED=0 turns off C implementations used by certain go standard library
 packages, this produces a fully static linked binary that works in the chroot.
 
-So you should also compile your own go server binaries with `CGO_ENABLED=0`.
+So you should also compile your own go server binaries with CGO_ENABLED=0.
 For more information and options see: https://www.arp242.net/static-go.html
 
-# Setup and Explanation
+# Setup and explanation
 
 First you need to purchase a domain name to host your website. Without a domain
 name, you cannot get a TLS certificate signed by a Certificate Authority that is
@@ -33,9 +33,9 @@ public IP address (search "what is my IP" online if at home) using your
 registrar's interface. Finally, if you're home hosting, set up port forwarding
 in your router settings page (usually accessible at http://192.168.1.1 with
 some manufacturer specfic default username and password) to forward all
-requests to `port 80` and `port 443` to your server's local IP address (it will
+requests to port 80 and port 443 to your server's local IP address (it will
 usually look like 192.168.1.xxx and on linux will be printed, among other
-things, by `ifconfig`).
+things, by ifconfig).
 
 TODO: When portal supports self signed certificates, explain it here
 
@@ -43,7 +43,7 @@ Then the main thing you need is [ask.systems/daemon/portal/portal], the reverse
 proxy server that is configured via gRPC. Portal will accept all connections to
 your domain name, instead of any servers like Apache or NGINX. To encrypt this
 traffic portal needs your TLS cert, the easiest way to get one is using the
-https://letsencrypt.org/ Certificate Authority (CA). Install their `certbot`
+https://letsencrypt.org/ Certificate Authority (CA). Install their certbot
 tool with your operating system's package manager then we can use it to get the
 certificate. This next step won't work if you didn't correctly set up your DNS
 and port forwarding settings.
@@ -71,13 +71,13 @@ To solve this problem, and make it convenient to run many servers, daemon
 includes a launcher program [ask.systems/daemon/spawn]. Spawn uses a [textproto]
 configuration file to list the server binaries to run and the commandline
 arguments to run them with, as well the user to run them as. Most editors
-recognize the `.pbtxt` extension, the default name is `config.pbtxt` in the
+recognize the .pbtxt extension, the default name is config.pbtxt in the
 spawn working dir.
 
-Spawn has a `-config_schema` help argument to print the fields accepted in the
+Spawn has a -config_schema help argument to print the fields accepted in the
 config file and documentation on the meaning of the options.
 
-Example spawn `config.pbtxt` for running portal only: (change my domain to yours)
+Example spawn config.pbtxt for running portal only: (change my domain to yours)
 
 	command {
 		binary: "portal"
@@ -110,60 +110,65 @@ The rest of the config options are for automatically renewing the Let's Encrypt
 TLS certificate. If you don't want to bother you can just restart the portal
 server (from the spawn dashboard page) whenever you renew the cert. To renew
 without any down-time, both spawn and portal need to coordinate to refresh the
-priveledged files and the two `auto_tls_certs` flags set this up on both sides.
-The `-cert_challenge_webroot` flag is a local directory path inside the chroot,
-which means `/` is actually `/home/www/`, this directory
-`/home/www/cert-challenge/` is where you will tell `certbot` to put the
+priveledged files and the two auto_tls_certs flags set this up on both sides.
+The -cert_challenge_webroot flag is a local directory path inside the chroot,
+which means / is actually /home/www/, this directory
+/home/www/cert-challenge/ is where you will tell certbot to put the
 temporary challenge files to prove you own the domain.
 
 So to renew your TLS certificate you need to put the following commands in an
-executable shell script e.g. `/root/renew-cert.sh`, which we will run
-periodically with `cron`: (change the domain name)
+executable shell script e.g. /root/renew-cert.sh, which we will run
+periodically with cron: (change the domain name)
 
 	certbot certonly -n --webroot -w /home/www/cert-challenge/ -d ask.systems
 	killall -SIGUSR1 {spawn,portal}
 
-Then to set it up to run regularly:
+Then to set it up to run regularly, first run:
 
- 1. Run `sudo crontab -e` to edit the root crontab file with `$EDITOR`
- 2. Enter `@weekly /root/renew-cert.sh`
+	sudo crontab -e # edit the root crontab file with $EDITOR
+
+Then add to the cron file:
+
+	@weekly /root/renew-cert.sh
 
 Finally we're ready to run the server. For the first time, simply run it in the
-terminal, assuming your `$GOPATH/bin` in in your `$PATH`, with:
+terminal, assuming your $GOPATH/bin in in your $PATH, with:
 
 	sudo daemon spawn
 
 This will run spawn as root which will run portal as www and importantly, portal
-will create a save state file (in `/home/www/`) and print the newly generated
+will create a save state file (in /home/www/) and print the newly generated
 API token for registering paths. You will need to pass this to client binaries
 as an argument.
 
 You can now set up running spawn at boot and enable the spawn dashboard which
 streams logs to the browser and has server restart buttons!
 
-The easiest thing to do is to copy the daemon binary to `/root/daemon`, or you
-could set up a GOPATH for the root user and use `go install` to update daemon.
-Then move the config file to `/root/config.pbtxt` as well. Finally set up
+The easiest thing to do is to copy the daemon binary to /root/daemon, or you
+could set up a GOPATH for the root user and use go install to update daemon.
+Then move the config file to /root/config.pbtxt as well. Finally set up
 running spawn at boot. I think the easiest way is using cron again with
-`@reboot`, but you can use your system init service if you like.
+@reboot, but you can use your system init service if you like.
 
-To use cron to run spawn run `sudo crontab -e` again and add:
+To use cron to run spawn run sudo crontab -e again and add:
 
 	@reboot /root/daemon -portal_token $TOKEN spawn -password_hash $HASH
 
-The `$HASH` is for the dashboard password protection. You can use
+The $HASH is for the dashboard password protection. You can use
 https://go.dev/play/p/TElqQjpp0z- to generate the hash for your password.
-Currently the username is not configurable, it's `admin`. The default dashboard
+Currently the username is not configurable, it's admin. The default dashboard
 path is example.com/daemon/ you can configure it with -dashboard_url.
 
 TODO: I plan to support authentication more generically so it won't be a spawn
 flag in the future. I think it will be an option in the portal registration
 request.
 
-Optionally I recommend using syslog, which is a service most unix operating
-systems have by default. If you're using chroots read the `-syslog_remote` flag
-comments for information on setting it up and set the flag to `127.0.0.1`. All
-of the daemon binaries support `-syslog` to a file and `-syslog_remote`.
+Optionally I recommend using syslog, which is a service that collects, combines
+and compresses logs which most unix operating systems have by default. With go
+binaries using the daemon library, if you're using chroots use the
+-syslog_remote flag (the help text has information on setting it up). For third
+party servers can pipe output to the logger binary which most distributions come
+with.
 
 Now it's all done ready! Check out the dashboard page!
 
@@ -172,7 +177,7 @@ Now it's all done ready! Check out the dashboard page!
 Daemon includes a basic file server (with index.html serving for directory
 paths) to serve a local path for files and static web pages:
 [ask.systems/daemon/host]. Simply add an entry to your config file. For example
-to serve `favicon.ico` in `/home/www/favicon.ico` add:
+to serve favicon.ico in /home/www/favicon.ico add:
 
 	command {
 		binary: "host"
@@ -217,54 +222,15 @@ application handlers with [http.Handle] then call
 
 Make sure to take a look at the utility functions in [ask.systems/daemon/tools]!
 
-Basic example:
-
-	package main
-	import (
-		"flag"
-		"net/http"
-
-		"ask.systems/daemon/portal"
-		"ask.systems/daemon/tools"
-		_ "ask.systems/daemon/portal/flags" // -portal_addr and -portal_token
-		_ "ask.systems/daemon/tools/flags" // for the -version and -syslog flags
-	)
-
-	const pattern = "/hello/"
-	func main() {
-		flag.Parse()
-		quit := make(chan struct{})
-		tools.CloseOnQuitSignals(quit) // close the channel when the OS says to stop
-
-		// Register with portal, generate a TLS cert signed by portal, and keep the
-		// registration and cert renewed in the background
-		lease, tlsConf := portal.MustStartTLSRegistration(&portal.RegisterRequest{
-			Pattern: pattern,
-		}, quit)
-
-		// Serve Hello World with standard go server functions
-		http.Handle(pattern, http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-			w.Write([]byte("Hello World!"))
-		}))
-
-		// Run the server and stop gracefully using the handlers registered with the
-		// default http global system
-		tools.RunHTTPServerTLS(lease.Port, tlsConf, quit)
-	}
-
-Write this to a new directory named `hello` then run:
-
-	go mod init hello && go mod tidy && CGO_ENABLED=0 go build
-
-Remember: Make sure to compile your binaries with `CGO_ENABLED=0 go build` to
+Remember: Make sure to compile your binaries with CGO_ENABLED=0 go build to
 allow them to run in a chroot.
 
-You can then copy your binary to `/root/` next to daemon and add an entry to
-your `/root/config.pbtxt` with binary name and arguments. By default spawn
+You can then copy your binary to /root/ next to daemon and add an entry to
+your /root/config.pbtxt with binary name and arguments. By default spawn
 checks the working dir for binaries named in the config and you can set the
 spawn -path argument to change it.
 
-[textproto] https://developers.google.com/protocol-buffers/docs/text-format-spec
+[textproto]: https://developers.google.com/protocol-buffers/docs/text-format-spec
 */
 package main
 
