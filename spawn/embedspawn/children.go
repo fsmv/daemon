@@ -19,11 +19,12 @@ import (
 	"ask.systems/daemon/tools"
 )
 
-var (
-	MegabinaryCommands []string
-)
+// MegabinaryCommands is the list of commands that spawn should use as
+// sub-commands of the binary running spawn. The main [ask.systems/daemon]
+// binary sets this so spawn can run commands from it.
+var MegabinaryCommands []string
 
-type Child struct {
+type child struct {
 	Up              bool
 	Message         error
 	Name            string
@@ -32,20 +33,20 @@ type Child struct {
 	quitFileRefresh chan struct{}
 }
 
-type Children struct {
+type children struct {
 	*sync.Mutex
 	*logHandler
 	// Note the PID map will contain all old instances of servers
-	ByPID  map[int]*Child
-	ByName map[string]*Child
+	ByPID  map[int]*child
+	ByName map[string]*child
 }
 
-func NewChildren(quit chan struct{}) *Children {
-	c := &Children{
+func newChildren(quit chan struct{}) *children {
+	c := &children{
 		&sync.Mutex{},
-		NewLogHandler(quit),
-		make(map[int]*Child),
-		make(map[string]*Child),
+		newLogHandler(quit),
+		make(map[int]*child),
+		make(map[string]*child),
 	}
 	r, w := io.Pipe()
 	log.SetOutput(io.MultiWriter(log.Writer(), tools.NewTimestampWriter(w)))
@@ -53,7 +54,7 @@ func NewChildren(quit chan struct{}) *Children {
 	return c
 }
 
-func (c *Children) StartPrograms(programs []*Command) (errCnt int) {
+func (c *children) StartPrograms(programs []*Command) (errCnt int) {
 	errCnt = 0
 	for i, cmd := range programs {
 		err := c.StartProgram(cmd)
@@ -66,7 +67,7 @@ func (c *Children) StartPrograms(programs []*Command) (errCnt int) {
 	return errCnt
 }
 
-func (children *Children) StartProgram(cmd *Command) error {
+func (children *children) StartProgram(cmd *Command) error {
 	if len(cmd.Binary) == 0 {
 		return fmt.Errorf("Binary is required")
 	}
@@ -229,7 +230,7 @@ func (children *Children) StartProgram(cmd *Command) error {
 
 	// Start the process
 	proc, err := os.StartProcess(binpath, argv, attr)
-	c := &Child{
+	c := &child{
 		Cmd:             cmd,
 		Proc:            proc,
 		Name:            name,
@@ -255,7 +256,7 @@ func (children *Children) StartProgram(cmd *Command) error {
 	return nil
 }
 
-func (c *Children) RestartChild(name string) {
+func (c *children) RestartChild(name string) {
 	c.Lock()
 
 	child, ok := c.ByName[name]
@@ -284,7 +285,7 @@ func (c *Children) RestartChild(name string) {
 	}
 }
 
-func (c *Children) ReloadConfig() {
+func (c *children) ReloadConfig() {
 	commands, err := ReadConfig(*configFilename)
 	if err != nil {
 		log.Print("Failed to reload config: ", err)
@@ -294,12 +295,12 @@ func (c *Children) ReloadConfig() {
 	defer c.Unlock()
 	for _, cmd := range commands {
 		name := cmd.FullName()
-		child, ok := c.ByName[name]
+		cmdChild, ok := c.ByName[name]
 		if ok {
-			child.Cmd = cmd
+			cmdChild.Cmd = cmd
 		} else {
 			log.Print("New server: ", name)
-			c.unsafeStore(&Child{
+			c.unsafeStore(&child{
 				Cmd:  cmd,
 				Name: name,
 				Up:   false,
@@ -308,7 +309,7 @@ func (c *Children) ReloadConfig() {
 	}
 }
 
-func (c *Children) ReportDown(pid int, message error) {
+func (c *children) ReportDown(pid int, message error) {
 	c.Lock()
 	defer c.Unlock() // need it the whole time we modify child
 	child, ok := c.ByPID[pid]
@@ -341,7 +342,7 @@ func makeDeadChildMessage(status syscall.WaitStatus,
 		resUsage.Nvcsw, resUsage.Nivcsw)
 }
 
-func (c *Children) MonitorDeaths(quit chan struct{}) {
+func (c *children) MonitorDeaths(quit chan struct{}) {
 	child := make(chan os.Signal, 16)
 	signal.Notify(child, syscall.SIGCHLD)
 	for {
@@ -373,14 +374,14 @@ func (c *Children) MonitorDeaths(quit chan struct{}) {
 	}
 }
 
-func (c *Children) unsafeStore(child *Child) {
+func (c *children) unsafeStore(child *child) {
 	if child.Proc != nil {
 		c.ByPID[child.Proc.Pid] = child
 	}
 	c.ByName[child.Name] = child
 }
 
-func (c *Children) Store(child *Child) {
+func (c *children) Store(child *child) {
 	c.Lock()
 	c.unsafeStore(child)
 	c.Unlock()

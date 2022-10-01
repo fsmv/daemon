@@ -35,7 +35,7 @@ var (
 )
 
 type logStream struct {
-	Children *Children
+	Children *children
 }
 
 func (l *logStream) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -72,7 +72,7 @@ func (l *logStream) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 type dashboard struct {
-	Children *Children
+	Children *children
 
 	templates *template.Template
 }
@@ -131,7 +131,7 @@ func (d *dashboard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func StartDashboard(children *Children, quit chan struct{}) (dashboardQuit chan struct{}, err error) {
+func startDashboard(children *children, quit chan struct{}) (dashboardQuit chan struct{}, err error) {
 	pattern := *dashboardUrlFlag
 	_, dashboardUrl = gate.ParsePattern(pattern)
 	logsUrl = dashboardUrl + "logs"

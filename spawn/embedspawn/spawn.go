@@ -65,13 +65,13 @@ func Run(flags *flag.FlagSet, args []string) {
 	quit := make(chan struct{})
 	tools.CloseOnQuitSignals(quit)
 
-	children := NewChildren(quit)
+	children := newChildren(quit)
 	go children.MonitorDeaths(quit)
 	// Mutex to make the death message handler wait for data about the children
 	if errcnt := children.StartPrograms(commands); errcnt != 0 {
 		log.Printf("%v errors occurred in spawning", errcnt)
 	}
-	if _, err := StartDashboard(children, quit); err != nil {
+	if _, err := startDashboard(children, quit); err != nil {
 		log.Print("Failed to start dashboard: ", err)
 		// TODO: retry it? Also check the dashboardQuit signal for retries
 	}

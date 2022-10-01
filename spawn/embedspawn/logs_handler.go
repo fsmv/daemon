@@ -19,18 +19,18 @@ type logHandler struct {
 	logLines map[string]*ringBuffer
 	// Broadcasting system
 	quit        chan struct{}
-	publish     chan LogMessage
-	subscribe   chan chan<- LogMessage
-	subscribers map[chan<- LogMessage]struct{}
+	publish     chan logMessage
+	subscribe   chan chan<- logMessage
+	subscribers map[chan<- logMessage]struct{}
 }
 
-func NewLogHandler(quit chan struct{}) *logHandler {
+func newLogHandler(quit chan struct{}) *logHandler {
 	h := &logHandler{
 		quit:        quit,
 		logLines:    make(map[string]*ringBuffer),
-		subscribers: make(map[chan<- LogMessage]struct{}),
-		publish:     make(chan LogMessage, kPublishChannelSize),
-		subscribe:   make(chan chan<- LogMessage),
+		subscribers: make(map[chan<- logMessage]struct{}),
+		publish:     make(chan logMessage, kPublishChannelSize),
+		subscribe:   make(chan chan<- logMessage),
 	}
 	go h.run()
 	return h
@@ -98,7 +98,7 @@ func (h *logHandler) HandleLogs(logs io.ReadCloser, tag string) {
 			// Use fmt instead of log so we don't syslog the client's logs
 			fmt.Printf("%v: %v", tag, line)
 		}
-		h.publish <- LogMessage{Line: line, Tag: tag}
+		h.publish <- logMessage{Line: line, Tag: tag}
 		select {
 		case <-h.quit:
 			return
@@ -107,8 +107,8 @@ func (h *logHandler) HandleLogs(logs io.ReadCloser, tag string) {
 	}
 }
 
-func (h *logHandler) StreamLogs() (stream <-chan LogMessage, cancel func()) {
-	sub := make(chan LogMessage, kSubscriptionChannelSize)
+func (h *logHandler) StreamLogs() (stream <-chan logMessage, cancel func()) {
+	sub := make(chan logMessage, kSubscriptionChannelSize)
 	h.subscribe <- sub
 	return sub, func() {
 		h.subscribe <- sub
@@ -116,7 +116,7 @@ func (h *logHandler) StreamLogs() (stream <-chan LogMessage, cancel func()) {
 	}
 }
 
-type LogMessage struct {
+type logMessage struct {
 	Line string
 	Tag  string
 }
@@ -138,13 +138,13 @@ func (r *ringBuffer) Push(line string) {
 }
 
 // Not thread safe, simultaneous push will break it
-func (r *ringBuffer) Write(out chan<- LogMessage, tag string) {
+func (r *ringBuffer) Write(out chan<- logMessage, tag string) {
 	if r.filled {
 		for _, line := range r.buffer[r.nextLine:] {
-			out <- LogMessage{Line: line, Tag: tag}
+			out <- logMessage{Line: line, Tag: tag}
 		}
 	}
 	for _, line := range r.buffer[:r.nextLine] {
-		out <- LogMessage{Line: line, Tag: tag}
+		out <- logMessage{Line: line, Tag: tag}
 	}
 }
