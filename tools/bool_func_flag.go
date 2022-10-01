@@ -18,6 +18,8 @@ func (b BoolFuncFlag) Set(s string) error {
 	return b(s)
 }
 
+// Returns true. This is why you need a helper type and can't just use flag.Var
+// to get this behavior.
 func (b BoolFuncFlag) IsBoolFlag() bool {
 	return true
 }

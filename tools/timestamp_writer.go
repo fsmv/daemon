@@ -11,8 +11,8 @@ func init() {
 	_ = time.Local.String()
 }
 
-// Wraps an [io.Writer] and prepends a timestamp from [time.Now] to each [Write]
-// call.
+// Wraps an [io.Writer] and prepends a timestamp from [time.Now] to each
+// [TimestampWriter.Write] call.
 type TimestampWriter struct {
 	io.Writer
 	// Don't forget to include whitespace at the end to separate the message

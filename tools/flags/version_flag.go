@@ -23,7 +23,7 @@ var (
 	// Set this to information about your license and copyright to print in the
 	// -version flag results
 	//
-	// Must be set before calling flag.Parse()
+	// Must be set before calling [flag.Parse]
 	CopyrightNotice string
 )
 

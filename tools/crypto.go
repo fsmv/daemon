@@ -8,7 +8,7 @@ import (
 // Returns a random base64 string of the specified number of bytes.
 // If there's an error calling [crypto/rand.Read], it returns "".
 //
-// Uses [encoding/base64.URLEncoding] for URL safe strings.
+// Uses [base64.URLEncoding] for URL safe strings.
 func RandomString(bytes int) string {
 	b := make([]byte, bytes)
 	_, err := rand.Read(b)

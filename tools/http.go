@@ -79,8 +79,8 @@ func RunHTTPServer(port uint32, quit chan struct{}) {
 	log.Print("HTTP server exit status:", code)
 }
 
-// SecureHTTPDir is a replacement for [net/http.Dir] for use with
-// [net/http.FileServer]. It allows you to turn off serving directory listings
+// SecureHTTPDir is a replacement for [http.Dir] for use with
+// [http.FileServer]. It allows you to turn off serving directory listings
 // and hidden dotfiles.
 //
 // These settings are not thread safe so set them up before serving.
@@ -98,7 +98,7 @@ type SecureHTTPDir struct {
 // Test if we can open the given file.
 //
 // It's good to call this when you start up a file server because
-// [net/http.FileServer] doesn't log anything on open errors.
+// [http.FileServer] doesn't log anything on open errors.
 func (s SecureHTTPDir) TestOpen(path string) error {
 	webrootFile, err := s.Dir.Open(path) // Use the internal to bypass no dir listing
 	if err == nil {
@@ -142,10 +142,10 @@ func (s SecureHTTPDir) FileSize(request string) (int64, error) {
 	return iStat.Size(), nil
 }
 
-// Returns [io/fs.ErrNotExist] for files and directories that should not be
+// Returns [fs.ErrNotExist] for files and directories that should not be
 // accessed depending on the settings.
 //
-// This is the override over [net/http.Dir] that allows this class to work
+// This is the override over [http.Dir] that allows this class to work
 func (s SecureHTTPDir) Open(name string) (http.File, error) {
 	filename := filepath.Base(name)
 
