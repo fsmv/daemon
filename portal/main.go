@@ -1,3 +1,17 @@
+/*
+Portal is a reverse proxy HTTPS server configured via gRPC
+
+A reverse proxy means that portal accepts all requests to your domain name and
+then forwards the requests to backend servers, which have been configured via
+gRPC, and then relays the backend's response back to the client.
+
+Install portal standalone with:
+
+	CGO_ENABLED=0 go install ask.systems/daemon/portal@latest
+
+You can also use portal as a subcommand of the combined [ask.systems/daemon]
+binary.
+*/
 package main
 
 import (

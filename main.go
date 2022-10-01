@@ -297,6 +297,10 @@ import (
 	"ask.systems/daemon/spawn/embedspawn"
 )
 
+//go:generate protoc -I ./portal/ portal/embedportal/storage.proto --go_out ./portal --go_opt=paths=source_relative
+//go:generate protoc -I ./portal/ portal/gate/service.proto --go_out ./portal --go-grpc_out ./portal --go_opt=paths=source_relative --go-grpc_opt=paths=source_relative
+//go:generate protoc -I ./spawn/ spawn/embedspawn/config.proto --go_out ./spawn --go_opt=paths=source_relative
+
 type command struct {
 	name        string
 	run         func(*flag.FlagSet, []string)

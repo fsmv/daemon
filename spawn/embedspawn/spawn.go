@@ -19,7 +19,7 @@ import (
 //go:embed config.proto
 var configSchema string
 
-//go:generate protoc config.proto --go_out ./ --go_opt=paths=source_relative
+//go:generate protoc -I ../ ../embedspawn/config.proto --go_out ../ --go_opt=paths=source_relative
 
 var (
 	configFilename   *string
