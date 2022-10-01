@@ -316,10 +316,9 @@ func (c *Children) ReportDown(pid int, message error) {
 		log.Printf("Got death message for unregistered child: %v", message)
 		return
 	}
-	if !child.Up {
-		log.Printf("Got death message for already dead child")
-		return
-	}
+	// Don't accumulate old Child structs in the ByPID map forever, we will still
+	// have it in the ByName map until it gets reloaded then the GC will delete it
+	delete(c.ByPID, pid)
 	child.Up = false
 	child.Message = message
 	if child.quitFileRefresh != nil {
@@ -375,7 +374,9 @@ func (c *Children) MonitorDeaths(quit chan struct{}) {
 }
 
 func (c *Children) unsafeStore(child *Child) {
-	c.ByPID[child.Proc.Pid] = child
+	if child.Proc != nil {
+		c.ByPID[child.Proc.Pid] = child
+	}
 	c.ByName[child.Name] = child
 }
 
