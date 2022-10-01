@@ -2,15 +2,14 @@ package embedportal
 
 import (
 	"crypto/x509"
-	"encoding/base64"
 	"log"
-	"math/rand"
 	"os"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"ask.systems/daemon/portal"
+	"ask.systems/daemon/tools"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -80,12 +79,7 @@ func (s *StateManager) Token() string {
 // If empty, generate a new token
 func (s *StateManager) SetToken(token string) {
 	if token == "" {
-		b := make([]byte, 32)
-		_, err := rand.Read(b)
-		if err != nil {
-			log.Fatalf("Failed to generate a random API token: ", err)
-		}
-		token = base64.URLEncoding.EncodeToString(b)
+		token = tools.RandomString(32)
 	}
 
 	log.Printf("**** Portal API token: %v ****", token)
