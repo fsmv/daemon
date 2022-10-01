@@ -13,13 +13,11 @@ import (
 	"ask.systems/daemon/tools"
 )
 
-var (
-	// Use this if you want to use the log severity methods. This is only
-	// initialized if the syslogTag flag is set and flag.Parse() has been called.
-	//
-	// Using this writer directly will not also log to stdout
-	Syslog *syslog.Writer
-)
+// Use this if you want to use the log severity methods. This is only
+// initialized if the syslogTag flag is set and flag.Parse() has been called.
+//
+// Using this writer directly will not also log to stdout
+var Syslog *syslog.Writer
 
 func init() {
 	flag.Var(tools.BoolFuncFlag(handleSyslogFlag), "syslog", ""+

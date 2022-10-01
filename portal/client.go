@@ -50,7 +50,7 @@ func checkFlags() error {
 
 // Make a connection to the portal RPC service and send the registration
 // request. Also starts a goroutine to renew the lease (using
-// [KeepLeaseRenewed]) until the quit channel is closed.
+// [Client.KeepLeaseRenewed]) until the quit channel is closed.
 //
 // Returns the initial lease or an error if the registration didn't work.
 func StartRegistration(request *RegisterRequest, quit <-chan struct{}) (*Lease, error) {
@@ -95,9 +95,9 @@ func MustStartTLSRegistration(request *RegisterRequest, quit <-chan struct{}) (*
 // over the network).
 //
 // Starts a goroutine to renew the both the lease and the TLS certificate
-// (using [KeepLeaseRenewedTLS]) until the quit channel is closed.
+// (using [Client.KeepLeaseRenewedTLS]) until the quit channel is closed.
 //
-// Returns the initial lease, and a [crypto/tls.Config] which automatically
+// Returns the initial lease, and a [tls.Config] which automatically
 // renews the certificate seemlessly. Or return an error if the registration
 // didn't work.
 func StartTLSRegistration(request *RegisterRequest, quit <-chan struct{}) (*Lease, *tls.Config, error) {
@@ -144,7 +144,7 @@ func StartTLSRegistration(request *RegisterRequest, quit <-chan struct{}) (*Leas
 
 // Parse a pattern in the syntax accepted by portal separating the hostname
 // (URL) part of the pattern from the path part. The path part is then
-// compatible with [net/http.Handle]
+// compatible with [http.Handle]
 //
 // This is needed to host multiple URLs with portal.
 func ParsePattern(pattern string) (host, path string) {

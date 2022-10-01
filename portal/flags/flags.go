@@ -1,3 +1,4 @@
+// Defines the -portal_addr and -portal_token flags
 package flags
 
 import (

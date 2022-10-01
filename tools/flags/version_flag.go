@@ -19,13 +19,11 @@ import (
 	"ask.systems/daemon/tools"
 )
 
-var (
-	// Set this to information about your license and copyright to print in the
-	// -version flag results
-	//
-	// Must be set before calling [flag.Parse]
-	CopyrightNotice string
-)
+// Set this to information about your license and copyright to print in the
+// -version flag results
+//
+// Must be set before calling [flag.Parse]
+var CopyrightNotice string
 
 func init() {
 	flag.Var(tools.BoolFuncFlag(handleVersionFlag), "version",

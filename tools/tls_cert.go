@@ -159,8 +159,8 @@ func SignCertificate(root *tls.Certificate, rawCertRequest []byte, expiration ti
 	return cert, nil
 }
 
-// Convert raw certificate bytes and a private key into the
-// [crypto/tls.Certificate] structure, so it can be used for go connections.
+// Convert raw certificate bytes and a private key into the [tls.Certificate]
+// structure, so it can be used for go connections.
 //
 // You need this after your root CA has signed your certificate request.
 func CertificateFromSignedCert(rawCert []byte, privateKey *ecdsa.PrivateKey) *tls.Certificate {
