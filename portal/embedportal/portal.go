@@ -146,7 +146,7 @@ type tlsRefresher struct {
 	quit  chan struct{}
 }
 
-func StartTLSRefresher(tlsCert, tlsKey []*os.File, quit chan struct{}) *tlsRefresher {
+func startTLSRefresher(tlsCert, tlsKey []*os.File, quit chan struct{}) *tlsRefresher {
 	t := &tlsRefresher{
 		quit:  quit,
 		cache: make([]*atomic.Value, len(tlsCert)),
@@ -315,7 +315,7 @@ func loadTLSConfig(tlsCertSpec, tlsKeySpec []string,
 	}
 
 	if autoTLSCerts {
-		refresher := StartTLSRefresher(tlsCert, tlsKey, quit)
+		refresher := startTLSRefresher(tlsCert, tlsKey, quit)
 		return &tls.Config{
 			GetCertificate: refresher.GetCertificate,
 		}, nil

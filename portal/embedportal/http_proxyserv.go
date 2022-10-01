@@ -271,16 +271,6 @@ func (p *HTTPProxy) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	fwd.Handler.ServeHTTP(w, req)
 }
 
-// RedirectToHTTPS is an http Handler function which redirects any requests to
-// the same url but with https instead of http
-func RedirectToHTTPS(w http.ResponseWriter, req *http.Request) {
-	var url url.URL = *req.URL // make a copy
-	url.Scheme = "https"
-	url.Host = req.Host
-	url.Host = url.Hostname() // strip the port if one exists
-	http.Redirect(w, req, url.String(), http.StatusSeeOther)
-}
-
 // runServer calls serv.Serv(list) and prints and error and closes the quit
 // channel if the server dies
 func runServer(quit chan struct{}, name string,
@@ -359,7 +349,7 @@ func StartHTTPProxy(l *PortLeasor, tlsConfig *tls.Config,
 	go runServer(quit, "TLS", tlsServer, tls.NewListener(httpsList, tlsConfig))
 	// Start the HTTP server to redirect to HTTPS
 	httpServer := &http.Server{
-		Handler: http.HandlerFunc(RedirectToHTTPS),
+		Handler: tools.RedirectToHTTPS{},
 	}
 	go runServer(quit, "HTTP redirect", httpServer, httpList)
 	// Close the servers on quit signal

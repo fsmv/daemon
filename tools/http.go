@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"net/url"
 	"path"
 	"path/filepath"
 	"strconv"
@@ -242,4 +243,17 @@ func (f noDotfilesHTTPFile) ReadDir(n int) ([]fs.DirEntry, error) {
 		trimmedResults = append(trimmedResults, result)
 	}
 	return trimmedResults, nil
+}
+
+// RedirectToHTTPS is an [http.Handler] which redirects any requests to the same
+// url but with https instead of http.
+type RedirectToHTTPS struct{}
+
+// Unconditionally sets the url to https:// and then serves an HTTP 303 response
+func (r RedirectToHTTPS) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	var url url.URL = *req.URL // make a copy
+	url.Scheme = "https"
+	url.Host = req.Host
+	url.Host = url.Hostname() // strip the port if one exists
+	http.Redirect(w, req, url.String(), http.StatusSeeOther)
 }
