@@ -222,6 +222,54 @@ application handlers with [http.Handle] then call
 
 Make sure to take a look at the utility functions in [ask.systems/daemon/tools]!
 
+Below is a basic example of a go client for portal with encrypted internal
+traffic.  Simply change the handlers to any application logic you like using the
+standard [net/http] package.
+
+	package main
+
+	import (
+		"flag"
+		"log"
+		"net/http"
+
+		_ "ask.systems/daemon/portal/flags" // -portal_addr and -portal_token
+		_ "ask.systems/daemon/tools/flags"  // for the -version and -syslog flags
+
+		"ask.systems/daemon/portal"
+		"ask.systems/daemon/tools"
+	)
+
+	var (
+		pattern = flag.String("pattern", "/hello/", "The path to register with portal")
+	)
+
+	func Example() {
+		flag.Parse()
+		quit := make(chan struct{})
+		tools.CloseOnQuitSignals(quit) // close the channel when the OS says to stop
+
+		// Remove the optional URL prefix from the pattern, portal can serve multiple URLs
+		_, path := portal.ParsePattern(*pattern)
+		// Register with portal, generate a TLS cert signed by portal, and keep the
+		// registration and cert renewed in the background (until quit is closed)
+		lease, tlsConf := portal.MustStartTLSRegistration(&portal.RegisterRequest{
+			Pattern: *pattern,
+		}, quit)
+
+		// Serve Hello World with standard go server functions
+		http.Handle(path, http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			w.Write([]byte("Hello World!"))
+			// portal adds this header to tell you who sent the request to portal
+			log.Printf("Hello from %v", req.Header.Get("Orig-Address"))
+		}))
+
+		// Run the server and block until the channel is closed and the graceful stop
+		// is done. Uses the handlers registered with the http package global system
+		tools.RunHTTPServerTLS(lease.Port, tlsConf, quit)
+		log.Print("Goodbye")
+	}
+
 Remember: Make sure to compile your binaries with CGO_ENABLED=0 go build to
 allow them to run in a chroot.
 
