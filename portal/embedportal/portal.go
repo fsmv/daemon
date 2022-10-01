@@ -93,7 +93,7 @@ func Run(flags *flag.FlagSet, args []string) {
 		log.Print("No save data: ", err)
 	}
 
-	state := NewStateManager(*saveFilepath)
+	state := newStateManager(*saveFilepath)
 	onCertRenew := func(cert *tls.Certificate) {
 		if err := state.NewRootCA(cert.Certificate[0]); err != nil {
 			log.Print("Error saving new root CA, new backend connections may not work: ", err)
@@ -105,9 +105,9 @@ func Run(flags *flag.FlagSet, args []string) {
 		log.Fatalf("Failed to create a self signed certificate for the RPC server: %v", err)
 	}
 
-	l := StartPortLeasor(portRangeStart, portRangeEnd, leaseTTL, quit)
-	tcpProxy := StartTCPProxy(l, tlsConfig, quit)
-	httpProxy, err := StartHTTPProxy(l, tlsConfig,
+	l := startPortLeasor(portRangeStart, portRangeEnd, leaseTTL, quit)
+	tcpProxy := startTCPProxy(l, tlsConfig, quit)
+	httpProxy, err := startHTTPProxy(l, tlsConfig,
 		httpListener, httpsListener,
 		*defaultHost, *certChallengeWebRoot,
 		state, rootCert, quit)
@@ -116,7 +116,7 @@ func Run(flags *flag.FlagSet, args []string) {
 		log.Fatalf("Failed to start HTTP proxy server: %v", err)
 	}
 
-	_, err = StartRPCServer(l,
+	_, err = startRPCServer(l,
 		tcpProxy, httpProxy, rpcPort,
 		rootCert, saveData, state, quit)
 	log.Print("Started rpc server on port ", rpcPort)

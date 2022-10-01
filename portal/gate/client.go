@@ -1,7 +1,7 @@
 /*
 The client library for registering paths with [ask.systems/daemon/portal].
 
-This package contains the raw gRPC service protos in addition to helper
+This package contains the raw [gRPC] service [protos] in addition to helper
 functions for using the service. The helpers are:
 
   - [StartTLSRegistration], [MustStartTLSRegistration], [StartRegistration], and
@@ -12,16 +12,19 @@ functions for using the service. The helpers are:
     used to register with portal when portal is hosting multiple URLs. This is
     needed to extract the path part that can be used with [http.Handle].
   - [Client] and the methods under it provide full access to the gRPC server
-    using the token authentication. Call methods directly using [Client.RPC] if
+    using the token authentication. Call methods directly using [Client].RPC if
     you want detailed access to portal.
 
 You need to set the [Address] and [Token] vars to use the 4 helper functions
-like [StartTLSRegistrtation] so it can connect to portal. The simplest way to
+like [StartTLSRegistration] so it can connect to portal. The simplest way to
 do this is to import the [ask.systems/daemon/portal/flags] library:
 
 	import (
 		_ "ask.systems/daemon/portal/flags"
 	)
+
+[gRPC]: https://grpc.io/
+[protos]: https://developers.google.com/protocol-buffers
 */
 package gate
 
@@ -168,7 +171,7 @@ func StartTLSRegistration(request *RegisterRequest, quit <-chan struct{}) (*Leas
 
 // Parse a pattern in the syntax accepted by portal separating the hostname
 // (URL) part of the pattern from the path part. The path part is then
-// compatible with [http.Handle]
+// compatible with [net/http.Handle]
 //
 // This is needed to host multiple URLs with portal.
 func ParsePattern(pattern string) (host, path string) {

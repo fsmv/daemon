@@ -1,3 +1,5 @@
+//go:build !nosyslog
+
 package flags
 
 import (
@@ -14,7 +16,8 @@ import (
 )
 
 // Use this if you want to use the log severity methods. This is only
-// initialized if the syslogTag flag is set and flag.Parse() has been called.
+// initialized if the -syslog or the -syslog_remote flag is set and [flag.Parse]
+// has been called.
 //
 // Using this writer directly will not also log to stdout
 var Syslog *syslog.Writer
@@ -37,7 +40,8 @@ func init() {
 		"servers in chroots. You can then use the syslog service to send to another\n"+
 		"server securely.\n\n"+
 
-		"If you're using -syslog_remote, do not set -syslog.",
+		"If you're using -syslog_remote then do not also set -syslog;\n"+
+		"it is undefined which one wins the race.",
 		handleSyslogFlag)
 }
 

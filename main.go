@@ -155,7 +155,7 @@ To use cron to run spawn run sudo crontab -e again and add:
 	@reboot /root/daemon -portal_token $TOKEN spawn -password_hash $HASH
 
 The $HASH is for the dashboard password protection. You can use
-https://go.dev/play/p/TElqQjpp0z- to generate the hash for your password.
+https://go.dev/play/p/swuUb50vdyq to generate the hash for your password.
 Currently the username is not configurable, it's admin. The default dashboard
 path is example.com/daemon/ you can configure it with -dashboard_url.
 

@@ -13,7 +13,7 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-type StateManager struct {
+type stateManager struct {
 	mut          *sync.Mutex
 	saveFilepath string
 
@@ -26,8 +26,8 @@ type StateManager struct {
 	token *atomic.Value
 }
 
-func NewStateManager(saveFilepath string) *StateManager {
-	return &StateManager{
+func newStateManager(saveFilepath string) *stateManager {
+	return &stateManager{
 		mut:          &sync.Mutex{},
 		saveFilepath: saveFilepath,
 
@@ -41,7 +41,7 @@ func NewStateManager(saveFilepath string) *StateManager {
 	}
 }
 
-func (s *StateManager) saveUnsafe() {
+func (s *stateManager) saveUnsafe() {
 	// Build the save state proto from the current in memory state
 	state := &State{}
 	if token := s.token.Load(); token != nil {
@@ -72,12 +72,12 @@ func (s *StateManager) saveUnsafe() {
 	log.Print("Saved leases state file")
 }
 
-func (s *StateManager) Token() string {
+func (s *stateManager) Token() string {
 	return s.token.Load().(string)
 }
 
 // If empty, generate a new token
-func (s *StateManager) SetToken(token string) {
+func (s *stateManager) SetToken(token string) {
 	if token == "" {
 		token = tools.RandomString(32)
 	}
@@ -89,7 +89,7 @@ func (s *StateManager) SetToken(token string) {
 	s.saveUnsafe()
 }
 
-func (s *StateManager) NewRootCA(rawCert []byte) error {
+func (s *stateManager) NewRootCA(rawCert []byte) error {
 	newRoot, err := x509.ParseCertificate(rawCert)
 	if err != nil {
 		return err
@@ -105,18 +105,18 @@ func (s *StateManager) NewRootCA(rawCert []byte) error {
 	return nil
 }
 
-func (s *StateManager) RootCAs() *x509.CertPool {
+func (s *stateManager) RootCAs() *x509.CertPool {
 	return s.readCertPool.Load().(*x509.CertPool)
 }
 
-func (s *StateManager) LookupRegistration(lease *gate.Lease) *Registration {
+func (s *stateManager) LookupRegistration(lease *gate.Lease) *Registration {
 	s.mut.Lock()
 	defer s.mut.Unlock()
 
 	return s.registrations[lease.Port]
 }
 
-func (s *StateManager) NewRegistration(r *Registration) {
+func (s *stateManager) NewRegistration(r *Registration) {
 	s.mut.Lock()
 	defer s.mut.Unlock()
 
@@ -125,7 +125,7 @@ func (s *StateManager) NewRegistration(r *Registration) {
 	s.saveUnsafe()
 }
 
-func (s *StateManager) RenewRegistration(lease *gate.Lease) {
+func (s *stateManager) RenewRegistration(lease *gate.Lease) {
 	s.mut.Lock()
 	defer s.mut.Unlock()
 
@@ -135,7 +135,7 @@ func (s *StateManager) RenewRegistration(lease *gate.Lease) {
 	s.saveUnsafe()
 }
 
-func (s *StateManager) Unregister(oldLease *gate.Lease) {
+func (s *stateManager) Unregister(oldLease *gate.Lease) {
 	s.mut.Lock()
 	defer s.mut.Unlock()
 

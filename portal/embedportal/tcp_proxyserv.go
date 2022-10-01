@@ -15,15 +15,15 @@ import (
 // The RegisterRequest.Pattern prefix for tcp proxies
 const tcpProxyPrefix = ":tcp"
 
-type TCPProxy struct {
-	leasor    *PortLeasor
+type tcpProxy struct {
+	leasor    *portLeasor
 	tlsConfig *tls.Config
 	quit      chan struct{}
 	cancelers sync.Map
 }
 
-func StartTCPProxy(l *PortLeasor, tlsConfig *tls.Config, quit chan struct{}) *TCPProxy {
-	p := &TCPProxy{
+func startTCPProxy(l *portLeasor, tlsConfig *tls.Config, quit chan struct{}) *tcpProxy {
+	p := &tcpProxy{
 		leasor:    l,
 		tlsConfig: tlsConfig,
 		quit:      quit,
@@ -32,14 +32,14 @@ func StartTCPProxy(l *PortLeasor, tlsConfig *tls.Config, quit chan struct{}) *TC
 	return p
 }
 
-func (p *TCPProxy) Unregister(lease *gate.Lease) {
+func (p *tcpProxy) Unregister(lease *gate.Lease) {
 	canceler, _ := p.cancelers.Load(lease.Pattern)
 	if canceler != nil {
 		close(canceler.(chan struct{}))
 	}
 }
 
-func (p *TCPProxy) Register(clientAddr string, request *gate.RegisterRequest) (*gate.Lease, error) {
+func (p *tcpProxy) Register(clientAddr string, request *gate.RegisterRequest) (*gate.Lease, error) {
 	cancelLease := make(chan struct{})
 	go func() {
 		select {
@@ -59,7 +59,7 @@ func (p *TCPProxy) Register(clientAddr string, request *gate.RegisterRequest) (*
 		return nil, fmt.Errorf("Failed to listen on the requested port for TCP Proxy (%v): %v", lease.Port, err)
 	}
 	serverAddress := fmt.Sprintf("%v:%v", clientAddr, lease.Port)
-	startTCPProxy(listener, serverAddress, cancelLease)
+	startTCPForward(listener, serverAddress, cancelLease)
 	log.Printf("Registered a TCP proxy forwarding %v to %v.", port, serverAddress)
 	p.cancelers.Store(request.Pattern, cancelLease)
 	return lease, nil
@@ -103,7 +103,7 @@ func handleConnection(publicConn net.Conn, serverAddress string, quit chan struc
 		publicConn.RemoteAddr(), serverAddress, privateConn.LocalAddr())
 }
 
-func startTCPProxy(tlsListener net.Listener, serverAddress string, quit chan struct{}) {
+func startTCPForward(tlsListener net.Listener, serverAddress string, quit chan struct{}) {
 	go func() {
 		<-quit // stop listening when we quit
 		tlsListener.Close()

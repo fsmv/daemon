@@ -88,7 +88,7 @@ func (cmd *Command) FullName() string {
 	return name
 }
 
-func ResolveRelativePaths(path string, commands []*Command) error {
+func resolveRelativePaths(path string, commands []*Command) error {
 	for i, _ := range commands {
 		cmd := commands[i]
 		if len(cmd.Binary) == 0 || cmd.Binary[0] == '/' {
@@ -115,6 +115,6 @@ func ReadConfig(filename string) ([]*Command, error) {
 	if err := prototext.Unmarshal(configText, config); err != nil {
 		return nil, err
 	}
-	err = ResolveRelativePaths(*path, config.Command)
+	err = resolveRelativePaths(*path, config.Command)
 	return config.Command, err
 }

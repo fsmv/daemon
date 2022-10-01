@@ -1,10 +1,3 @@
-// Package proxyserv provides an HTTPS frontend gateway (reverse proxy) server.
-// At the start there are no forwarding rules and every URL returns 404.
-// At runtime, call Register or Unregister to set up forwarding rules.
-//
-// Registration will grant the caller a Lease to the forwarding rule for a time
-// period called the time to live (TTL). After the TTL has expired, the
-// forwarding rule will be automatically unregistered.
 package embedportal
 
 import (
@@ -28,30 +21,39 @@ import (
 // The path for the let's encrypt web-root cert challenge
 const certChallengePattern = "*/.well-known/acme-challenge/"
 
-// HTTPProxy implements http.Handler to handle requests using a pool of
+// httpProxy implements http.Handler to handle requests using a pool of
 // forwarding rules registered at runtime
-type HTTPProxy struct {
-	leasor *PortLeasor
+//
+// It provides an HTTPS frontend gateway (reverse proxy) server.
+// At the start there are no forwarding rules and every URL returns 404.
+// At runtime, call [httpProxy.Register] or [httpProxy.Unregister] to set up
+// forwarding rules.
+//
+// Registration will grant the caller a Lease to the forwarding rule for a time
+// period called the time to live (TTL). After the TTL has expired, the
+// forwarding rule will be automatically unregistered.
+type httpProxy struct {
+	leasor *portLeasor
 	// Map from pattern to *forwarder, which must not be modified
 	forwarders  sync.Map
 	rootCert    *tools.AutorenewCertificate
-	state       *StateManager
+	state       *stateManager
 	defaultHost string
 }
 
-// forwarder holds the data for a forwarding rule registered with HTTPProxy
+// forwarder holds the data for a forwarding rule registered with httpProxy
 type forwarder struct {
 	Handler http.Handler
 	Lease   *gate.Lease
 }
 
-func (p *HTTPProxy) Unregister(lease *gate.Lease) {
+func (p *httpProxy) Unregister(lease *gate.Lease) {
 	p.forwarders.Delete(lease.Pattern)
 }
 
 // Register leases a new forwarder for the given pattern.
 // Returns an error if the server has no more ports to lease.
-func (p *HTTPProxy) Register(
+func (p *httpProxy) Register(
 	clientAddr string, request *gate.RegisterRequest) (*gate.Lease, error) {
 
 	if oldFwd := p.selectForwarder(gate.ParsePattern(request.Pattern)); oldFwd != nil {
@@ -90,7 +92,7 @@ func (p *HTTPProxy) Register(
 // if stripPattern is true, the pattern will be removed from the prefix of the
 // http request paths. This is needed for third party applications that expect
 // to get requests for / not /pattern/
-func (p *HTTPProxy) saveForwarder(clientAddr string, lease *gate.Lease,
+func (p *httpProxy) saveForwarder(clientAddr string, lease *gate.Lease,
 	stripPattern bool, useTLS bool) error {
 
 	var protocol string
@@ -212,7 +214,7 @@ func urlMatchesPattern(url, pattern string) bool {
 // returns nil if no matching forwarder is found
 //
 // Similar to http.ServeMux.match, see https://golang.org/LICENSE
-func (p *HTTPProxy) selectForwarder(host, path string) *forwarder {
+func (p *httpProxy) selectForwarder(host, path string) *forwarder {
 	var ret *forwarder = nil
 	var maxPatternLen = 0
 	p.forwarders.Range(func(key, value interface{}) bool {
@@ -250,7 +252,7 @@ func (p *HTTPProxy) selectForwarder(host, path string) *forwarder {
 
 // ServeHTTP is the HTTPProxy net/http handler func which selects a registered
 // forwarder to handle the request based on the forwarder's pattern
-func (p *HTTPProxy) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+func (p *httpProxy) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	fwd := p.selectForwarder(req.Host, req.URL.Path)
 	if fwd == nil {
 		log.Printf("%v requested unregistered path: %v%v", req.RemoteAddr, req.Host, req.URL.Path)
@@ -304,18 +306,11 @@ func makeChallengeHandler(webRoot string) (http.Handler, error) {
 	}), nil
 }
 
-// StartNew creates a new HTTPProxy and starts the server.
-//
-// Arguments:
-//   - tlsCert and tlsKey are file handles for the TLS certificate and key files
-//   - httpList and httpsList are listeners for the http and https ports
-//   - certChallengeWebRoot if non-empty start the file server for tls cert challenges
-//   - quit is a channel that will be closed when the server should quit
-func StartHTTPProxy(l *PortLeasor, tlsConfig *tls.Config,
+func startHTTPProxy(l *portLeasor, tlsConfig *tls.Config,
 	httpList, httpsList net.Listener, defaultHost, certChallengeWebRoot string,
-	state *StateManager, rootCert *tools.AutorenewCertificate,
-	quit chan struct{}) (*HTTPProxy, error) {
-	ret := &HTTPProxy{
+	state *stateManager, rootCert *tools.AutorenewCertificate,
+	quit chan struct{}) (*httpProxy, error) {
+	ret := &httpProxy{
 		leasor:      l,
 		rootCert:    rootCert,
 		state:       state,

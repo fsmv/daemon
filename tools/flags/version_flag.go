@@ -12,6 +12,11 @@ Provides:
   - -syslog and -syslog_remote which enable directly sending [log] package
     logs to the syslogd service directly for collecting all your logs
     together.
+
+If you'd like to have the -version flag but exclude the syslog flags then you
+can compile your binary with:
+
+	CGO_ENABLED=0 go build -tags nosyslog
 */
 package flags
 

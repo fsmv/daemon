@@ -23,14 +23,14 @@ import (
 )
 
 // Methods on this type are exported as rpc calls
-type RPCServ struct {
+type rcpServ struct {
 	gate.PortalServer
 
-	leasor    *PortLeasor
-	tcpProxy  *TCPProxy
-	httpProxy *HTTPProxy
+	leasor    *portLeasor
+	tcpProxy  *tcpProxy
+	httpProxy *httpProxy
 	rootCert  *tools.AutorenewCertificate
-	state     *StateManager
+	state     *stateManager
 	quit      chan struct{}
 }
 
@@ -39,7 +39,7 @@ func hostname(address string) string {
 	return address[:portIdx]
 }
 
-func (s *RPCServ) loadState(saveData []byte) {
+func (s *rcpServ) loadState(saveData []byte) {
 	state := &State{}
 	if err := proto.Unmarshal(saveData, state); err != nil {
 		log.Print("Failed to unmarshal save state file: ", err)
@@ -79,7 +79,7 @@ func (s *RPCServ) loadState(saveData []byte) {
 	log.Printf("Successfully loaded %v/%v saved registrations", loaded, len(state.Registrations))
 }
 
-func (s *RPCServ) MyHostname(ctx context.Context, empty *emptypb.Empty) (*gate.Hostname, error) {
+func (s *rcpServ) MyHostname(ctx context.Context, empty *emptypb.Empty) (*gate.Hostname, error) {
 	p, _ := peer.FromContext(ctx)
 	client := hostname(p.Addr.String())
 	return &gate.Hostname{Hostname: client}, nil
@@ -87,7 +87,7 @@ func (s *RPCServ) MyHostname(ctx context.Context, empty *emptypb.Empty) (*gate.H
 
 // Register registers a new forwarding rule to the rpc client's ip address.
 // Randomly assigns port for the client to listen on
-func (s *RPCServ) Register(ctx context.Context, request *gate.RegisterRequest) (*gate.Lease, error) {
+func (s *rcpServ) Register(ctx context.Context, request *gate.RegisterRequest) (*gate.Lease, error) {
 	// Get the RPC client's address (without the port) from gRPC
 	p, _ := peer.FromContext(ctx)
 	client := hostname(p.Addr.String())
@@ -110,7 +110,7 @@ func (s *RPCServ) Register(ctx context.Context, request *gate.RegisterRequest) (
 	return lease, nil
 }
 
-func (s *RPCServ) internalRegister(client string, request *gate.RegisterRequest) (lease *gate.Lease, err error) {
+func (s *rcpServ) internalRegister(client string, request *gate.RegisterRequest) (lease *gate.Lease, err error) {
 	if strings.HasPrefix(request.Pattern, tcpProxyPrefix) {
 		lease, err = s.tcpProxy.Register(client, request)
 	} else {
@@ -127,7 +127,7 @@ func (s *RPCServ) internalRegister(client string, request *gate.RegisterRequest)
 }
 
 // Unregister unregisters the forwarding rule with the given pattern
-func (s *RPCServ) Unregister(ctx context.Context, lease *gate.Lease) (*gate.Lease, error) {
+func (s *rcpServ) Unregister(ctx context.Context, lease *gate.Lease) (*gate.Lease, error) {
 	err := s.leasor.Unregister(lease)
 	if err != nil {
 		log.Print(err)
@@ -140,7 +140,7 @@ func (s *RPCServ) Unregister(ctx context.Context, lease *gate.Lease) (*gate.Leas
 }
 
 // Renew renews the lease on a currently registered pattern
-func (s *RPCServ) Renew(ctx context.Context, lease *gate.Lease) (*gate.Lease, error) {
+func (s *rcpServ) Renew(ctx context.Context, lease *gate.Lease) (*gate.Lease, error) {
 	newLease, err := s.leasor.Renew(lease)
 	if err != nil {
 		log.Print(err)
@@ -166,12 +166,12 @@ func (s *RPCServ) Renew(ctx context.Context, lease *gate.Lease) (*gate.Lease, er
 }
 
 // StartNew creates a new RPCServ and starts it
-func StartRPCServer(leasor *PortLeasor,
-	tcpProxy *TCPProxy, httpProxy *HTTPProxy,
+func startRPCServer(leasor *portLeasor,
+	tcpProxy *tcpProxy, httpProxy *httpProxy,
 	port uint16, rootCert *tools.AutorenewCertificate,
-	saveData []byte, state *StateManager, quit chan struct{}) (*RPCServ, error) {
+	saveData []byte, state *stateManager, quit chan struct{}) (*rcpServ, error) {
 
-	s := &RPCServ{
+	s := &rcpServ{
 		leasor:    leasor,
 		state:     state,
 		tcpProxy:  tcpProxy,
