@@ -1,3 +1,6 @@
+// Embedhost lets you run the host binary main function inside another program
+//
+// This is used by [ask.systems/daemon], but feel free to use it if you want to!
 package embedhost
 
 import (

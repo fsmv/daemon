@@ -1,3 +1,7 @@
+// Embedassimilate lets you run the assimilate binary main function inside
+// another program
+//
+// This is used by [ask.systems/daemon], but feel free to use it if you want to!
 package embedassimilate
 
 import (

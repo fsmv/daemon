@@ -217,14 +217,14 @@ For servers written in go, you can use the portal client library
 port to listen on that won't conflict and even automatically use a newly
 generated TLS certificate to encrypt local traffic (this time it's easy!). To do
 this you will call [ask.systems/daemon/portal/gate.StartTLSRegistration], set up
-any application handlers with [http.Handle] then call
+any application handlers with [net/http.Handle] then call
 [ask.systems/daemon/tools.RunHTTPServerTLS].
 
 Make sure to take a look at the utility functions in [ask.systems/daemon/tools]!
 
 Take a look at the package example for the client library
 [ask.systems/daemon/portal/gate] for a simple go client of portal with encrypted
-internal traffic. It uses the standard [http.Handle] system.
+internal traffic. It uses the standard [net/http.Handle] system.
 
 Remember: Make sure to compile your binaries with CGO_ENABLED=0 go build to
 allow them to run in a chroot.

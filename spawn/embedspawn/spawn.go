@@ -1,3 +1,6 @@
+// Embedspawn lets you run the spawn binary main function inside another program
+//
+// This is used by [ask.systems/daemon], but feel free to use it if you want to!
 package embedspawn
 
 import (
