@@ -32,7 +32,7 @@ browsers. Once you have a domain set up a DNS A record pointing to your server's
 public IP address (search "what is my IP" online if at home) using your
 registrar's interface. Finally, if you're home hosting, set up port forwarding
 in your router settings page (usually accessible at http://192.168.1.1 with
-some manufacturer specfic default username and password) to forward all
+some manufacturer specific default username and password) to forward all
 requests to port 80 and port 443 to your server's local IP address (it will
 usually look like 192.168.1.xxx and on linux will be printed, among other
 things, by ifconfig).
@@ -98,7 +98,7 @@ Example spawn config.pbtxt for running portal only: (change my domain to yours)
 		]
 	}
 
-This will tell spawn to, while running as root, bind the priveledged ports
+This will tell spawn to, while running as root, bind the privileged ports
 (linux only allows root to use these ports) and open the root owned cert files,
 then use the OS to securely pass these resources to portal, which we tell portal
 about using the file descriptor numbers in the arguments. Also as a security
@@ -110,7 +110,7 @@ The rest of the config options are for automatically renewing the Let's Encrypt
 TLS certificate. If you don't want to bother you can just restart the portal
 server (from the spawn dashboard page) whenever you renew the cert. To renew
 without any down-time, both spawn and portal need to coordinate to refresh the
-priveledged files and the two auto_tls_certs flags set this up on both sides.
+privileged files and the two auto_tls_certs flags set this up on both sides.
 The -cert_challenge_webroot flag is a local directory path inside the chroot,
 which means / is actually /home/www/, this directory
 /home/www/cert-challenge/ is where you will tell certbot to put the
@@ -209,6 +209,13 @@ for example a minecraft map listening on :8080/ to example.com/minecraft/ with:
 			"pattern: '/minecraft/' fixed_port: 8080 strip_pattern: true"
 		]
 	}
+
+Additionally you could use spawn to launch third party binaries as well and pass
+them a fixed port in the commandline arguments which assimilate will register
+for them. If you don't want to copy the binary to your spawn path just use an
+absolute file path for the binary field. Also you may need to set
+no_chroot: true unless it's a statically linked binary. Or just use your system
+init system, whatever you like.
 
 # Running custom go servers
 
