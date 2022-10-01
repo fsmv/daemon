@@ -14,7 +14,7 @@ import (
 
 	_ "ask.systems/daemon/portal/flags"
 
-	"ask.systems/daemon/portal"
+	"ask.systems/daemon/portal/gate"
 	"ask.systems/daemon/tools"
 )
 
@@ -133,7 +133,7 @@ func (d *dashboard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func StartDashboard(children *Children, quit chan struct{}) (dashboardQuit chan struct{}, err error) {
 	pattern := *dashboardUrlFlag
-	_, dashboardUrl = portal.ParsePattern(pattern)
+	_, dashboardUrl = gate.ParsePattern(pattern)
 	logsUrl = dashboardUrl + "logs"
 
 	// If the main  quit closes, shut down the dashboard. But, if the dashboard
@@ -143,7 +143,7 @@ func StartDashboard(children *Children, quit chan struct{}) (dashboardQuit chan 
 		<-quit
 		close(dashboardQuit)
 	}()
-	lease, tlsConf, err := portal.StartTLSRegistration(&portal.RegisterRequest{
+	lease, tlsConf, err := gate.StartTLSRegistration(&gate.RegisterRequest{
 		Pattern: pattern,
 	}, dashboardQuit)
 	if err != nil {

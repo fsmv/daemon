@@ -9,7 +9,7 @@ import (
 	"strings"
 	"sync"
 
-	"ask.systems/daemon/portal"
+	"ask.systems/daemon/portal/gate"
 )
 
 // The RegisterRequest.Pattern prefix for tcp proxies
@@ -32,14 +32,14 @@ func StartTCPProxy(l *PortLeasor, tlsConfig *tls.Config, quit chan struct{}) *TC
 	return p
 }
 
-func (p *TCPProxy) Unregister(lease *portal.Lease) {
+func (p *TCPProxy) Unregister(lease *gate.Lease) {
 	canceler, _ := p.cancelers.Load(lease.Pattern)
 	if canceler != nil {
 		close(canceler.(chan struct{}))
 	}
 }
 
-func (p *TCPProxy) Register(clientAddr string, request *portal.RegisterRequest) (*portal.Lease, error) {
+func (p *TCPProxy) Register(clientAddr string, request *gate.RegisterRequest) (*gate.Lease, error) {
 	cancelLease := make(chan struct{})
 	go func() {
 		select {

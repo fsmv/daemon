@@ -8,7 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"ask.systems/daemon/portal"
+	"ask.systems/daemon/portal/gate"
 	"ask.systems/daemon/tools"
 	"google.golang.org/protobuf/proto"
 )
@@ -109,7 +109,7 @@ func (s *StateManager) RootCAs() *x509.CertPool {
 	return s.readCertPool.Load().(*x509.CertPool)
 }
 
-func (s *StateManager) LookupRegistration(lease *portal.Lease) *Registration {
+func (s *StateManager) LookupRegistration(lease *gate.Lease) *Registration {
 	s.mut.Lock()
 	defer s.mut.Unlock()
 
@@ -125,7 +125,7 @@ func (s *StateManager) NewRegistration(r *Registration) {
 	s.saveUnsafe()
 }
 
-func (s *StateManager) RenewRegistration(lease *portal.Lease) {
+func (s *StateManager) RenewRegistration(lease *gate.Lease) {
 	s.mut.Lock()
 	defer s.mut.Unlock()
 
@@ -135,7 +135,7 @@ func (s *StateManager) RenewRegistration(lease *portal.Lease) {
 	s.saveUnsafe()
 }
 
-func (s *StateManager) Unregister(oldLease *portal.Lease) {
+func (s *StateManager) Unregister(oldLease *gate.Lease) {
 	s.mut.Lock()
 	defer s.mut.Unlock()
 

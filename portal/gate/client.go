@@ -1,5 +1,5 @@
 // The client library for registering paths with portal.
-package portal
+package gate
 
 import (
 	"context"

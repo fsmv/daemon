@@ -2,9 +2,9 @@
 // versions:
 // - protoc-gen-go-grpc v1.2.0
 // - protoc             v3.20.1
-// source: service.proto
+// source: gate/service.proto
 
-package portal
+package gate
 
 import (
 	context "context"
@@ -216,5 +216,5 @@ var Portal_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "service.proto",
+	Metadata: "gate/service.proto",
 }

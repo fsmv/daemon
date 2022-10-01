@@ -10,7 +10,7 @@ import (
 	_ "ask.systems/daemon/portal/flags"
 	_ "ask.systems/daemon/tools/flags"
 
-	"ask.systems/daemon/portal"
+	"ask.systems/daemon/portal/gate"
 	"ask.systems/daemon/tools"
 )
 
@@ -35,8 +35,8 @@ func Run(flags *flag.FlagSet, args []string) {
 	tools.CloseOnQuitSignals(quit)
 
 	pattern := *urlPath
-	_, servePath := portal.ParsePattern(pattern)
-	lease, tlsConf := portal.MustStartTLSRegistration(&portal.RegisterRequest{
+	_, servePath := gate.ParsePattern(pattern)
+	lease, tlsConf := gate.MustStartTLSRegistration(&gate.RegisterRequest{
 		Pattern: pattern,
 	}, quit)
 

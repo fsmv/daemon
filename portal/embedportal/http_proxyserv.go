@@ -21,7 +21,7 @@ import (
 	"strings"
 	"sync"
 
-	"ask.systems/daemon/portal"
+	"ask.systems/daemon/portal/gate"
 	"ask.systems/daemon/tools"
 )
 
@@ -42,19 +42,19 @@ type HTTPProxy struct {
 // forwarder holds the data for a forwarding rule registered with HTTPProxy
 type forwarder struct {
 	Handler http.Handler
-	Lease   *portal.Lease
+	Lease   *gate.Lease
 }
 
-func (p *HTTPProxy) Unregister(lease *portal.Lease) {
+func (p *HTTPProxy) Unregister(lease *gate.Lease) {
 	p.forwarders.Delete(lease.Pattern)
 }
 
 // Register leases a new forwarder for the given pattern.
 // Returns an error if the server has no more ports to lease.
 func (p *HTTPProxy) Register(
-	clientAddr string, request *portal.RegisterRequest) (*portal.Lease, error) {
+	clientAddr string, request *gate.RegisterRequest) (*gate.Lease, error) {
 
-	if oldFwd := p.selectForwarder(portal.ParsePattern(request.Pattern)); oldFwd != nil {
+	if oldFwd := p.selectForwarder(gate.ParsePattern(request.Pattern)); oldFwd != nil {
 		if oldFwd.Lease.Pattern == certChallengePattern {
 			err := fmt.Errorf("Clients cannot register the cert challenge path %#v which covers your requested pattern %#v", certChallengePattern, request.Pattern)
 			log.Print("Error registering: ", err)
@@ -90,7 +90,7 @@ func (p *HTTPProxy) Register(
 // if stripPattern is true, the pattern will be removed from the prefix of the
 // http request paths. This is needed for third party applications that expect
 // to get requests for / not /pattern/
-func (p *HTTPProxy) saveForwarder(clientAddr string, lease *portal.Lease,
+func (p *HTTPProxy) saveForwarder(clientAddr string, lease *gate.Lease,
 	stripPattern bool, useTLS bool) error {
 
 	var protocol string
@@ -217,7 +217,7 @@ func (p *HTTPProxy) selectForwarder(host, path string) *forwarder {
 	var maxPatternLen = 0
 	p.forwarders.Range(func(key, value interface{}) bool {
 		pattern := key.(string)
-		patternHost, pattern := portal.ParsePattern(pattern)
+		patternHost, pattern := gate.ParsePattern(pattern)
 
 		// If the hostname doesn't match skip this forwarder
 		if patternHost == "" {
@@ -306,7 +306,7 @@ func makeChallengeHandler(webRoot string) (http.Handler, error) {
 	if err := dir.TestOpen("/"); err != nil {
 		return nil, err
 	}
-	_, pattern := portal.ParsePattern(certChallengePattern)
+	_, pattern := gate.ParsePattern(certChallengePattern)
 	fileServer := http.StripPrefix(pattern, http.FileServer(dir))
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		log.Printf("%v requested %v", req.RemoteAddr, req.URL)
@@ -341,7 +341,7 @@ func StartHTTPProxy(l *PortLeasor, tlsConfig *tls.Config,
 		} else {
 			ret.forwarders.Store(certChallengePattern, &forwarder{
 				Handler: handler,
-				Lease: &portal.Lease{
+				Lease: &gate.Lease{
 					Pattern: certChallengePattern,
 				},
 			})

@@ -1,4 +1,4 @@
-package portal
+package gate
 
 import _ "embed"
 
@@ -10,4 +10,4 @@ var ServiceProto string
 //go:generate protoc service.proto --go_out ./ --go-grpc_out ./ --go_opt=paths=source_relative --go-grpc_opt=paths=source_relative
 
 // Run the sub-package protoc as well just so it's easy to generate everything
-//go:generate protoc embedportal/storage.proto -I ./ --go_out ./ --go_opt=paths=source_relative
+//go:generate protoc ../embedportal/storage.proto -I ../ --go_out ../ --go_opt=paths=source_relative

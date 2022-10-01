@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"ask.systems/daemon/portal"
+	"ask.systems/daemon/portal/gate"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -30,9 +30,9 @@ var (
 // port list for each machine connecting to portal but there should be enough
 // ports to just have one list.
 type PortLeasor struct {
-	mut      *sync.Mutex              // Everything in this struct needs the lock
-	leases   map[uint32]*portal.Lease // maps the port to the lease
-	onCancel []func(*portal.Lease)    // All are called when a lease times out
+	mut      *sync.Mutex            // Everything in this struct needs the lock
+	leases   map[uint32]*gate.Lease // maps the port to the lease
+	onCancel []func(*gate.Lease)    // All are called when a lease times out
 
 	// List of automatic ports to be leased out, in a random order.
 	// Always has values between 0 and n, see unusedPortOffset.
@@ -54,7 +54,7 @@ func StartPortLeasor(startPort, endPort uint16, ttl time.Duration, quit chan str
 		startPort:        startPort,
 		endPort:          endPort,
 		ttl:              ttl,
-		leases:           make(map[uint32]*portal.Lease),
+		leases:           make(map[uint32]*gate.Lease),
 		unusedPortOffset: startPort,
 		unusedPorts:      r.Perm(int(endPort - startPort)),
 	}
@@ -62,7 +62,7 @@ func StartPortLeasor(startPort, endPort uint16, ttl time.Duration, quit chan str
 	return l
 }
 
-func (l *PortLeasor) OnCancel(cancelFunc func(*portal.Lease)) {
+func (l *PortLeasor) OnCancel(cancelFunc func(*gate.Lease)) {
 	l.mut.Lock()
 	defer l.mut.Unlock()
 	l.onCancel = append(l.onCancel, cancelFunc)
@@ -74,11 +74,11 @@ func (l *PortLeasor) OnCancel(cancelFunc func(*portal.Lease)) {
 //
 // The client string is simply stored in the state save file so that proxy
 // backends can reconnect to the address on restart.
-func (l *PortLeasor) Register(request *portal.RegisterRequest) (*portal.Lease, error) {
+func (l *PortLeasor) Register(request *gate.RegisterRequest) (*gate.Lease, error) {
 	l.mut.Lock()
 	defer l.mut.Unlock()
 
-	newLease := &portal.Lease{
+	newLease := &gate.Lease{
 		Pattern: request.Pattern,
 	}
 
@@ -104,10 +104,10 @@ func (l *PortLeasor) Register(request *portal.RegisterRequest) (*portal.Lease, e
 
 	l.leases[newLease.Port] = newLease
 	log.Print("New lease registered: ", newLease)
-	return proto.Clone(newLease).(*portal.Lease), nil
+	return proto.Clone(newLease).(*gate.Lease), nil
 }
 
-func (l *PortLeasor) Renew(lease *portal.Lease) (*portal.Lease, error) {
+func (l *PortLeasor) Renew(lease *gate.Lease) (*gate.Lease, error) {
 	l.mut.Lock()
 	defer l.mut.Unlock()
 
@@ -121,10 +121,10 @@ func (l *PortLeasor) Renew(lease *portal.Lease) (*portal.Lease, error) {
 
 	foundLease.Timeout = timestamppb.New(time.Now().Add(l.ttl))
 	log.Print("Lease renewed: ", foundLease)
-	return proto.Clone(foundLease).(*portal.Lease), nil
+	return proto.Clone(foundLease).(*gate.Lease), nil
 }
 
-func (l *PortLeasor) Unregister(lease *portal.Lease) error {
+func (l *PortLeasor) Unregister(lease *gate.Lease) error {
 	l.mut.Lock()
 	defer l.mut.Unlock()
 
@@ -161,7 +161,7 @@ func (l *PortLeasor) reservePortUnsafe() (uint32, error) {
 }
 
 // You must have a (write) lock on mut before calling.
-func (l *PortLeasor) deleteLeaseUnsafe(lease *portal.Lease) {
+func (l *PortLeasor) deleteLeaseUnsafe(lease *gate.Lease) {
 	port := uint16(lease.Port)
 	if port >= l.startPort && port <= l.endPort {
 		// Add the port back into the pool if it wasn't a fixed port

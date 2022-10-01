@@ -1,5 +1,5 @@
 syntax = "proto3";
-option go_package = "ask.systems/daemon/portal";
+option go_package = "ask.systems/daemon/portal/gate";
 
 import "google/protobuf/timestamp.proto";
 import "google/protobuf/empty.proto";

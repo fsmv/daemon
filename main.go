@@ -216,7 +216,7 @@ For servers written in go, you can use the portal client library
 [ask.systems/daemon/portal] to register with portal, automatically select a port
 to listen on that won't conflict and even automatically use a newly generated
 TLS certificate to encrypt local traffic (this time it's easy!). To do this you
-will call [ask.systems/daemon/portal.StartTLSRegistration], set up any
+will call [ask.systems/daemon/gate.StartTLSRegistration], set up any
 application handlers with [http.Handle] then call
 [ask.systems/daemon/tools.RunHTTPServerTLS].
 
@@ -240,20 +240,18 @@ standard [net/http] package.
 		"ask.systems/daemon/tools"
 	)
 
-	var (
-		pattern = flag.String("pattern", "/hello/", "The path to register with portal")
-	)
+	var pattern = flag.String("pattern", "/hello/", "The path to register with portal")
 
-	func Example() {
+	func main() {
 		flag.Parse()
 		quit := make(chan struct{})
 		tools.CloseOnQuitSignals(quit) // close the channel when the OS says to stop
 
 		// Remove the optional URL prefix from the pattern, portal can serve multiple URLs
-		_, path := portal.ParsePattern(*pattern)
+		_, path := gate.ParsePattern(*pattern)
 		// Register with portal, generate a TLS cert signed by portal, and keep the
 		// registration and cert renewed in the background (until quit is closed)
-		lease, tlsConf := portal.MustStartTLSRegistration(&portal.RegisterRequest{
+		lease, tlsConf := gate.MustStartTLSRegistration(&gate.RegisterRequest{
 			Pattern: *pattern,
 		}, quit)
 

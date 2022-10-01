@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"strings"
 
-	"ask.systems/daemon/portal"
+	"ask.systems/daemon/portal/gate"
 	"ask.systems/daemon/tools"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -24,7 +24,7 @@ import (
 
 // Methods on this type are exported as rpc calls
 type RPCServ struct {
-	portal.PortalServer
+	gate.PortalServer
 
 	leasor    *PortLeasor
 	tcpProxy  *TCPProxy
@@ -79,15 +79,15 @@ func (s *RPCServ) loadState(saveData []byte) {
 	log.Printf("Successfully loaded %v/%v saved registrations", loaded, len(state.Registrations))
 }
 
-func (s *RPCServ) MyHostname(ctx context.Context, empty *emptypb.Empty) (*portal.Hostname, error) {
+func (s *RPCServ) MyHostname(ctx context.Context, empty *emptypb.Empty) (*gate.Hostname, error) {
 	p, _ := peer.FromContext(ctx)
 	client := hostname(p.Addr.String())
-	return &portal.Hostname{Hostname: client}, nil
+	return &gate.Hostname{Hostname: client}, nil
 }
 
 // Register registers a new forwarding rule to the rpc client's ip address.
 // Randomly assigns port for the client to listen on
-func (s *RPCServ) Register(ctx context.Context, request *portal.RegisterRequest) (*portal.Lease, error) {
+func (s *RPCServ) Register(ctx context.Context, request *gate.RegisterRequest) (*gate.Lease, error) {
 	// Get the RPC client's address (without the port) from gRPC
 	p, _ := peer.FromContext(ctx)
 	client := hostname(p.Addr.String())
@@ -110,7 +110,7 @@ func (s *RPCServ) Register(ctx context.Context, request *portal.RegisterRequest)
 	return lease, nil
 }
 
-func (s *RPCServ) internalRegister(client string, request *portal.RegisterRequest) (lease *portal.Lease, err error) {
+func (s *RPCServ) internalRegister(client string, request *gate.RegisterRequest) (lease *gate.Lease, err error) {
 	if strings.HasPrefix(request.Pattern, tcpProxyPrefix) {
 		lease, err = s.tcpProxy.Register(client, request)
 	} else {
@@ -127,7 +127,7 @@ func (s *RPCServ) internalRegister(client string, request *portal.RegisterReques
 }
 
 // Unregister unregisters the forwarding rule with the given pattern
-func (s *RPCServ) Unregister(ctx context.Context, lease *portal.Lease) (*portal.Lease, error) {
+func (s *RPCServ) Unregister(ctx context.Context, lease *gate.Lease) (*gate.Lease, error) {
 	err := s.leasor.Unregister(lease)
 	if err != nil {
 		log.Print(err)
@@ -140,7 +140,7 @@ func (s *RPCServ) Unregister(ctx context.Context, lease *portal.Lease) (*portal.
 }
 
 // Renew renews the lease on a currently registered pattern
-func (s *RPCServ) Renew(ctx context.Context, lease *portal.Lease) (*portal.Lease, error) {
+func (s *RPCServ) Renew(ctx context.Context, lease *gate.Lease) (*gate.Lease, error) {
 	newLease, err := s.leasor.Renew(lease)
 	if err != nil {
 		log.Print(err)
@@ -210,7 +210,7 @@ func StartRPCServer(leasor *PortLeasor,
 			return handler(ctx, req)
 		}),
 	)
-	portal.RegisterPortalServer(server, s)
+	gate.RegisterPortalServer(server, s)
 	l, err := net.Listen("tcp", ":"+strconv.Itoa(int(port)))
 	if err != nil {
 		return nil, fmt.Errorf("Failed to start listener: %v", err)
