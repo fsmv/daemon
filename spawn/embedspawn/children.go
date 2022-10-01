@@ -325,7 +325,7 @@ func (c *children) ReportDown(pid int, message error) {
 	if child.quitFileRefresh != nil {
 		close(child.quitFileRefresh)
 	}
-	if strings.Index(message, "\n") {
+	if strings.Index(message.Error(), "\n") != -1 {
 		log.Printf("%v (pid: %v) died:\n\n%v", child.Cmd.Binary, pid, message)
 	} else {
 		log.Printf("%v (pid: %v) died: %v", child.Cmd.Binary, pid, message)
