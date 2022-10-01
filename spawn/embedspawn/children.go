@@ -12,6 +12,7 @@ import (
 	"os/user"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -277,7 +278,6 @@ func (c *children) RestartChild(name string) {
 	if proc != nil {
 		proc.Wait()
 		c.ReportDown(proc.Pid, fmt.Errorf("Killed for restart"))
-		log.Print("Down after being killed: ", name)
 	}
 	err := c.StartProgram(cmd)
 	if err != nil {
@@ -325,7 +325,11 @@ func (c *children) ReportDown(pid int, message error) {
 	if child.quitFileRefresh != nil {
 		close(child.quitFileRefresh)
 	}
-	log.Printf("%v (pid: %v)\n\n%v", child.Cmd.Binary, pid, message)
+	if strings.Index(message, "\n") {
+		log.Printf("%v (pid: %v) died:\n\n%v", child.Cmd.Binary, pid, message)
+	} else {
+		log.Printf("%v (pid: %v) died: %v", child.Cmd.Binary, pid, message)
+	}
 }
 
 func makeDeadChildMessage(status syscall.WaitStatus,
