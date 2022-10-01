@@ -23,6 +23,8 @@ func strSliceContains(slice []string, key string) bool {
 	return false
 }
 
+// Starts an HTTPS server on the specified port using the TLS config and block
+// until the quit channel is closed and graceful shutdown has finished.
 func RunHTTPServerTLS(port uint32, config *tls.Config, quit chan struct{}) {
 	log.Print("Starting server...")
 	var srv http.Server
@@ -49,12 +51,14 @@ func RunHTTPServerTLS(port uint32, config *tls.Config, quit chan struct{}) {
 
 	<-quit
 	log.Print("Shutting down HTTPS Server...")
-	log.Print("Waiting 10 seconds for HTTPS connections to close.")
+	log.Print("Waiting up to 10 seconds for HTTPS connections to close.")
 	ttl, _ := context.WithTimeout(context.Background(), 10*time.Second)
 	code := srv.Shutdown(ttl)
 	log.Print("HTTPS server exit status:", code)
 }
 
+// Starts an HTTP server on the specified port and block until the quit channel
+// is closed and graceful shutdown has finished.
 func RunHTTPServer(port uint32, quit chan struct{}) {
 	log.Print("Starting server...")
 	var srv http.Server
@@ -69,24 +73,32 @@ func RunHTTPServer(port uint32, quit chan struct{}) {
 
 	<-quit
 	log.Print("Shutting down HTTP Server...")
-	log.Print("Waiting 10 seconds for HTTP connections to close.")
+	log.Print("Waiting up to 10 seconds for HTTP connections to close.")
 	ttl, _ := context.WithTimeout(context.Background(), 10*time.Second)
 	code := srv.Shutdown(ttl)
 	log.Print("HTTP server exit status:", code)
 }
 
-// SecureHTTPDir is a replacement for http.Dir for use with http.FileServer. It
-// allows you to turn off serving directory listings and hidden dotfiles.
+// SecureHTTPDir is a replacement for [net/http.Dir] for use with
+// [net/http.FileServer]. It allows you to turn off serving directory listings
+// and hidden dotfiles.
 //
 // These settings are not thread safe so set them up before serving.
 type SecureHTTPDir struct {
 	http.Dir
 
-	AllowDotfiles         bool
+	// If false, do not serve or list files or directories starting with '.'
+	AllowDotfiles bool
+	// If true, serve a page listing all the files in a directory for any
+	// directories that do not have index.html. If false serve 404 instead, and
+	// index.html will still be served for directories containing it.
 	AllowDirectoryListing bool
 }
 
-// Test if we can open the files, http.FileServer doesn't log anything helpful
+// Test if we can open the given file.
+//
+// It's good to call this when you start up a file server because
+// [net/http.FileServer] doesn't log anything on open errors.
 func (s SecureHTTPDir) TestOpen(path string) error {
 	webrootFile, err := s.Dir.Open(path) // Use the internal to bypass no dir listing
 	if err == nil {
@@ -130,6 +142,10 @@ func (s SecureHTTPDir) FileSize(request string) (int64, error) {
 	return iStat.Size(), nil
 }
 
+// Returns [io/fs.ErrNotExist] for files and directories that should not be
+// accessed depending on the settings.
+//
+// This is the override over [net/http.Dir] that allows this class to work
 func (s SecureHTTPDir) Open(name string) (http.File, error) {
 	filename := filepath.Base(name)
 

@@ -11,16 +11,21 @@ func init() {
 	_ = time.Local.String()
 }
 
+// Wraps an [io.Writer] and prepends a timestamp from [time.Now] to each [Write]
+// call.
 type TimestampWriter struct {
 	io.Writer
 	// Don't forget to include whitespace at the end to separate the message
 	TimeFormat string
 }
 
+// Create a [TimestampWriter] with the default time format (which matches the
+// [log] package default format)
 func NewTimestampWriter(w io.Writer) *TimestampWriter {
 	return &TimestampWriter{w, "2006/01/02 15:04:05 "}
 }
 
+// See [io.Writer]
 func (w *TimestampWriter) Write(in []byte) (int, error) {
 	// Use a stack buffer if the format size is small enough
 	// Copied from https://cs.opensource.google/go/go/+/refs/tags/go1.18.1:src/time/format.go;l=587;drc=293ecd87c10eb5eed777d220394ed63a935b2c20

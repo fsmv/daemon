@@ -1,3 +1,4 @@
+// The client library for registering paths with portal.
 package portal
 
 import (
@@ -21,13 +22,20 @@ var (
 )
 
 type Client struct {
-	RPC  PortalClient // Call any of the service.proto functions here
+	// Call any of the service.proto functions here
+	RPC  PortalClient
 	conn *grpc.ClientConn
 }
 
+// Configuration for connecting to portal
+//
+// These are set by the [ask.systems/portal/flags] library. If you don't want to
+// use the flags you can set the values here.
 var (
+	// The hostname (or IP) and port of the portal server to connect to.
 	Address *string
-	Token   *string
+	// The API authentication token for portal RPCs. Portal logs this on startup.
+	Token *string
 )
 
 func checkFlags() error {
@@ -41,10 +49,9 @@ func checkFlags() error {
 }
 
 // Make a connection to the portal RPC service and send the registration
-// request. Also starts a goroutine to renew the lease (KeepLeaseRenewed) until
-// the quit channel is closed.
+// request. Also starts a goroutine to renew the lease (using
+// [KeepLeaseRenewed]) until the quit channel is closed.
 //
-// See service.proto for request documentation.
 // Returns the initial lease or an error if the registration didn't work.
 func StartRegistration(request *RegisterRequest, quit <-chan struct{}) (*Lease, error) {
 	if err := checkFlags(); err != nil {
@@ -64,6 +71,7 @@ func StartRegistration(request *RegisterRequest, quit <-chan struct{}) (*Lease, 
 	return lease, nil
 }
 
+// The same as [StartRegistration] but call [log.Fatal] on error
 func MustStartRegistration(request *RegisterRequest, quit <-chan struct{}) *Lease {
 	lease, err := StartRegistration(request, quit)
 	if err != nil {
@@ -72,6 +80,7 @@ func MustStartRegistration(request *RegisterRequest, quit <-chan struct{}) *Leas
 	return lease
 }
 
+// The same as [StartTLSRegistration] but call [log.Fatal] on error
 func MustStartTLSRegistration(request *RegisterRequest, quit <-chan struct{}) (*Lease, *tls.Config) {
 	lease, conf, err := StartTLSRegistration(request, quit)
 	if err != nil {
@@ -80,8 +89,18 @@ func MustStartTLSRegistration(request *RegisterRequest, quit <-chan struct{}) (*
 	return lease, conf
 }
 
+// Make a connection to the portal RPC service and send the registration
+// request. Additionally, generate a new TLS certificate and request portal to
+// sign it with portal's private Certificate Authority (the key is never sent
+// over the network).
+//
+// Starts a goroutine to renew the both the lease and the TLS certificate
+// (using [KeepLeaseRenewedTLS]) until the quit channel is closed.
+//
+// Returns the initial lease, and a [crypto/tls.Config] which automatically
+// renews the certificate seemlessly. Or return an error if the registration
+// didn't work.
 func StartTLSRegistration(request *RegisterRequest, quit <-chan struct{}) (*Lease, *tls.Config, error) {
-
 	if err := checkFlags(); err != nil {
 		return nil, nil, err
 	}
@@ -123,6 +142,11 @@ func StartTLSRegistration(request *RegisterRequest, quit <-chan struct{}) (*Leas
 	return lease, config, nil
 }
 
+// Parse a pattern in the syntax accepted by portal separating the hostname
+// (URL) part of the pattern from the path part. The path part is then
+// compatible with [net/http.Handle]
+//
+// This is needed to host multiple URLs with portal.
 func ParsePattern(pattern string) (host, path string) {
 	path = pattern
 	firstSlash := strings.Index(pattern, "/")
@@ -174,6 +198,15 @@ func (c Client) KeepLeaseRenewed(quit <-chan struct{}, lease *Lease) {
 	c.KeepLeaseRenewedTLS(quit, lease, nil)
 }
 
+// Run a loop to call the Renew RPC for the given lease before the lease expires
+// until the quit channel is closed. Intended to be run in a goroutine.
+//
+// Additionally, if the lease contains a TLS certificate request, the
+// certificate is renewed with the lease. Each time the certificate is renewed,
+// the newCert function is called with the cert data.
+//
+// When the quit channel is closed this function unregisters the lease and
+// closes the client.
 func (c Client) KeepLeaseRenewedTLS(quit <-chan struct{}, lease *Lease, newCert func([]byte)) {
 	defer func() {
 		c.RPC.Unregister(context.Background(), lease)

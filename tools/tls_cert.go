@@ -20,10 +20,20 @@ type AutorenewCertificate struct {
 	cache *atomic.Value
 }
 
+// Return the latest certificate, thread safe
 func (c *AutorenewCertificate) Certificate() *tls.Certificate {
 	return c.cache.Load().(*tls.Certificate)
 }
 
+// Generate a new self signed certificate for the given hostname with the given
+// TTL expiration time, and keep it renewed in the background until the quit
+// channel is closed.
+//
+// If the onRenew function is not nil, it is called every time the certificate
+// is renewed, including the first time it is generated.
+//
+// The returned container is a thread safe way to access the latest certificate
+// which the background goroutine keeps up to date.
 func AutorenewSelfSignedCertificate(hostname string, TTL time.Duration, onRenew func(*tls.Certificate), quit chan struct{}) (*AutorenewCertificate, error) {
 	cache := &atomic.Value{}
 	newCert, err := GenerateSelfSignedCertificate(hostname, time.Now().Add(TTL))
@@ -60,6 +70,9 @@ func AutorenewSelfSignedCertificate(hostname string, TTL time.Duration, onRenew 
 	return &AutorenewCertificate{cache}, nil
 }
 
+// Generate a self signed TLS certificate for the given hostname and expiration
+// date. These certificates are given the capability bits to be a root
+// Certificate Authority. So you can use them with [SignCertificate].
 func GenerateSelfSignedCertificate(hostname string, expiration time.Time) (*tls.Certificate, error) {
 	csr, private, err := GenerateCertificateRequest(hostname)
 	if err != nil {
@@ -72,6 +85,8 @@ func GenerateSelfSignedCertificate(hostname string, expiration time.Time) (*tls.
 	return CertificateFromSignedCert(signedCert, private), nil
 }
 
+// Generate a random certificate key and a request to send to a Certificate
+// Authority to get your new certificate signed.
 func GenerateCertificateRequest(hostname string) ([]byte, *ecdsa.PrivateKey, error) {
 	template := &x509.CertificateRequest{
 		SignatureAlgorithm: x509.ECDSAWithSHA256,
@@ -89,6 +104,10 @@ func GenerateCertificateRequest(hostname string) ([]byte, *ecdsa.PrivateKey, err
 	return csr, private, err
 }
 
+// Use a root Certificate Authority certificate to sign a given certificate
+// request and give the new certificate the specified expiration date.
+//
+// Returns the raw certificate data from [crypto/x509.CreateCertificate].
 func SignCertificate(root *tls.Certificate, rawCertRequest []byte, expiration time.Time, isCA bool) ([]byte, error) {
 	csr, err := x509.ParseCertificateRequest(rawCertRequest)
 	if err != nil {
@@ -140,6 +159,10 @@ func SignCertificate(root *tls.Certificate, rawCertRequest []byte, expiration ti
 	return cert, nil
 }
 
+// Convert raw certificate bytes and a private key into the
+// [crypto/tls.Certificate] structure, so it can be used for go connections.
+//
+// You need this after your root CA has signed your certificate request.
 func CertificateFromSignedCert(rawCert []byte, privateKey *ecdsa.PrivateKey) *tls.Certificate {
 	return &tls.Certificate{
 		Certificate:                  [][]byte{rawCert},
