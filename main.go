@@ -1,7 +1,7 @@
 /*
 Daemon is a webserver that securely organizes any internal webservers under a
 single URL. Internal servers register a path on the URL with the main
-[ask.systems/daemon/portal/portal] server via gRPC. Portal then acts as a
+[ask.systems/daemon/portal] server via gRPC. Portal then acts as a
 reverse proxy, accepting all requests to the URL and forwarding requests and
 responses to and from the server that registered for the requested path.
 
@@ -39,12 +39,12 @@ things, by ifconfig).
 
 TODO: When portal supports self signed certificates, explain it here
 
-Then the main thing you need is [ask.systems/daemon/portal/portal], the reverse
-proxy server that is configured via gRPC. Portal will accept all connections to
-your domain name, instead of any servers like Apache or NGINX. To encrypt this
+Then the main thing you need is [ask.systems/daemon/portal], the reverse proxy
+server that is configured via gRPC. Portal will accept all connections to your
+domain name, instead of any servers like Apache or NGINX. To encrypt this
 traffic portal needs your TLS cert, the easiest way to get one is using the
-https://letsencrypt.org/ Certificate Authority (CA). Install their certbot
-tool with your operating system's package manager then we can use it to get the
+https://letsencrypt.org/ Certificate Authority (CA). Install their certbot tool
+with your operating system's package manager then we can use it to get the
 certificate. This next step won't work if you didn't correctly set up your DNS
 and port forwarding settings.
 
@@ -213,60 +213,18 @@ for example a minecraft map listening on :8080/ to example.com/minecraft/ with:
 # Running custom go servers
 
 For servers written in go, you can use the portal client library
-[ask.systems/daemon/portal] to register with portal, automatically select a port
-to listen on that won't conflict and even automatically use a newly generated
-TLS certificate to encrypt local traffic (this time it's easy!). To do this you
-will call [ask.systems/daemon/gate.StartTLSRegistration], set up any
-application handlers with [http.Handle] then call
+[ask.systems/daemon/portal/gate] to register with portal, automatically select a
+port to listen on that won't conflict and even automatically use a newly
+generated TLS certificate to encrypt local traffic (this time it's easy!). To do
+this you will call [ask.systems/daemon/portal/gate.StartTLSRegistration], set up
+any application handlers with [http.Handle] then call
 [ask.systems/daemon/tools.RunHTTPServerTLS].
 
 Make sure to take a look at the utility functions in [ask.systems/daemon/tools]!
 
-Below is a basic example of a go client for portal with encrypted internal
-traffic.  Simply change the handlers to any application logic you like using the
-standard [net/http] package.
-
-	package main
-
-	import (
-		"flag"
-		"log"
-		"net/http"
-
-		_ "ask.systems/daemon/portal/flags" // -portal_addr and -portal_token
-		_ "ask.systems/daemon/tools/flags"  // for the -version and -syslog flags
-
-		"ask.systems/daemon/portal"
-		"ask.systems/daemon/tools"
-	)
-
-	var pattern = flag.String("pattern", "/hello/", "The path to register with portal")
-
-	func main() {
-		flag.Parse()
-		quit := make(chan struct{})
-		tools.CloseOnQuitSignals(quit) // close the channel when the OS says to stop
-
-		// Remove the optional URL prefix from the pattern, portal can serve multiple URLs
-		_, path := gate.ParsePattern(*pattern)
-		// Register with portal, generate a TLS cert signed by portal, and keep the
-		// registration and cert renewed in the background (until quit is closed)
-		lease, tlsConf := gate.MustStartTLSRegistration(&gate.RegisterRequest{
-			Pattern: *pattern,
-		}, quit)
-
-		// Serve Hello World with standard go server functions
-		http.Handle(path, http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-			w.Write([]byte("Hello World!"))
-			// portal adds this header to tell you who sent the request to portal
-			log.Printf("Hello from %v", req.Header.Get("Orig-Address"))
-		}))
-
-		// Run the server and block until the channel is closed and the graceful stop
-		// is done. Uses the handlers registered with the http package global system
-		tools.RunHTTPServerTLS(lease.Port, tlsConf, quit)
-		log.Print("Goodbye")
-	}
+Take a look at the package example for the client library
+[ask.systems/daemon/portal/gate] for a simple go client of portal with encrypted
+internal traffic. It uses the standard [http.Handle] system.
 
 Remember: Make sure to compile your binaries with CGO_ENABLED=0 go build to
 allow them to run in a chroot.

@@ -1,12 +1,18 @@
-// Include this package to get useful flags every server should have
-//
-// Provides:
-//
-//   - -version which prints the module name, version and the [CopyrightNotice],
-//     and for development builds prints version control information.
-//   - -syslog and -syslog_remote which enable directly sending [log] package
-//     logs to the syslogd service directly for collecting all your logs
-//     together.
+/*
+Import this package to get useful flags every server should have
+
+	import (
+		_ "ask.systems/daemon/tools/flags
+	)
+
+Provides:
+
+  - -version which prints the module name, version and the [CopyrightNotice],
+    and for development builds prints version control information.
+  - -syslog and -syslog_remote which enable directly sending [log] package
+    logs to the syslogd service directly for collecting all your logs
+    together.
+*/
 package flags
 
 import (

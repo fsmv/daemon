@@ -6,8 +6,6 @@ package tools
 //
 // This means you can invoke the flag by -foobar instead of -foobar=true, and
 // the callback will be called by [flag.Parse].
-//
-// Ex: func init() { flag.Var(tools.BoolFuncFlag(myCallback), "name", "usage") }
 type BoolFuncFlag func(string) error
 
 func (b BoolFuncFlag) String() string {

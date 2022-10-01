@@ -28,7 +28,7 @@ func ExampleRedirectToHTTPS() {
 	go httpsServer.ListenAndServeTLS("example.cert", "example.key")
 	// Redirect any unencrypted connections to the encrypted server
 	httpServer := &http.Server{
-		Addr:    ":88",
+		Addr:    ":80",
 		Handler: tools.RedirectToHTTPS{},
 	}
 	go httpServer.ListenAndServe()

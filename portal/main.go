@@ -11,6 +11,8 @@ Install portal standalone with:
 
 You can also use portal as a subcommand of the combined [ask.systems/daemon]
 binary.
+
+The client library for portal is [ask.systems/daemon/portal/gate]
 */
 package main
 

@@ -1,4 +1,28 @@
-// The client library for registering paths with portal.
+/*
+The client library for registering paths with [ask.systems/daemon/portal].
+
+This package contains the raw gRPC service protos in addition to helper
+functions for using the service. The helpers are:
+
+  - [StartTLSRegistration], [MustStartTLSRegistration], [StartRegistration], and
+    [MustStartRegistration] are all in one helpers for getting a lease from
+    portal and keeping it renewed in the background. Most clients should use
+    one of these.
+  - [ParsePattern] which splits out the hostname part of multi-hostname patterns
+    used to register with portal when portal is hosting multiple URLs. This is
+    needed to extract the path part that can be used with [http.Handle].
+  - [Client] and the methods under it provide full access to the gRPC server
+    using the token authentication. Call methods directly using [Client.RPC] if
+    you want detailed access to portal.
+
+You need to set the [Address] and [Token] vars to use the 4 helper functions
+like [StartTLSRegistrtation] so it can connect to portal. The simplest way to
+do this is to import the [ask.systems/daemon/portal/flags] library:
+
+	import (
+		_ "ask.systems/daemon/portal/flags"
+	)
+*/
 package gate
 
 import (
@@ -29,7 +53,7 @@ type Client struct {
 
 // Configuration for connecting to portal
 //
-// These are set by the [ask.systems/portal/flags] library. If you don't want to
+// These are set by the [ask.systems/daemon/portal/flags] library. If you don't want to
 // use the flags you can set the values here.
 var (
 	// The hostname (or IP) and port of the portal server to connect to.

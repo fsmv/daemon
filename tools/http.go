@@ -1,3 +1,39 @@
+/*
+Tools provides utility functions useful for web servers
+
+Also check out the optional [ask.systems/daemon/tools/flags] library which
+provides -version and -syslog when you include it.
+
+Common features:
+
+  - Run a web server with graceful shutdown when the quit channel is closed in
+    one function call. Prefer [RunHTTPServerTLS].
+  - Easily setup standard signal handlers to close your quit channel with
+    [CloseOnQuitSignals]
+  - Generate random tokens or secret URL paths with [RandomString]
+
+Less common features:
+
+  - [SecureHTTPDir] which is a way to use [http.FileServer] and not serve
+    directory listings. [ask.systems/daemon/host] uses this so it's only needed
+    if you want a file server as part a larger application.
+  - Generate self signed certificates and be your own Certificate Authority.
+    These certificate functions are used by [ask.systems/daemon/portal] and the
+    [ask.systems/daemon/portal/gate] client library. You only need them if you
+    want to do extra custom certificate logic.
+  - Enforce HTTPS only with [RedirectToHTTPS]. [ask.systems/daemon/portal] uses
+    this for all client connections, and will only connect to your backend via
+    HTTPS. So you don't really need to use this unless you're accepting
+    connections from clients other than portal.
+  - Create a flag that parses with no value and runs a callback when it is
+    parsed with [BoolFuncFlag]. This is how -version and -syslog from
+    [ask.systems/daemon/tools/flags] works.
+  - Prepend the current timestamp to any [io.Writer.Write] calls with
+    [TimestampWriter]. This can be used for log files. This is already used by
+    -syslog and the default [log] package prints the same timestamp format by
+    default so this is only useful if you are working with custom output
+    streams that you want timestamps for.
+*/
 package tools
 
 import (

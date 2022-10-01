@@ -1,4 +1,12 @@
-// Defines the -portal_addr and -portal_token flags
+/*
+Defines the -portal_addr and -portal_token flags
+
+To define these flags:
+
+	import (
+		_ "ask.systems/daemon/portal/flags"
+	)
+*/
 package flags
 
 import (
