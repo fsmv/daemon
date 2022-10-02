@@ -28,14 +28,14 @@ First you need to purchase a domain name to host your website. Without a domain
 name, you cannot get a TLS certificate signed by a Certificate Authority that is
 accepted by all major web browsers. This means a domain name is required to get
 encryption in transit that works without big scary security warnings in
-browsers. Once you have a domain set up a DNS A record pointing to your server's
-public IP address (search "what is my IP" online if at home) using your
+browsers. Once you have a domain, set up a DNS A record pointing to your
+server's public IP address (search "what is my IP" online if at home) using your
 registrar's interface. Finally, if you're home hosting, set up port forwarding
-in your router settings page (usually accessible at http://192.168.1.1 with
-some manufacturer specific default username and password) to forward all
-requests to port 80 and port 443 to your server's local IP address (it will
-usually look like 192.168.1.xxx and on linux will be printed, among other
-things, by ifconfig).
+in your router settings page (usually accessible at http://192.168.1.1 with some
+manufacturer specific default username and password) to forward all requests to
+port 80 and port 443 to your server's local IP address (it will usually look
+like 192.168.1.xxx and on linux will be printed, among other things, by
+ifconfig).
 
 TODO: When portal supports self signed certificates, explain it here
 
@@ -60,7 +60,7 @@ Let's Encrypt will then sign a certificate for your URL and store the two
 certificate and key files in the standard location, which will be printed. Save
 these two filepaths for configuring portal arguments.
 
-These cert files will only be readable by the root user, certbot configures it
+These cert files will only be readable by the root user. Certbot configures it
 this way because it is critical that no one ever gains access to your cert keys,
 if they did they could impersonate your server and decrypt data in transit.
 However, you do not want to run a web server, like portal, accessible to the
@@ -170,7 +170,7 @@ binaries using the daemon library, if you're using chroots use the
 party servers can pipe output to the logger binary which most distributions come
 with.
 
-Now it's all done ready! Check out the dashboard page!
+Now it's all done! Check out the spawn dashboard page too!
 
 # Running built in servers
 

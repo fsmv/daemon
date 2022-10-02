@@ -32,8 +32,10 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"flag"
 	"fmt"
 	"log"
+	"os"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -65,12 +67,42 @@ var (
 	Token *string
 )
 
-func checkFlags() error {
-	if Address == nil || Token == nil {
-		return errors.New("import _ \"ask.systems/daemon/portal/flags\" or set portal.Address and portal.Token from your code to use these helper functions.")
+// Sets up [Address] and [Token] based on optional
+// [ask.systems/daemon/portal/flags] values and with fallback to using the
+// PORTAL_ADDR and PORTAL_TOKEN environment variable values if the the variables
+// were not already set in code or by the flags.
+func ResolveFlags() error {
+	noSetup := (Address == nil && Token == nil)
+	// Check if we have the default value of the addr flag without exporting a
+	// constant in either package.
+	addrFlagSet := false
+	flag.Visit(func(f *flag.Flag) { // Only visits flags that were set
+		if f.Name == "portal_addr" {
+			addrFlagSet = true
+		}
+	})
+	if !addrFlagSet {
+		envAddr := os.Getenv("PORTAL_ADDR")
+		// Don't overwrite the default flag value if it's empty.
+		// But if the user didn't include the flags library we allow setting to "".
+		// They might have set *Address to "" but that's their problem.
+		if envAddr != "" || Address == nil {
+			Address = &envAddr
+		}
+	}
+	if Token == nil || *Token == "" { // simpler because the flag default is ""
+		envToken := os.Getenv("PORTAL_TOKEN")
+		Token = &envToken
 	}
 	if *Token == "" {
-		return errors.New("-portal_token is required to connect to portal. The value is printed in the portal logs on startup.")
+		if noSetup {
+			return errors.New("" +
+				"You need to set the portal address and token (printed on portal startup)\n" +
+				"to use these helper functions. You can import _ \"ask.systems/daemon/portal/flags\"\n" +
+				"or set gate.Address and gate.Token from your code. And if the values aren't\n" +
+				"already set, the PORTAL_ADDR and PORTAL_TOKEN environment variables will be used.")
+		}
+		return errors.New("An API token is required to connect to portal. It is printed in the portal logs on startup.")
 	}
 	return nil
 }
@@ -81,7 +113,7 @@ func checkFlags() error {
 //
 // Returns the initial lease or an error if the registration didn't work.
 func StartRegistration(request *RegisterRequest, quit <-chan struct{}) (*Lease, error) {
-	if err := checkFlags(); err != nil {
+	if err := ResolveFlags(); err != nil {
 		return nil, err
 	}
 	c, err := Connect(*Address, *Token)
@@ -128,7 +160,7 @@ func MustStartTLSRegistration(request *RegisterRequest, quit <-chan struct{}) (*
 // renews the certificate seemlessly. Or return an error if the registration
 // didn't work.
 func StartTLSRegistration(request *RegisterRequest, quit <-chan struct{}) (*Lease, *tls.Config, error) {
-	if err := checkFlags(); err != nil {
+	if err := ResolveFlags(); err != nil {
 		return nil, nil, err
 	}
 	c, err := Connect(*Address, *Token)

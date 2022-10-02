@@ -52,8 +52,8 @@ func Run(flags *flag.FlagSet, args []string) {
 
 	var wg sync.WaitGroup
 	quit := make(chan struct{})
-	if *gate.Token == "" {
-		log.Fatal("-portal_token is required to connect to gate. The value is printed in the portal logs on startup.")
+	if err := gate.ResolveFlags(); err != nil {
+		log.Fatal(err)
 	}
 	fe, err := gate.Connect(*gate.Address, *gate.Token)
 	if err != nil {

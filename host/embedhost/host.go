@@ -18,7 +18,7 @@ import (
 )
 
 func Run(flags *flag.FlagSet, args []string) {
-	webRoot := flags.String("web_root", "",
+	webRoot := flags.String("web_root", "./",
 		"Directory to serve files from")
 	urlPath := flags.String("url_path", "/", ""+
 		"Url path to serve files under. A leading slash (/) is required and if you\n"+
