@@ -60,7 +60,7 @@ func Run(flags *flag.FlagSet, args []string) {
 		log.Fatal(err)
 	}
 	errCount := 0
-	for i, requestText := range flag.Args() {
+	for i, requestText := range flags.Args() {
 		registration := &gate.RegisterRequest{}
 		err := prototext.Unmarshal([]byte(requestText), registration)
 		if err != nil {
