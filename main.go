@@ -241,6 +241,10 @@ your /root/config.pbtxt with binary name and arguments. By default spawn
 checks the working dir for binaries named in the config and you can set the
 spawn -path argument to change it.
 
+Also if you want to run these binaries on the commandline you can use the
+PORTAL_ADDR and PORTAL_TOKEN environment variables to make it easy. When running
+with spawn you need to use the flags though.
+
 [textproto]: https://developers.google.com/protocol-buffers/docs/text-format-spec
 */
 package main
