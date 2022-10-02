@@ -29,13 +29,13 @@ name, you cannot get a TLS certificate signed by a Certificate Authority that is
 accepted by all major web browsers. This means a domain name is required to get
 encryption in transit that works without big scary security warnings in
 browsers. Once you have a domain, set up a DNS A record pointing to your
-server's public IP address (search "what is my IP" online if at home) using your
-registrar's interface. Finally, if you're home hosting, set up port forwarding
-in your router settings page (usually accessible at http://192.168.1.1 with some
-manufacturer specific default username and password) to forward all requests to
-port 80 and port 443 to your server's local IP address (it will usually look
-like 192.168.1.xxx and on linux will be printed, among other things, by
-ifconfig).
+server's public IP address using your registrar's interface. Finally, if you're
+home hosting, set up port forwarding in your router settings page (usually
+accessible at http://192.168.1.1 with some manufacturer specific default
+username and password) to forward all requests to port 80 and port 443 to your
+server's local IP address (it will usually look like 192.168.1.xxx and on linux
+will be printed, among other things, by ifconfig). To test your port forwarding,
+and see your public IP, you can use https://yougetsignal.com/tools/open-ports/
 
 TODO: When portal supports self signed certificates, explain it here
 

@@ -74,8 +74,16 @@ type RegisterRequest struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	// For HTTP: A url pattern that works with http.DefaultServMux
-	// For TCP: ":tcp:port" for the port number portal should listen on
+	// For HTTP: A url pattern that works with http.DefaultServMux. Ex: /images/
+	// For TCP: ":tcp:port" for the port number portal should listen on. Only tcp
+	// is accepted for now.
+	//
+	// HTTP patterns optionally accept a hostname (URL) constraint prefix. Or if
+	// portal is configured to use the default hostname for no hostname patterns,
+	// you can use * for the hostname to always match all URLs. For example:
+	//
+	//	ask.systems/images/
+	//	*/favicon.ico
 	Pattern string `protobuf:"bytes,1,opt,name=pattern,proto3" json:"pattern,omitempty"` // TODO: maybe support multiple patterns for the same IP/port
 	// Set for third party web interfaces (or TCP proxy backends) that can't
 	// use an random lease port.
