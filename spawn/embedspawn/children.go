@@ -74,7 +74,10 @@ func (children *children) StartProgram(cmd *Command) error {
 	}
 	name := cmd.FullName()
 	attr := &os.ProcAttr{
-		Env: []string{""},
+		Env: []string{
+			fmt.Sprintf("SPAWN_FILES=%v", len(cmd.Files)),
+			fmt.Sprintf("SPAWN_PORTS=%v", len(cmd.Ports)),
+		},
 	}
 	log.Print("Starting ", name)
 	if len(cmd.User) == 0 {

@@ -89,22 +89,17 @@ Example spawn config.pbtxt for running portal only: (change my domain to yours)
 		]
 		auto_tls_certs: true
 		args: [
-			"-http_port=-3",
-			"-https_port=-4",
-			"-tls_cert=5",
-			"-tls_key=6",
 			"-auto_tls_certs",
 			"-cert_challenge_webroot=/cert-challenge/"
 		]
 	}
 
-This will tell spawn to, while running as root, bind the privileged ports
-(linux only allows root to use these ports) and open the root owned cert files,
-then use the OS to securely pass these resources to portal, which we tell portal
-about using the file descriptor numbers in the arguments. Also as a security
-measure by default spawn runs all servers in a chroot so the cannot access
-files outside of the user's home directory (or the working_dir set in the
-config) in the event it did get hacked.
+This will tell spawn to, while running as root, bind the privileged ports (linux
+only allows root to use these ports) and open the root owned cert files, then
+use the OS to securely pass these resources to portal (which portal knows how to
+detect). Also as a security measure by default spawn runs all servers in a
+chroot so they cannot access files outside of the user's home directory (or the
+working_dir set in the config) in the event it did get hacked.
 
 The rest of the config options are for automatically renewing the Let's Encrypt
 TLS certificate. If you don't want to bother you can just restart the portal

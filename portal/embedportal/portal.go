@@ -44,12 +44,10 @@ func Run(flags *flag.FlagSet, args []string) {
 		"requests for any hostname that arrives at the server.")
 	// TODO: if there was no TLS cert specfied, use the self signed cert for web
 	tlsCertSpec := flags.String("tls_cert", "", ""+
-		"Either the filepath to the tls cert file (fullchain.pem) or\n"+
-		"the file descriptor id number shared by the parent process.\n"+
+		"The filepath to the tls cert file (fullchain.pem).\n"+
 		"Accepts multiple certificates with a comma separated list.")
 	tlsKeySpec := flags.String("tls_key", "", ""+
-		"Either the filepath to the tls key file (privkey.pem) or\n"+
-		"the file descriptor id number shared by the parent process.\n"+
+		"The filepath to the tls key file (privkey.pem).\n"+
 		"Accepts multiple keys with a comma separated list.")
 	autoTLSCerts := flags.Bool("auto_tls_certs", false, ""+
 		"If true update the tls files when SIGUSR1 is received. The\n"+
@@ -58,14 +56,10 @@ func Run(flags *flag.FlagSet, args []string) {
 	certChallengeWebRoot := flags.String("cert_challenge_webroot", "", ""+
 		"Set to a local folder path to enable hosting the let's encrypt webroot\n"+
 		"challenge path ("+certChallengePattern+") so you can auto-renew with certbot.")
-	httpPortSpec := flags.Int("http_port", 80, ""+
-		"If positive, the port to bind to for http traffic or\n"+
-		"if negative, the file descriptor id for a socket to listen on\n"+
-		"shared by the parent process.")
-	httpsPortSpec := flags.Int("https_port", 443, ""+
-		"If positive, the port to bind to for https traffic or\n"+
-		"if negative, the file descriptor id for a socket to listen on\n"+
-		"shared by the parent process.")
+	httpPort := flags.Int("http_port", 80,
+		"The port to bind to for http traffic.")
+	httpsPort := flags.Int("https_port", 443,
+		"The port to bind to for https traffic.")
 	saveFilepath := flags.String("save_file", "state.protodata", ""+
 		"The path to the file to store active lease information in so that\n"+
 		"the portal server can safely restart without disrupting proxy service.")
@@ -82,13 +76,9 @@ func Run(flags *flag.FlagSet, args []string) {
 		log.Fatalf("failed to load TLS config: %v", err)
 	}
 
-	httpListener, err := listenerFromPortOrFD(*httpPortSpec)
+	httpListener, httpsListener, err := openWebListeners(*httpPort, *httpsPort)
 	if err != nil {
-		log.Fatalf("Failed to listen on http port (%v): %v", *httpPortSpec, err)
-	}
-	httpsListener, err := listenerFromPortOrFD(*httpsPortSpec)
-	if err != nil {
-		log.Fatalf("Failed to listen on https port (%v): %v", *httpsPortSpec, err)
+		log.Fatalf("%v", err)
 	}
 
 	// Load the previous save data from the file before we overwrite it
@@ -131,16 +121,66 @@ func Run(flags *flag.FlagSet, args []string) {
 	<-quit // Wait for quit
 }
 
+func openWebListeners(httpPort, httpsPort int) (httpListener net.Listener, httpsListener net.Listener, err error) {
+	// Read 2 ports passed in from spawn, in either order
+	spawnPorts, _ := strconv.Atoi(os.Getenv("SPAWN_PORTS"))
+	if spawnPorts > 0 {
+		if fdListener, err := listenerFromPortOrFD(-3); err == nil {
+			addr := fdListener.Addr().String()
+			if strings.HasSuffix(addr, strconv.Itoa(httpPort)) {
+				httpListener = fdListener
+			}
+			if strings.HasSuffix(addr, strconv.Itoa(httpsPort)) {
+				httpsListener = fdListener
+			}
+		}
+	}
+	if spawnPorts > 1 {
+		if fdListener, err := listenerFromPortOrFD(-4); err == nil {
+			addr := fdListener.Addr().String()
+			if strings.HasSuffix(addr, strconv.Itoa(httpPort)) {
+				httpListener = fdListener
+			}
+			if strings.HasSuffix(addr, strconv.Itoa(httpsPort)) {
+				httpsListener = fdListener
+			}
+		}
+	}
+
+	// If we didn't get passed in ports from spawn try just listening ourselves
+	if httpListener == nil {
+		httpListener, err = listenerFromPortOrFD(httpPort)
+		if err != nil {
+			return nil, nil, fmt.Errorf("Failed to listen on http port (%v): %v", httpPort, err)
+		}
+	}
+	if httpsListener == nil {
+		httpsListener, err = listenerFromPortOrFD(httpsPort)
+		if err != nil {
+			return nil, nil, fmt.Errorf("Failed to listen on https port (%v): %v", httpsPort, err)
+		}
+	}
+	return httpListener, httpsListener, nil
+}
+
 func openFilePathOrFD(pathOrFD string) (*os.File, error) {
 	if fd, err := strconv.Atoi(pathOrFD); err == nil {
-		return os.NewFile(uintptr(fd), "fd"), nil
+		fdFile := os.NewFile(uintptr(fd), "fd")
+		if fdFile == nil {
+			return nil, fmt.Errorf("file descriptor %v is not valid.", fd)
+		}
+		return fdFile, nil
 	}
 	return os.Open(pathOrFD)
 }
 
 func listenerFromPortOrFD(portOrFD int) (net.Listener, error) {
 	if portOrFD < 0 {
-		return net.FileListener(os.NewFile(uintptr(-portOrFD), "fd"))
+		fdFile := os.NewFile(uintptr(-portOrFD), "fd")
+		if fdFile == nil {
+			return nil, fmt.Errorf("file descriptor %v is not valid.", -portOrFD)
+		}
+		return net.FileListener(fdFile)
 	}
 	return net.Listen("tcp", fmt.Sprintf(":%v", portOrFD))
 }
@@ -270,9 +310,15 @@ func loadTLSCertScanner(tlsCert, tlsKey *bufio.Scanner) (*tls.Certificate, error
 	if err := tlsKey.Err(); err != nil {
 		return nil, err
 	}
-	cert, err := tls.X509KeyPair(tlsCert.Bytes(), tlsKey.Bytes())
+	certBytes, keyBytes := tlsCert.Bytes(), tlsKey.Bytes()
+	cert, err := tls.X509KeyPair(certBytes, keyBytes)
 	if err != nil {
-		return nil, fmt.Errorf("invalid TLS file format: %v", err)
+		// Try it the other way too in case they got mixed up
+		forwardErr := err
+		cert, err = tls.X509KeyPair(keyBytes, certBytes)
+		if err != nil {
+			return nil, fmt.Errorf("invalid TLS file format: %v", forwardErr)
+		}
 	}
 	return &cert, nil
 }
@@ -290,7 +336,12 @@ func loadTLSCertFiles(tlsCert, tlsKey *os.File) (*tls.Certificate, error) {
 	}
 	cert, err := tls.X509KeyPair(certBytes, keyBytes)
 	if err != nil {
-		return nil, fmt.Errorf("invalid TLS file format: %v", err)
+		// Try it the other way too in case they got mixed up
+		forwardErr := err
+		cert, err = tls.X509KeyPair(keyBytes, certBytes)
+		if err != nil {
+			return nil, fmt.Errorf("invalid TLS file format: %v", forwardErr)
+		}
 	}
 	return &cert, nil
 }
@@ -301,9 +352,12 @@ func loadTLSConfig(tlsCertSpec, tlsKeySpec []string,
 		log.Fatal("-tls_cert and -tls_key must have the same number of entries.")
 	}
 
-	// Open the files
+	// Open the files from the flags
 	var tlsCert, tlsKey []*os.File
 	for i := 0; i < len(tlsCertSpec); i++ {
+		if tlsCertSpec[i] == "" && tlsKeySpec[i] == "" {
+			continue // strings.Split returns this unfortunately
+		}
 		if cert, err := openFilePathOrFD(tlsCertSpec[i]); err != nil {
 			return nil, fmt.Errorf("Failed to load TLS cert file (%v): %w",
 				tlsCertSpec[i], err)
@@ -316,6 +370,37 @@ func loadTLSConfig(tlsCertSpec, tlsKeySpec []string,
 		} else {
 			tlsKey = append(tlsKey, key)
 		}
+	}
+
+	// Try opening certs passed in by spawn
+	spawnPorts, _ := strconv.Atoi(os.Getenv("SPAWN_PORTS"))
+	spawnFiles, _ := strconv.Atoi(os.Getenv("SPAWN_FILES"))
+	startFD := 3 + spawnPorts // 3 is stdin, stdout, stderr
+	numFD := 3 + spawnPorts + spawnFiles
+	if (numFD-startFD)%2 == 0 { // must have pairs of files for cert and key
+		for fd := startFD; fd < numFD; fd += 2 {
+			cert, err := openFilePathOrFD(strconv.Itoa(fd))
+			if err != nil {
+				break
+			}
+			if _, err := cert.Stat(); err != nil {
+				cert.Close()
+				break
+			}
+			key, err := openFilePathOrFD(strconv.Itoa(fd + 1))
+			if err != nil {
+				cert.Close()
+				break
+			}
+			if _, err := key.Stat(); err != nil {
+				cert.Close()
+				break
+			}
+			tlsCert = append(tlsCert, cert)
+			tlsKey = append(tlsKey, key)
+		}
+	} else {
+		log.Printf("Warning: spawn passed in an odd number of files, cert and key files must come in pairs.")
 	}
 
 	if autoTLSCerts {
