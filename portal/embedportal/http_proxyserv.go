@@ -39,12 +39,14 @@ type httpProxy struct {
 	rootCert    *tools.AutorenewCertificate
 	state       *stateManager
 	defaultHost string
+	adminAuth   *tools.BasicAuthHandler
 }
 
 // forwarder holds the data for a forwarding rule registered with httpProxy
 type forwarder struct {
-	Handler http.Handler
-	Lease   *gate.Lease
+	Handler   http.Handler
+	Lease     *gate.Lease
+	AdminOnly bool
 }
 
 func (p *httpProxy) Unregister(lease *gate.Lease) {
@@ -77,7 +79,7 @@ func (p *httpProxy) Register(
 	}
 
 	useTLS := len(request.CertificateRequest) != 0
-	err = p.saveForwarder(clientAddr, lease, request.StripPattern, useTLS)
+	err = p.saveForwarder(clientAddr, lease, request.StripPattern, useTLS, request.AdminOnly)
 	if err != nil {
 		return nil, err
 	}
@@ -93,7 +95,7 @@ func (p *httpProxy) Register(
 // http request paths. This is needed for third party applications that expect
 // to get requests for / not /pattern/
 func (p *httpProxy) saveForwarder(clientAddr string, lease *gate.Lease,
-	stripPattern bool, useTLS bool) error {
+	stripPattern, useTLS, adminOnly bool) error {
 
 	var protocol string
 	if useTLS {
@@ -173,8 +175,9 @@ func (p *httpProxy) saveForwarder(clientAddr string, lease *gate.Lease,
 		},
 	}
 	fwd := &forwarder{
-		Handler: proxy,
-		Lease:   lease,
+		Handler:   proxy,
+		Lease:     lease,
+		AdminOnly: adminOnly,
 	}
 	p.forwarders.Store(pattern, fwd)
 	return nil
@@ -269,6 +272,15 @@ func (p *httpProxy) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	if fwd.AdminOnly {
+		if !p.adminAuth.Check(w, req) {
+			if user, _, ok := req.BasicAuth(); ok {
+				log.Printf("%v failed authentication for %v on %v%v", req.RemoteAddr, user, req.Host, req.URL.Path)
+			}
+			return
+		}
+	}
+
 	// handle the request with the selected forwarder
 	fwd.Handler.ServeHTTP(w, req)
 }
@@ -308,13 +320,14 @@ func makeChallengeHandler(webRoot string) (http.Handler, error) {
 
 func startHTTPProxy(l *portLeasor, tlsConfig *tls.Config,
 	httpList, httpsList net.Listener, defaultHost, certChallengeWebRoot string,
-	state *stateManager, rootCert *tools.AutorenewCertificate,
-	quit chan struct{}) (*httpProxy, error) {
+	adminAuth *tools.BasicAuthHandler, state *stateManager,
+	rootCert *tools.AutorenewCertificate, quit chan struct{}) (*httpProxy, error) {
 	ret := &httpProxy{
 		leasor:      l,
 		rootCert:    rootCert,
 		state:       state,
 		defaultHost: defaultHost,
+		adminAuth:   adminAuth,
 	}
 	l.OnCancel(ret.Unregister)
 

@@ -63,6 +63,9 @@ func Run(flags *flag.FlagSet, args []string) {
 	saveFilepath := flags.String("save_file", "state.protodata", ""+
 		"The path to the file to store active lease information in so that\n"+
 		"the portal server can safely restart without disrupting proxy service.")
+	adminLogins := flags.String("admin_logins", "", ""+
+		"A comma separated list of username:password_hash for admins that can access\n"+
+		"registrations that requested admin_only (this includes spawn dashboards).")
 	flags.Parse(args[1:])
 
 	quit := make(chan struct{})
@@ -99,11 +102,19 @@ func Run(flags *flag.FlagSet, args []string) {
 		log.Fatalf("Failed to create a self signed certificate for the RPC server: %v", err)
 	}
 
+	adminAuth := &tools.BasicAuthHandler{Realm: "daemon"}
+	logins := strings.Split(*adminLogins, ",")
+	for i, login := range logins {
+		if err := adminAuth.SetLogin(login); err != nil {
+			log.Printf("Failed to authorize login %v: %v", i, err)
+		}
+	}
+
 	l := startPortLeasor(portRangeStart, portRangeEnd, leaseTTL, quit)
 	tcpProxy := startTCPProxy(l, tlsConfig, quit)
 	httpProxy, err := startHTTPProxy(l, tlsConfig,
 		httpListener, httpsListener,
-		*defaultHost, *certChallengeWebRoot,
+		*defaultHost, *certChallengeWebRoot, adminAuth,
 		state, rootCert, quit)
 	log.Print("Started HTTP proxy server")
 	if err != nil {

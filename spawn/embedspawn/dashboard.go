@@ -2,10 +2,7 @@ package embedspawn
 
 import (
 	"bytes"
-	"crypto/sha256"
-	"crypto/subtle"
 	"embed"
-	"encoding/base64"
 	"fmt"
 	"html/template"
 	"log"
@@ -21,12 +18,9 @@ import (
 const javascriptStreamDelay = 4 * time.Millisecond
 
 var (
-	wantUsernameHash = sha256.Sum256([]byte("admin"))
-	wantPasswordHash []byte
 	//go:embed *.tmpl.html
 	templatesFS embed.FS
 
-	passwordHash     *string
 	dashboardUrlFlag *string
 
 	// Setup in StartDashboard
@@ -39,10 +33,6 @@ type logStream struct {
 }
 
 func (l *logStream) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if !checkAuth(w, r) {
-		return
-	}
-
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "Streaming is not supported.", http.StatusInternalServerError)
@@ -77,30 +67,7 @@ type dashboard struct {
 	templates *template.Template
 }
 
-func checkAuth(w http.ResponseWriter, r *http.Request) bool {
-	u, p, ok := r.BasicAuth()
-	if !ok {
-		w.Header().Set("WWW-Authenticate", `Basic realm="daemon", charset="UTF-8"`)
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return false
-	}
-	uh := sha256.Sum256([]byte(u))
-	ph := sha256.Sum256([]byte(p))
-	userMatch := (1 == subtle.ConstantTimeCompare(uh[:], wantUsernameHash[:]))
-	passMatch := (1 == subtle.ConstantTimeCompare(ph[:], wantPasswordHash[:]))
-	if !(userMatch && passMatch) {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return false
-	}
-	return true
-}
-
 func (d *dashboard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if !checkAuth(w, r) {
-		return
-	}
-	// Auth OK
-
 	if r.Method == "POST" {
 		err := r.ParseForm()
 		if err != nil {
@@ -144,19 +111,14 @@ func startDashboard(children *children, quit chan struct{}) (dashboardQuit chan 
 		close(dashboardQuit)
 	}()
 	lease, tlsConf, err := gate.StartTLSRegistration(&gate.RegisterRequest{
-		Pattern: pattern,
+		Pattern:   pattern,
+		AdminOnly: true,
 	}, dashboardQuit)
 	if err != nil {
 		close(dashboardQuit)
 		return dashboardQuit, err
 	}
 
-	// Setup the handler
-	wantPasswordHash, err = base64.StdEncoding.DecodeString(*passwordHash)
-	if err != nil {
-		close(dashboardQuit)
-		return dashboardQuit, err
-	}
 	templates, err := template.ParseFS(templatesFS, "*.tmpl.html")
 	if err != nil {
 		close(dashboardQuit)

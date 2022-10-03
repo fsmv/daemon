@@ -91,6 +91,7 @@ Example spawn config.pbtxt for running portal only: (change my domain to yours)
 		args: [
 			"-auto_tls_certs",
 			"-cert_challenge_webroot=/cert-challenge/"
+			"-admin_logins=admin:YOUR_PASSWORD_HASH_HERE"
 		]
 	}
 
@@ -100,6 +101,10 @@ use the OS to securely pass these resources to portal (which portal knows how to
 detect). Also as a security measure by default spawn runs all servers in a
 chroot so they cannot access files outside of the user's home directory (or the
 working_dir set in the config) in the event it did get hacked.
+
+You need to set at least one user in -admin_logins to access the spawn dashboard
+page to restart your servers and see logs. You can generate the password hash
+with the example under [ask.systems/daemon/tools.BasicAuthHandler].
 
 The rest of the config options are for automatically renewing the Let's Encrypt
 TLS certificate. If you don't want to bother you can just restart the portal
@@ -147,19 +152,10 @@ running spawn at boot. I think the easiest way is using cron again with
 
 To use cron to run spawn run sudo crontab -e again and add:
 
-	@reboot /root/daemon -portal_token $TOKEN spawn -password_hash $HASH
+	@reboot /root/daemon -portal_token $TOKEN spawn
 
 Spawn will pass the portal token, and address if you set it, to child binaries
 via the PORTAL_TOKEN and PORTAL_ADDR environment variables.
-
-The $HASH is for the dashboard password protection. You can use
-https://go.dev/play/p/swuUb50vdyq to generate the hash for your password.
-Currently the username is not configurable, it's admin. The default dashboard
-path is example.com/daemon/ you can configure it with -dashboard_url.
-
-TODO: I plan to support authentication more generically so it won't be a spawn
-flag in the future. I think it will be an option in the portal registration
-request.
 
 Optionally I recommend using syslog, which is a service that collects, combines
 and compresses logs which most unix operating systems have by default. With go

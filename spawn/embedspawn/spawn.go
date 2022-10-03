@@ -43,8 +43,6 @@ func Run(flags *flag.FlagSet, args []string) {
 	dontKillChildren = flags.Bool("dont_kill_children", false, ""+
 		"When not set, send a SIGHUP to child processes when this process dies. This is\n"+
 		"on by default so that it is easy to setup restarting your daemon with an init system.")
-	passwordHash = flags.String("password_hash", "set me",
-		"sha256sum hash of the 'admin' user's basic auth password.")
 	dashboardUrlFlag = flags.String("dashboard_url", "/daemon/", ""+
 		"The url to serve the dashboard for this spawn instance. If you have\n"+
 		"multiple servers running spawn, they need different URLs.\n"+
