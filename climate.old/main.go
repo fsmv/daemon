@@ -1,3 +1,11 @@
+// Will be turned into a generic metrics plotting binary, used to graph
+// temperature.
+//
+// I made this a long time time ago before I named portal, it used to be called
+// feproxy. This code no longer works but I will salvage the SVG generating code
+// and use it to plot metrics from the other servers.
+//
+// Stay tuned.
 package main
 
 import (
