@@ -1,0 +1,36 @@
+#!/bin/sh
+
+# To install this hook:
+#     echo "./pre-commit-hook" > .git/hooks/pre-commit; chmod +x .git/hooks/pre-commit
+#
+# This way it will always run the latest version from the repository
+
+# Make sure we have generated the go code from any the proto changes
+PROTO_DIFFS=$(git diff --cached --name-only | grep '\.proto')
+if [ -n "$PROTO_DIFFS" ]; then
+  go generate
+  GEN_DIFFS=$(git diff --name-only | grep "\.pb\.go")
+  if [ -n "$GEN_DIFFS" ]; then
+    echo "go generate produced diffs, add the .pb.go files to your commit."
+    exit 1
+  fi
+fi
+
+# Check if what we're about to commit builds the megabinary
+# Do stashes so we only compile what we're about to commit and ignore the rest
+# Don't panic if you get stash problems, it saves your work!
+NEED_POP=-1
+if [ -n "$(git diff --cached --name-only)" ]; then
+  git stash -q --keep-index --include-untracked
+  NEED_POP=$?
+fi
+go build -o test-build
+STATUS=$? # other commands will overwrite $? so save it
+if [ $NEED_POP -eq 0 ]; then
+  git stash pop -q
+fi
+if [ $STATUS -ne 0 ]; then
+  exit $STATUS
+else
+  rm test-build # clean up our test if the build worked
+fi
