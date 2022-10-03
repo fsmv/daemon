@@ -24,29 +24,37 @@ For more information and options see: https://www.arp242.net/static-go.html
 
 # Setup and explanation
 
-First you need to purchase a domain name to host your website. Without a domain
-name, you cannot get a TLS certificate signed by a Certificate Authority that is
-accepted by all major web browsers. This means a domain name is required to get
-encryption in transit that works without big scary security warnings in
-browsers. Once you have a domain, set up a DNS A record pointing to your
-server's public IP address using your registrar's interface. Finally, if you're
-home hosting, set up port forwarding in your router settings page (usually
-accessible at http://192.168.1.1 with some manufacturer specific default
-username and password) to forward all requests to port 80 and port 443 to your
-server's local IP address (it will usually look like 192.168.1.xxx and on linux
-will be printed, among other things, by ifconfig). To test your port forwarding,
-and see your public IP, you can use https://yougetsignal.com/tools/open-ports/
+First if you want to run a public website you need to purchase a domain name to
+host your website. Without a domain name, you cannot get a TLS certificate
+signed by a Certificate Authority that is accepted by all major web browsers.
+This means a domain name is required to get encryption in transit that works
+without big scary security warnings in browsers. However if you don't have a
+domain name, portal will generate a self-signed certificate which will trigger
+those browser warnings but enable encryption. If have a domain, set up a DNS A
+record pointing to your server's public IP address using your registrar's
+interface.
 
-TODO: When portal supports self signed certificates, explain it here
+If you're home hosting, you will need to set up port forwarding in your router
+settings page (usually accessible at http://192.168.1.1 with some manufacturer
+specific default username and password) to forward all requests to port 80 and
+port 443 to your server's local IP address (it will usually look like
+192.168.1.xxx and on linux will be printed, among other things, by ifconfig).
 
-Then the main thing you need is [ask.systems/daemon/portal], the reverse proxy
-server that is configured via gRPC. Portal will accept all connections to your
-domain name, instead of any servers like Apache or NGINX. To encrypt this
-traffic portal needs your TLS cert, the easiest way to get one is using the
-https://letsencrypt.org/ Certificate Authority (CA). Install their certbot tool
-with your operating system's package manager then we can use it to get the
-certificate. This next step won't work if you didn't correctly set up your DNS
-and port forwarding settings.
+To test your setup (and see your public IP), you can use:
+https://yougetsignal.com/tools/open-ports/. Make sure it says your URL (or IP if
+you didn't buy a domain) has port 80 and port 443 opened.
+
+Then the main daemon command you need is [ask.systems/daemon/portal], the
+reverse proxy server that is configured via gRPC. Portal will accept all
+connections to your domain name, instead of any servers like Apache or NGINX.
+
+To encrypt this traffic portal needs a TLS certificate. Portal can automatically
+generate a self-signed cert but browsers will warn about it. So if you have a
+domain name use the free https://letsencrypt.org/ Certificate Authority (CA) to
+get a trusted certificate. Install their certbot tool with your operating
+system's package manager then we can use it to get the certificate. This next
+step won't work if you didn't correctly set up your DNS and port forwarding
+settings.
 
 Note: in all examples below I've used my domain name ask.systems, replace this
 with your domain name. It will give you an error if you use mine.
@@ -152,10 +160,11 @@ running spawn at boot. I think the easiest way is using cron again with
 
 To use cron to run spawn run sudo crontab -e again and add:
 
-	@reboot /root/daemon -portal_token $TOKEN spawn
+	@reboot /root/daemon -portal_token $TOKEN spawn >/dev/null >2>&1 &
 
 Spawn will pass the portal token, and address if you set it, to child binaries
-via the PORTAL_TOKEN and PORTAL_ADDR environment variables.
+via the PORTAL_TOKEN and PORTAL_ADDR environment variables. The syntax after the
+command is shell script to ignore spawn's output and run it in the background.
 
 Optionally I recommend using syslog, which is a service that collects, combines
 and compresses logs which most unix operating systems have by default. With go

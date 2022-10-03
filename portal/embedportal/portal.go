@@ -42,7 +42,6 @@ func Run(flags *flag.FlagSet, args []string) {
 		"Set this to the domain name that patterns registered without a hostname\n"+
 		"should be served under. If unset, patterns without a hostname will match\n"+
 		"requests for any hostname that arrives at the server.")
-	// TODO: if there was no TLS cert specfied, use the self signed cert for web
 	tlsCertSpec := flags.String("tls_cert", "", ""+
 		"The filepath to the tls cert file (fullchain.pem).\n"+
 		"Accepts multiple certificates with a comma separated list.")
@@ -97,7 +96,8 @@ func Run(flags *flag.FlagSet, args []string) {
 		}
 	}
 
-	rootCert, err := tools.AutorenewSelfSignedCertificate("portal", 10*leaseTTL, onCertRenew, quit)
+	rootCert, err := tools.AutorenewSelfSignedCertificate("portal",
+		10*leaseTTL, true /*isCA*/, onCertRenew, quit)
 	if err != nil {
 		log.Fatalf("Failed to create a self signed certificate for the RPC server: %v", err)
 	}
@@ -411,7 +411,14 @@ func loadTLSConfig(tlsCertSpec, tlsKeySpec []string,
 			tlsKey = append(tlsKey, key)
 		}
 	} else {
-		log.Printf("Warning: spawn passed in an odd number of files, cert and key files must come in pairs.")
+		log.Print("Warning: spawn passed in an odd number of files, cert and key files must come in pairs.")
+	}
+
+	// If there was no certificate we could load, use a self-signed cert
+	if len(tlsCert) == 0 {
+		log.Printf("Warning: no TLS certificate loaded. Using a self-signed certificate.")
+		return tools.AutorenewSelfSignedCertificate( /*hostname*/ "*",
+			24*time.Hour, false /*isCA*/, nil /*onRenew*/, quit)
 	}
 
 	if autoTLSCerts {

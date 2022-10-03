@@ -29,7 +29,7 @@ type rcpServ struct {
 	leasor    *portLeasor
 	tcpProxy  *tcpProxy
 	httpProxy *httpProxy
-	rootCert  *tools.AutorenewCertificate
+	rootCert  *tls.Config
 	state     *stateManager
 	quit      chan struct{}
 }
@@ -99,7 +99,11 @@ func (s *rcpServ) Register(ctx context.Context, request *gate.RegisterRequest) (
 
 	var clientCert []byte
 	if len(request.CertificateRequest) != 0 {
-		clientCert, err = tools.SignCertificate(s.rootCert.Certificate(),
+		root, err := s.rootCert.GetCertificate(nil)
+		if err != nil {
+			return nil, err
+		}
+		clientCert, err = tools.SignCertificate(root,
 			request.CertificateRequest, lease.Timeout.AsTime(), false)
 		if err != nil {
 			return nil, err
@@ -151,7 +155,11 @@ func (s *rcpServ) Renew(ctx context.Context, lease *gate.Lease) (*gate.Lease, er
 
 	// Renew the certificate if we had one
 	if len(registration.Request.CertificateRequest) != 0 {
-		newCert, err := tools.SignCertificate(s.rootCert.Certificate(),
+		root, err := s.rootCert.GetCertificate(nil)
+		if err != nil {
+			return nil, err
+		}
+		newCert, err := tools.SignCertificate(root,
 			registration.Request.CertificateRequest, newLease.Timeout.AsTime(), false)
 		if err != nil {
 			return nil, err
@@ -168,8 +176,9 @@ func (s *rcpServ) Renew(ctx context.Context, lease *gate.Lease) (*gate.Lease, er
 // StartNew creates a new RPCServ and starts it
 func startRPCServer(leasor *portLeasor,
 	tcpProxy *tcpProxy, httpProxy *httpProxy,
-	port uint16, rootCert *tools.AutorenewCertificate,
-	saveData []byte, state *stateManager, quit chan struct{}) (*rcpServ, error) {
+	port uint16, rootCert *tls.Config,
+	saveData []byte, state *stateManager,
+	quit chan struct{}) (*rcpServ, error) {
 
 	s := &rcpServ{
 		leasor:    leasor,
@@ -188,11 +197,7 @@ func startRPCServer(leasor *portLeasor,
 		// for sure talking to your portal server when it's not just on a local
 		// network, in which case authenticating the server is good so that we don't
 		// send our auth token to a MITM attacker.
-		grpc.Creds(credentials.NewTLS(&tls.Config{
-			GetCertificate: func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
-				return rootCert.Certificate(), nil
-			},
-		})),
+		grpc.Creds(credentials.NewTLS(rootCert)),
 		grpc.UnaryInterceptor(func(ctx context.Context, req interface{},
 			info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp interface{}, err error) {
 			md, ok := metadata.FromIncomingContext(ctx)

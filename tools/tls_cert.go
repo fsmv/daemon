@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"fmt"
 	"log"
 	"math/big"
@@ -14,29 +15,22 @@ import (
 	"time"
 )
 
-// Read only thread safe store for the latest certificate that will be
-// automatically updated when renewed.
-type AutorenewCertificate struct {
-	cache *atomic.Value
-}
-
-// Return the latest certificate, thread safe
-func (c *AutorenewCertificate) Certificate() *tls.Certificate {
-	return c.cache.Load().(*tls.Certificate)
-}
-
 // Generate a new self signed certificate for the given hostname with the given
 // TTL expiration time, and keep it renewed in the background until the quit
 // channel is closed.
 //
+// If isCA is true, set the capability bits to be a root Certificate Authority.
+// So you can use the cert with [SignCertificate]. Certificate Authority certs
+// cannot be used to serve webpages.
+//
 // If the onRenew function is not nil, it is called every time the certificate
 // is renewed, including the first time it is generated.
 //
-// The returned container is a thread safe way to access the latest certificate
-// which the background goroutine keeps up to date.
-func AutorenewSelfSignedCertificate(hostname string, TTL time.Duration, onRenew func(*tls.Certificate), quit chan struct{}) (*AutorenewCertificate, error) {
+// The returned config only has [tls.Config.GetCertificate] set, and it will
+// return the latest certificate for any arguments (including nil).
+func AutorenewSelfSignedCertificate(hostname string, TTL time.Duration, isCA bool, onRenew func(*tls.Certificate), quit chan struct{}) (*tls.Config, error) {
 	cache := &atomic.Value{}
-	newCert, err := GenerateSelfSignedCertificate(hostname, time.Now().Add(TTL))
+	newCert, err := GenerateSelfSignedCertificate(hostname, time.Now().Add(TTL), isCA)
 	if err != nil {
 		return nil, err
 	}
@@ -54,7 +48,7 @@ func AutorenewSelfSignedCertificate(hostname string, TTL time.Duration, onRenew 
 				return
 			case <-timer.C:
 			}
-			newCert, err := GenerateSelfSignedCertificate(hostname, time.Now().Add(TTL))
+			newCert, err := GenerateSelfSignedCertificate(hostname, time.Now().Add(TTL), isCA)
 			if err != nil {
 				log.Print("Failed to renew self signed certificate: ", err)
 				continue
@@ -67,18 +61,29 @@ func AutorenewSelfSignedCertificate(hostname string, TTL time.Duration, onRenew 
 		}
 	}()
 
-	return &AutorenewCertificate{cache}, nil
+	return &tls.Config{
+		GetCertificate: func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
+			cert, ok := cache.Load().(*tls.Certificate)
+			if !ok || cert == nil {
+				return nil, errors.New("Failed to load self-signed certificate.")
+			}
+			return cert, nil
+		},
+	}, nil
 }
 
 // Generate a self signed TLS certificate for the given hostname and expiration
-// date. These certificates are given the capability bits to be a root
-// Certificate Authority. So you can use them with [SignCertificate].
-func GenerateSelfSignedCertificate(hostname string, expiration time.Time) (*tls.Certificate, error) {
+// date.
+//
+// If isCA is true, set the capability bits to be a root Certificate Authority.
+// So you can use the cert with [SignCertificate]. Certificate Authority certs
+// cannot be used to serve webpages.
+func GenerateSelfSignedCertificate(hostname string, expiration time.Time, isCA bool) (*tls.Certificate, error) {
 	csr, private, err := GenerateCertificateRequest(hostname)
 	if err != nil {
 		return nil, err
 	}
-	signedCert, err := SignCertificate(&tls.Certificate{PrivateKey: private}, csr, expiration, true)
+	signedCert, err := SignCertificate(&tls.Certificate{PrivateKey: private}, csr, expiration, isCA)
 	if err != nil {
 		return nil, err
 	}

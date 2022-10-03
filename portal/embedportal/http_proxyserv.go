@@ -36,7 +36,7 @@ type httpProxy struct {
 	leasor *portLeasor
 	// Map from pattern to *forwarder, which must not be modified
 	forwarders  sync.Map
-	rootCert    *tools.AutorenewCertificate
+	rootCert    *tls.Config
 	state       *stateManager
 	defaultHost string
 	adminAuth   *tools.BasicAuthHandler
@@ -120,7 +120,7 @@ func (p *httpProxy) saveForwarder(clientAddr string, lease *gate.Lease,
 			ClientCAs: roots,
 			// Use the server cert for client auth
 			GetClientCertificate: func(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
-				return p.rootCert.Certificate(), nil
+				return p.rootCert.GetCertificate(nil)
 			},
 		}
 
@@ -321,7 +321,7 @@ func makeChallengeHandler(webRoot string) (http.Handler, error) {
 func startHTTPProxy(l *portLeasor, tlsConfig *tls.Config,
 	httpList, httpsList net.Listener, defaultHost, certChallengeWebRoot string,
 	adminAuth *tools.BasicAuthHandler, state *stateManager,
-	rootCert *tools.AutorenewCertificate, quit chan struct{}) (*httpProxy, error) {
+	rootCert *tls.Config, quit chan struct{}) (*httpProxy, error) {
 	ret := &httpProxy{
 		leasor:      l,
 		rootCert:    rootCert,
