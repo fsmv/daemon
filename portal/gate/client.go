@@ -63,6 +63,8 @@ type Client struct {
 
 // Configuration for connecting to portal
 //
+// If you read these vars directly, call [ResolveFlags] first!
+//
 // These are set by the [ask.systems/daemon/portal/flags] library. If you don't want to
 // use the flags you can set the values here.
 var (
