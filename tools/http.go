@@ -11,6 +11,7 @@ Common features:
   - Easily setup standard signal handlers to close your quit channel with
     [CloseOnQuitSignals]
   - Generate random tokens or secret URL paths with [RandomString]
+  - Authenticate users via HTTP basic auth with [BasicAuthHandler]
 
 Less common features:
 

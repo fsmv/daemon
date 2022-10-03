@@ -67,6 +67,9 @@ func (h *BasicAuthHandler) SetUser(username string, passwordHash string) error {
 }
 
 // Authorizes a user with this handler using a "username:password_hash" string
+//
+// The password_hash must be a SHA256 [base64.URLEncoding] encoded string. You
+// can generate this with [BasicAuthHash].
 func (h *BasicAuthHandler) SetLogin(login string) error {
 	split := strings.Split(login, ":")
 	if len(split) != 2 {
