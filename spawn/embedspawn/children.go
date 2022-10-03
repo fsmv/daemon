@@ -17,6 +17,8 @@ import (
 	"syscall"
 	"time"
 
+	_ "ask.systems/daemon/portal/flags"
+	"ask.systems/daemon/portal/gate"
 	"ask.systems/daemon/tools"
 )
 
@@ -78,6 +80,11 @@ func (children *children) StartProgram(cmd *Command) error {
 			fmt.Sprintf("SPAWN_FILES=%v", len(cmd.Files)),
 			fmt.Sprintf("SPAWN_PORTS=%v", len(cmd.Ports)),
 		},
+	}
+	err := gate.ResolveFlags()
+	if err != nil {
+		attr.Env = append(attr.Env, fmt.Sprintf("PORTAL_ADDR=%v", *gate.Address))
+		attr.Env = append(attr.Env, fmt.Sprintf("PORTAL_TOKEN=%v", *gate.Token))
 	}
 	log.Print("Starting ", name)
 	if len(cmd.User) == 0 {

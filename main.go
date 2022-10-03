@@ -149,6 +149,9 @@ To use cron to run spawn run sudo crontab -e again and add:
 
 	@reboot /root/daemon -portal_token $TOKEN spawn -password_hash $HASH
 
+Spawn will pass the portal token, and address if you set it, to child binaries
+via the PORTAL_TOKEN and PORTAL_ADDR environment variables.
+
 The $HASH is for the dashboard password protection. You can use
 https://go.dev/play/p/swuUb50vdyq to generate the hash for your password.
 Currently the username is not configurable, it's admin. The default dashboard
@@ -180,7 +183,6 @@ to serve favicon.ico in /home/www/favicon.ico add:
 		name: "favicon"
 		args: [
 			"-syslog_remote=127.0.0.1",
-			"-portal_token=YOUR TOKEN HERE",
 			"-web_root=/",
 			"-url_path=/favicon.ico"
 		]
@@ -198,7 +200,6 @@ for example a minecraft map listening on :8080/ to example.com/minecraft/ with:
 		binary: "assimilate"
 		user: "www"
 		args: [
-			"-portal_token=YOUR TOKEN HERE",
 			"-syslog_remote=127.0.0.1",
 
 			"pattern: '/minecraft/' fixed_port: 8080 strip_pattern: true"
