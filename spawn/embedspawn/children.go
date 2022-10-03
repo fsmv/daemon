@@ -82,7 +82,7 @@ func (children *children) StartProgram(cmd *Command) error {
 		},
 	}
 	err := gate.ResolveFlags()
-	if err != nil {
+	if err == nil {
 		attr.Env = append(attr.Env, fmt.Sprintf("PORTAL_ADDR=%v", *gate.Address))
 		attr.Env = append(attr.Env, fmt.Sprintf("PORTAL_TOKEN=%v", *gate.Token))
 	}
