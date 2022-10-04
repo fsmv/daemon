@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 // Returns a random base64 string of the specified number of bytes.
@@ -25,11 +27,17 @@ func RandomString(bytes int) string {
 	return base64.URLEncoding.EncodeToString(b)
 }
 
-// Returns a [base64.URLEncoding] SHA256 hash of the input password.
-// Compatible with [BasicAuthHandler].
+// Returns a password hash compatible with the default [BasicAuthHandler] hash.
+// May change algorithms over time as hash recommendations change.
+//
+// Returns an empty string if there's any error reading random devices etc.
 func BasicAuthHash(password string) string {
-	hash := sha256.Sum256([]byte(password))
-	return base64.URLEncoding.EncodeToString(hash[:])
+	// This generates a salt internally and produces the standard encoded string
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return ""
+	}
+	return string(hash)
 }
 
 // Wraps another [http.Handler] and only calls the wrapped handler if BasicAuth
@@ -45,9 +53,43 @@ type BasicAuthHandler struct {
 	Realm   string
 	Handler http.Handler
 
+	// If set, auth checks are performed using this function instead of the
+	// default. CheckPassword is responsible for parsing the encoded parameters
+	// from the authHash string and doing any base64 decoding, as well as doing
+	// the hash comparison (which should be a constant time comparison).
+	//
+	// This allows for using any hash function that's needed with
+	// BasicAuthHandler, or even accept multiple at once. Many are available in
+	// [golang.org/x/crypto].
+	//
+	// If not set [DefaultCheckPassword] will be used.
+	// The default will always accept the hashes from [BasicAuthHash] and will
+	// continue to accept hashes from old versions for compatibility.
+	CheckPassword func(authHash, userPassword string) bool
+
 	users      sync.Map // map from username string to password hash []byte
 	init       sync.Once
 	authHeader string
+}
+
+// Checks passwords for [BasicAuthHandler] (or other uses if you want). Accepts
+// hashes from [BasicAuthHash] and will continue to accept hashes from old
+// versions for compatibility.
+func DefaultCheckPassword(authHash, userPassword string) bool {
+	// Check the format from the first version of BasicAuthHash which used only
+	// the standard library. I didn't think much before I picked sha256 but it's
+	// not a good idea given all the bitcoin mining rigs out there.
+	//
+	// We can detect the format I used because most others use StdEncoding
+	if wantHash, err := base64.URLEncoding.DecodeString(authHash); err == nil {
+		hash := sha256.Sum256([]byte(userPassword))
+		return (1 == subtle.ConstantTimeCompare(hash[:], wantHash))
+	}
+	// The first good version, bcrypt
+	if strings.HasPrefix(authHash, "$2") {
+		return (bcrypt.CompareHashAndPassword([]byte(authHash), []byte(userPassword)) == nil)
+	}
+	return false
 }
 
 // Authorizes the given user to access the pages protected by this handler.
@@ -58,11 +100,7 @@ func (h *BasicAuthHandler) SetUser(username string, passwordHash string) error {
 	if username == "" {
 		return errors.New("username must not be empty")
 	}
-	decoded, err := base64.URLEncoding.DecodeString(passwordHash)
-	if err != nil {
-		return err
-	}
-	h.users.Store(username, decoded)
+	h.users.Store(username, passwordHash)
 	return nil
 }
 
@@ -104,15 +142,18 @@ func (h *BasicAuthHandler) Check(w http.ResponseWriter, r *http.Request) bool {
 		return false
 	}
 	// Look up the user's password
-	wantHashIface, ok := h.users.Load(username)
+	wantHash, ok := h.users.Load(username)
 	if !ok {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return false
 	}
-	wantHash := wantHashIface.([]byte)
-	// Hash and check the password
-	hash := sha256.Sum256([]byte(password))
-	passMatch := (1 == subtle.ConstantTimeCompare(hash[:], wantHash))
+
+	passMatch := false
+	if h.CheckPassword == nil {
+		passMatch = DefaultCheckPassword(wantHash.(string), password)
+	} else {
+		passMatch = h.CheckPassword(wantHash.(string), password)
+	}
 	if !passMatch {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return false

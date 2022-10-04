@@ -1,17 +1,16 @@
-/*?sr/bin/env go run "$0" "$@"; exit $? #*/
-// You can copy this to a file and make it executable and run it locally with
-// ./pass.go for privacy if you like
+// If you prefer to run it offline copy this to a new folder and run it locally.
+// go mod init $(basename `pwd`); go mod tidy; go run .
 package tools_test
 
 import (
 	"bufio"
-	"crypto/sha256"
-	"encoding/base64"
 	"flag"
 	"fmt"
 	"log"
 	"os"
 	"strings"
+
+	"ask.systems/daemon/tools"
 )
 
 // Change the password here to run in online in the docs site
@@ -27,8 +26,5 @@ func ExampleBasicAuthHandler_generatePasswordHash() {
 			log.Fatal(err)
 		}
 	}
-	hash := sha256.Sum256([]byte(*Password))
-	fmt.Println(base64.URLEncoding.EncodeToString(hash[:]))
-	// Output:
-	// 9S-9MrKzuG_4jvbEkGKChfSCrxXdyylUH5S89Saj9sc=
+	fmt.Println(tools.BasicAuthHash(*Password))
 }

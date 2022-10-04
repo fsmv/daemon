@@ -3,6 +3,7 @@ module ask.systems/daemon
 go 1.17
 
 require (
+	golang.org/x/crypto v0.0.0-20190308221718-c2843e01d9a2
 	google.golang.org/grpc v1.49.0
 	google.golang.org/protobuf v1.28.1
 )
