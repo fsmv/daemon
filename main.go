@@ -98,7 +98,7 @@ Example spawn config.pbtxt for running portal only: (change my domain to yours)
 		auto_tls_certs: true
 		args: [
 			"-auto_tls_certs",
-			"-cert_challenge_webroot=/cert-challenge/"
+			"-cert_challenge_webroot=/cert-challenge/",
 			"-admin_logins=admin:YOUR_PASSWORD_HASH_HERE"
 		]
 	}
