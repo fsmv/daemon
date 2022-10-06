@@ -31,13 +31,36 @@ func RandomString(bytes int) string {
 // May change algorithms over time as hash recommendations change.
 //
 // Returns an empty string if there's any error reading random devices etc.
-func BasicAuthHash(password string) string {
+func HashPassword(password string) string {
 	// This generates a salt internally and produces the standard encoded string
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
 		return ""
 	}
 	return string(hash)
+}
+
+// Checks passwords for [BasicAuthHandler] (or other uses if you want). Accepts
+// hashes from [HashPassword] and will continue to accept hashes from old
+// versions for compatibility. Empty authHash always returns false.
+func CheckPassword(authHash, userPassword string) bool {
+	if authHash == "" {
+		return false
+	}
+	// Check the format from the first version of HashPassword which used only
+	// the standard library. I didn't think much before I picked sha256 but it's
+	// not a good idea given all the bitcoin mining rigs out there.
+	//
+	// We can detect the format I used because most others use StdEncoding
+	if wantHash, err := base64.URLEncoding.DecodeString(authHash); err == nil {
+		hash := sha256.Sum256([]byte(userPassword))
+		return (1 == subtle.ConstantTimeCompare(hash[:], wantHash))
+	}
+	// The first good version, bcrypt
+	if strings.HasPrefix(authHash, "$2") {
+		return (bcrypt.CompareHashAndPassword([]byte(authHash), []byte(userPassword)) == nil)
+	}
+	return false
 }
 
 // Wraps another [http.Handler] and only calls the wrapped handler if BasicAuth
@@ -62,8 +85,8 @@ type BasicAuthHandler struct {
 	// BasicAuthHandler, or even accept multiple at once. Many are available in
 	// [golang.org/x/crypto].
 	//
-	// If not set [DefaultCheckPassword] will be used.
-	// The default will always accept the hashes from [BasicAuthHash] and will
+	// If not set [tools.CheckPassword] will be used.
+	// The default will always accept the hashes from [HashPassword] and will
 	// continue to accept hashes from old versions for compatibility.
 	CheckPassword func(authHash, userPassword string) bool
 
@@ -72,30 +95,10 @@ type BasicAuthHandler struct {
 	authHeader string
 }
 
-// Checks passwords for [BasicAuthHandler] (or other uses if you want). Accepts
-// hashes from [BasicAuthHash] and will continue to accept hashes from old
-// versions for compatibility.
-func DefaultCheckPassword(authHash, userPassword string) bool {
-	// Check the format from the first version of BasicAuthHash which used only
-	// the standard library. I didn't think much before I picked sha256 but it's
-	// not a good idea given all the bitcoin mining rigs out there.
-	//
-	// We can detect the format I used because most others use StdEncoding
-	if wantHash, err := base64.URLEncoding.DecodeString(authHash); err == nil {
-		hash := sha256.Sum256([]byte(userPassword))
-		return (1 == subtle.ConstantTimeCompare(hash[:], wantHash))
-	}
-	// The first good version, bcrypt
-	if strings.HasPrefix(authHash, "$2") {
-		return (bcrypt.CompareHashAndPassword([]byte(authHash), []byte(userPassword)) == nil)
-	}
-	return false
-}
-
 // Authorizes the given user to access the pages protected by this handler.
 //
 // The passwordHash must be a SHA256 [base64.URLEncoding] encoded string. You
-// can generate this with [BasicAuthHash].
+// can generate this with [HashPassword].
 func (h *BasicAuthHandler) SetUser(username string, passwordHash string) error {
 	if username == "" {
 		return errors.New("username must not be empty")
@@ -107,7 +110,7 @@ func (h *BasicAuthHandler) SetUser(username string, passwordHash string) error {
 // Authorizes a user with this handler using a "username:password_hash" string
 //
 // The password_hash must be a SHA256 [base64.URLEncoding] encoded string. You
-// can generate this with [BasicAuthHash].
+// can generate this with [HashPassword].
 func (h *BasicAuthHandler) SetLogin(login string) error {
 	split := strings.Split(login, ":")
 	if len(split) != 2 {
@@ -150,7 +153,7 @@ func (h *BasicAuthHandler) Check(w http.ResponseWriter, r *http.Request) bool {
 
 	passMatch := false
 	if h.CheckPassword == nil {
-		passMatch = DefaultCheckPassword(wantHash.(string), password)
+		passMatch = CheckPassword(wantHash.(string), password)
 	} else {
 		passMatch = h.CheckPassword(wantHash.(string), password)
 	}
