@@ -145,6 +145,18 @@ type SecureHTTPDir struct {
 	BasicAuthRealm string
 }
 
+// Wraps a given handler and only calls it if [CheckPasswordsFiles] passes.
+// It probably doesn't make sense to use this with anything other than
+// [http.FileServer]
+func (s SecureHTTPDir) CheckPasswordsHandler(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		err := s.CheckPasswordsFiles(w, r)
+		if err == nil {
+			h.ServeHTTP(w, r)
+		}
+	})
+}
+
 // Call this before handling the request with [http.FileServer] in order to
 // authenticate the user if the directory requested contains [PasswordsFile]
 // files. If the returned error is not nil, then authentication failed and a
@@ -160,6 +172,9 @@ type SecureHTTPDir struct {
 // top. This means you can add additional users for futher subdirectories, or
 // revoke access to a subdirectory by entering a username:revoked line (revoked
 // will actually be interpreted as a sha256 hash which will never match).
+//
+// The easiest way to use this is [CheckPasswordsHandler], but you will need to
+// call this directly if you want to log errors for example.
 func (s SecureHTTPDir) CheckPasswordsFiles(w http.ResponseWriter, r *http.Request) error {
 	// Never serve the PasswordsFile
 	if path.Base(r.URL.Path) == PasswordsFile {
@@ -179,7 +194,7 @@ func (s SecureHTTPDir) CheckPasswordsFiles(w http.ResponseWriter, r *http.Reques
 	if username, _, ok := r.BasicAuth(); ok {
 		return fmt.Errorf("failed auth as %v", username)
 	} else {
-		return fmt.Errorf("requested protected directory. Got login page")
+		return fmt.Errorf("requested protected directory. Got login page.")
 	}
 }
 

@@ -1,21 +1,11 @@
 package tools_test
 
 import (
+	"log"
 	"net/http"
 
 	"ask.systems/daemon/tools"
 )
-
-// How to use [http.FileServer] and disallow directory listing
-func ExampleSecureHTTPDir() {
-	const localDirectory = "/home/www/public/"
-	const servePath = "/foo/"
-	dir := tools.SecureHTTPDir{
-		Dir:                   http.Dir(localDirectory),
-		AllowDirectoryListing: false,
-	}
-	http.Handle(servePath, http.StripPrefix(servePath, http.FileServer(dir)))
-}
 
 func ExampleRedirectToHTTPS() {
 	// Serve an encrypted greeting
@@ -32,4 +22,46 @@ func ExampleRedirectToHTTPS() {
 		Handler: tools.RedirectToHTTPS{},
 	}
 	go httpServer.ListenAndServe()
+}
+
+// How to use [http.FileServer] and disallow directory listing
+func ExampleSecureHTTPDir() {
+	const localDirectory = "/home/www/public/"
+	const servePath = "/foo/"
+	dir := tools.SecureHTTPDir{
+		Dir:                   http.Dir(localDirectory),
+		AllowDirectoryListing: false,
+	}
+	http.Handle(servePath, http.StripPrefix(servePath, http.FileServer(dir)))
+}
+
+func ExampleSecureHTTPDir_CheckPasswordsHandler() {
+	dir := tools.SecureHTTPDir{
+		Dir:            http.Dir("/home/www/public/"),
+		BasicAuthRealm: "daemon",
+	}
+	const servePath = "/filez/"
+	http.Handle(servePath,
+		http.StripPrefix(servePath, dir.CheckPasswordsHandler(http.FileServer(dir))))
+	// Then start the http server
+}
+
+func ExampleSecureHTTPDir_CheckPasswordsFiles() {
+	dir := tools.SecureHTTPDir{
+		Dir:            http.Dir("/home/www/public/"),
+		BasicAuthRealm: "daemon",
+	}
+	fileServer := http.FileServer(dir)
+	const servePath = "/filez/"
+	http.Handle(servePath, http.StripPrefix(servePath,
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			err := dir.CheckPasswordsFiles(w, r)
+			if err == nil {
+				fileServer.ServeHTTP(w, r)
+			} else {
+				// This header is added by portal
+				log.Printf("%v failed authentication: %v", r.Header.Get("Orig-Address"), err)
+			}
+		})))
+	// Then start the http server
 }
