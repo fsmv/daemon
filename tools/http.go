@@ -38,9 +38,11 @@ Less common features:
 package tools
 
 import (
+	"bufio"
 	"context"
 	"crypto/tls"
 	"errors"
+	"fmt"
 	"io/fs"
 	"log"
 	"net/http"
@@ -51,6 +53,10 @@ import (
 	"strings"
 	"time"
 )
+
+// The filename to read username:password_hash logins per line from when using
+// [SecureHTTPDir.CheckPasswordsFiles]
+var PasswordsFile = ".passwords"
 
 func strSliceContains(slice []string, key string) bool {
 	for _, val := range slice {
@@ -131,6 +137,101 @@ type SecureHTTPDir struct {
 	// directories that do not have index.html. If false serve 404 instead, and
 	// index.html will still be served for directories containing it.
 	AllowDirectoryListing bool
+
+	// If you're using [CheckPasswordsFiles] set this to an application identifier
+	// string e.g. "daemon". The browser will remember the realm after a
+	// successful login so the user won't have to keep typing the password, and
+	// this works across multiple paths as well.
+	BasicAuthRealm string
+}
+
+// Call this before handling the request with [http.FileServer] in order to
+// authenticate the user if the directory requested contains [PasswordsFile]
+// files. If the returned error is not nil, then authentication failed and a
+// response has been written and sent. Otherwise nothing is written.
+//
+// You can generate hashes with [PasswordHash] and the format of the files is:
+//
+//	username1:password_hash1
+//	user2:password_hash2
+//
+// The passwords files are merged by loading the file from the closest-to-root
+// directory first then applying any other passwords files in subdirectories on
+// top. This means you can add additional users for futher subdirectories, or
+// revoke access to a subdirectory by entering a username:revoked line (revoked
+// will actually be interpreted as a sha256 hash which will never match).
+func (s SecureHTTPDir) CheckPasswordsFiles(w http.ResponseWriter, r *http.Request) error {
+	// Never serve the PasswordsFile
+	if path.Base(r.URL.Path) == PasswordsFile {
+		http.NotFound(w, r)
+		return fmt.Errorf("requested a passwords file!")
+	}
+	auth := BasicAuthHandler{
+		Realm: s.BasicAuthRealm,
+	}
+	if s.registerPasswords(&auth, s.cleanRequest(r.URL.Path)) == 0 {
+		return nil // if there were no passwords, allow the request
+	}
+	passed := auth.Check(w, r)
+	if passed {
+		return nil
+	}
+	if username, _, ok := r.BasicAuth(); ok {
+		return fmt.Errorf("failed auth as %v", username)
+	} else {
+		return fmt.Errorf("requested protected directory. Got login page")
+	}
+}
+
+// Recursively scan parent directories for the PasswordsFile file and add
+// passwords to the auth checker from the top-most directory first
+func (s SecureHTTPDir) registerPasswords(auth *BasicAuthHandler, name string) int {
+	f, err := s.Dir.Open(name)
+	if err != nil {
+		if name != "/" {
+			// We might still be able to read some of the parent dirs
+			return s.registerPasswords(auth, path.Dir(name))
+		} else {
+			return 0 // At the root, nothing more to check
+		}
+	}
+	dirStat, err := f.Stat()
+	f.Close()
+	if err == nil && !dirStat.IsDir() { // the name cannot be "/" if it's not a dir.
+		// If it's not a dir, register passwords from the dir
+		return s.registerPasswords(auth, path.Dir(name))
+	}
+	// If we can't stat, just assume it was a dir and look for the .passwords
+	// file.  If it was a file, then trying to load a file under it won't work
+	// which is fine.
+
+	// Register parent directory passwords first, so subdirectories override
+	var parentRegistered int
+	if name != "/" {
+		parentRegistered = s.registerPasswords(auth, path.Dir(name))
+	}
+	// Finally check the password file
+	passwords, err := s.Dir.Open(path.Join(name, PasswordsFile))
+	if err != nil {
+		return parentRegistered
+	}
+	// We found a passwords file, register it!
+	registered := 0
+	scanner := bufio.NewScanner(passwords)
+	for scanner.Scan() {
+		auth.SetLogin(scanner.Text())
+		registered++
+	}
+	passwords.Close()
+	return registered + parentRegistered
+}
+
+// Clean the request to get a filepath
+func (s SecureHTTPDir) cleanRequest(request string) string {
+	if !strings.HasPrefix(request, "/") {
+		request = "/" + request
+	}
+	return path.Clean(request)
 }
 
 // Test if we can open the given file.
@@ -153,10 +254,8 @@ func (s SecureHTTPDir) TestOpen(path string) error {
 // You can safely ignore the error, it's just there in case you want to know why
 // we returned 0
 func (s SecureHTTPDir) FileSize(request string) (int64, error) {
-	if !strings.HasPrefix(request, "/") {
-		request = "/" + request
-	}
-	f, err := s.Open(path.Clean(request))
+	request = s.cleanRequest(request)
+	f, err := s.Open(request)
 	if err != nil {
 		return 0, err
 	}

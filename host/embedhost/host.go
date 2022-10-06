@@ -10,7 +10,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"path"
 	"path/filepath"
 	"strings"
 
@@ -20,9 +19,6 @@ import (
 	"ask.systems/daemon/portal/gate"
 	"ask.systems/daemon/tools"
 )
-
-// The filename to read username:password_hash logins per line from
-var PasswordsFile = ".passwords"
 
 func Run(flags *flag.FlagSet, args []string) {
 	webRoot := flags.String("web_root", "./",
@@ -60,6 +56,7 @@ func Run(flags *flag.FlagSet, args []string) {
 		Dir:                   http.Dir(*webRoot),
 		AllowDotfiles:         *serveDotfiles,
 		AllowDirectoryListing: *directoryListing,
+		BasicAuthRealm:        *passwordRealm,
 	}
 	fileServer := http.FileServer(dir)
 	var prefix string
@@ -73,7 +70,7 @@ func Run(flags *flag.FlagSet, args []string) {
 		func(w http.ResponseWriter, req *http.Request) {
 			fullPath := prefix + req.URL.String()
 			addr := req.Header.Get("Orig-Address")
-			if err := checkAuth(*passwordRealm, &dir, w, req); err != nil {
+			if err := dir.CheckPasswordsFiles(w, req); err != nil {
 				if *logRequests {
 					log.Print("%v %v at %v", addr, err, fullPath)
 				}
@@ -97,82 +94,11 @@ func Run(flags *flag.FlagSet, args []string) {
 	log.Print("Goodbye.")
 }
 
-func checkAuth(realm string, dir *tools.SecureHTTPDir, w http.ResponseWriter, r *http.Request) error {
-	// Never serve the PasswordsFile
-	if path.Base(r.URL.Path) == PasswordsFile {
-		http.NotFound(w, r)
-		return fmt.Errorf("requested a passwords file!")
-	}
-	auth := tools.BasicAuthHandler{
-		Realm: realm,
-	}
-	// Clean the request to get a filepath
-	request := r.URL.Path
-	if !strings.HasPrefix(request, "/") {
-		request = "/" + request
-	}
-	if registerPasswords(&auth, dir, path.Clean(request)) == 0 {
-		return nil // if there were no passwords, allow the request
-	}
-	passed := auth.Check(w, r)
-	if passed {
-		return nil
-	}
-	if username, _, ok := r.BasicAuth(); ok {
-		return fmt.Errorf("failed auth as %v", username)
-	} else {
-		return fmt.Errorf("requested protected directory. Got login page")
-	}
-}
-
-// Recursively scan parent directories for the PasswordsFile file and add
-// passwords to the auth checker from the top-most directory first
-func registerPasswords(auth *tools.BasicAuthHandler, dir *tools.SecureHTTPDir, name string) int {
-	f, err := dir.Dir.Open(name)
-	if err != nil {
-		if name != "/" {
-			// We might still be able to read some of the parent dirs
-			return registerPasswords(auth, dir, path.Dir(name))
-		} else {
-			return 0 // At the root, nothing more to check
-		}
-	}
-	dirStat, err := f.Stat()
-	f.Close()
-	if err == nil && !dirStat.IsDir() { // the name cannot be "/" if it's not a dir.
-		// If it's not a dir, register passwords from the dir
-		return registerPasswords(auth, dir, path.Dir(name))
-	}
-	// If we can't stat, just assume it was a dir and look for the .passwords
-	// file.  If it was a file, then trying to load a file under it won't work
-	// which is fine.
-
-	// Register parent directory passwords first, so subdirectories override
-	var parentRegistered int
-	if name != "/" {
-		parentRegistered = registerPasswords(auth, dir, path.Dir(name))
-	}
-	// Finally check the password file
-	passwords, err := dir.Dir.Open(path.Join(name, PasswordsFile))
-	if err != nil {
-		return parentRegistered
-	}
-	// We found a passwords file, register it!
-	registered := 0
-	scanner := bufio.NewScanner(passwords)
-	for scanner.Scan() {
-		auth.SetLogin(scanner.Text())
-		registered++
-	}
-	passwords.Close()
-	return registered + parentRegistered
-}
-
 // The -hash_pasword utility
 func hashPassword(string) error {
 	fmt.Fprintf(os.Stderr,
 		"After you hash your password, add a line to %v in the format username:password_hash.\n",
-		PasswordsFile)
+		tools.PasswordsFile)
 	fmt.Fprintf(os.Stderr, "Type your password, prints unmasked, then press enter: ")
 	password, err := bufio.NewReader(os.Stdin).ReadString('\n')
 	if err != nil {
