@@ -70,6 +70,7 @@ func CheckPassword(authHash, userPassword string) bool {
 //
 //   - Options must be setup before any requests and then not changed.
 //   - Methods may be called at any time, it's thread safe.
+//   - This type must not be copied after first use (it holds sync containers)
 type BasicAuthHandler struct {
 	// Realm is passed to the browser and the browser will automatically send the
 	// same credentials for a realm it has logged into before.
