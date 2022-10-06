@@ -201,31 +201,16 @@ func (s SecureHTTPDir) CheckPasswordsFiles(w http.ResponseWriter, r *http.Reques
 // Recursively scan parent directories for the PasswordsFile file and add
 // passwords to the auth checker from the top-most directory first
 func (s SecureHTTPDir) registerPasswords(auth *BasicAuthHandler, name string) int {
-	f, err := s.Dir.Open(name)
-	if err != nil {
-		if name != "/" {
-			// We might still be able to read some of the parent dirs
-			return s.registerPasswords(auth, path.Dir(name))
-		} else {
-			return 0 // At the root, nothing more to check
-		}
-	}
-	dirStat, err := f.Stat()
-	f.Close()
-	if err == nil && !dirStat.IsDir() { // the name cannot be "/" if it's not a dir.
-		// If it's not a dir, register passwords from the dir
-		return s.registerPasswords(auth, path.Dir(name))
-	}
-	// If we can't stat, just assume it was a dir and look for the .passwords
-	// file.  If it was a file, then trying to load a file under it won't work
-	// which is fine.
-
 	// Register parent directory passwords first, so subdirectories override
-	var parentRegistered int
+	parentRegistered := 0
 	if name != "/" {
 		parentRegistered = s.registerPasswords(auth, path.Dir(name))
 	}
-	// Finally check the password file
+	// Just assume name is a dir and look for the .passwords file. If it is a
+	// file, then trying to load a file under it won't work which is fine. Not
+	// checking if it is a dir saves us 2 syscalls per level!
+
+	// Check the password file
 	passwords, err := s.Dir.Open(path.Join(name, PasswordsFile))
 	if err != nil {
 		return parentRegistered
