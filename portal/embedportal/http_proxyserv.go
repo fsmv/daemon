@@ -66,7 +66,7 @@ func (p *httpProxy) Register(
 		}
 		if oldFwd.Lease.Pattern == request.Pattern {
 			log.Printf("Replacing existing lease with the same pattern: %#v", request.Pattern)
-			p.leasor.Unregister(oldFwd.Lease) // ignore not registered error
+			p.leasor.Unregister(oldFwd.Lease) // this calls also httpProxy.Unregister via callback
 		}
 	}
 	lease, err := p.leasor.Register(request)

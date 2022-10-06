@@ -89,7 +89,7 @@ func (l *portLeasor) Register(request *gate.RegisterRequest) (*gate.Lease, error
 		}
 		if oldLease, ok := l.leases[request.FixedPort]; ok {
 			// TODO: can we notify the old lease holder that we kicked them?
-			log.Printf("Replacing an existing lease for the same fixed port: %#v", oldLease.Pattern)
+			log.Printf("Replacing an existing lease for the same port: %#v", oldLease.Pattern)
 			l.deleteLeaseUnsafe(oldLease)
 		}
 		newLease.Port = request.FixedPort

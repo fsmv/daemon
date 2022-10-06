@@ -33,9 +33,14 @@ func startTCPProxy(l *portLeasor, tlsConfig *tls.Config, quit chan struct{}) *tc
 }
 
 func (p *tcpProxy) Unregister(lease *gate.Lease) {
-	canceler, _ := p.cancelers.Load(lease.Pattern)
+	p.unregisterPattern(lease.GetPattern())
+}
+
+func (p *tcpProxy) unregisterPattern(pattern string) {
+	canceler, _ := p.cancelers.Load(pattern)
 	if canceler != nil {
 		close(canceler.(chan struct{}))
+		p.cancelers.Delete(pattern)
 	}
 }
 
@@ -49,12 +54,13 @@ func (p *tcpProxy) Register(clientAddr string, request *gate.RegisterRequest) (*
 			return
 		}
 	}()
+	p.unregisterPattern(request.Pattern) // replace existing patterns
 	lease, err := p.leasor.Register(request)
 	if err != nil {
 		return nil, err
 	}
 	port := strings.TrimPrefix(request.Pattern, tcpProxyPrefix)
-	listener, err := tls.Listen("tcp", port, p.tlsConfig)
+	listener, err := tls.Listen("tcp", port, p.tlsConfig) // hopefully the old listener has closed by now
 	if err != nil {
 		return nil, fmt.Errorf("Failed to listen on the requested port for TCP Proxy (%v): %v", lease.Port, err)
 	}
