@@ -64,13 +64,10 @@ func (p *httpProxy) Register(
 			log.Print("Error registering: ", err)
 			return nil, err
 		}
-		if oldFwd.Lease.Pattern != request.Pattern {
-			err := fmt.Errorf("Another pattern %#v already covers your requested pattern %#v", oldFwd.Lease.Pattern, request.Pattern)
-			log.Print("Error registering: ", err)
-			return nil, err
+		if oldFwd.Lease.Pattern == request.Pattern {
+			log.Printf("Replacing existing lease with the same pattern: %#v", request.Pattern)
+			p.leasor.Unregister(oldFwd.Lease) // ignore not registered error
 		}
-		log.Printf("Replacing existing lease with the same pattern: %#v", request.Pattern)
-		p.leasor.Unregister(oldFwd.Lease) // ignore not registered error
 	}
 	lease, err := p.leasor.Register(request)
 	if err != nil {
@@ -219,7 +216,7 @@ func urlMatchesPattern(url, pattern string) bool {
 // Similar to http.ServeMux.match, see https://golang.org/LICENSE
 func (p *httpProxy) selectForwarder(host, path string) *forwarder {
 	var ret *forwarder = nil
-	var maxPatternLen = 0
+	var mostSpecificPattern string
 	p.forwarders.Range(func(key, value interface{}) bool {
 		pattern := key.(string)
 		patternHost, pattern := gate.ParsePattern(pattern)
@@ -243,9 +240,12 @@ func (p *httpProxy) selectForwarder(host, path string) *forwarder {
 		if !urlMatchesPattern(path, pattern) {
 			return true
 		}
-		// The pattern matches, find the longest one
-		if ret == nil || len(pattern) > maxPatternLen {
-			maxPatternLen = len(pattern)
+		// The pattern matches, find the most specific one
+		if ret == nil || // First one we've seen
+			pattern == strings.TrimSuffix(mostSpecificPattern, "/") || // the single file version of an existing directory pattern
+			len(pattern) > len(mostSpecificPattern) { // The longer pattern is just a subdir of the shorter pattern (now that the above case is handled)
+
+			mostSpecificPattern = pattern
 			ret = value.(*forwarder)
 		}
 		return true
