@@ -12,12 +12,13 @@ Common features:
     [CloseOnQuitSignals]
   - Generate random tokens or secret URL paths with [RandomString]
   - Authenticate users via HTTP basic auth with [BasicAuthHandler]
+  - [SecureHTTPDir] which is a way to use [http.FileServer] and not serve
+    directory listings, as well as password protect directories with .passwords
+    files. [ask.systems/daemon/host] uses this so it's only needed if you want a
+    file server as part a larger application.
 
 Less common features:
 
-  - [SecureHTTPDir] which is a way to use [http.FileServer] and not serve
-    directory listings. [ask.systems/daemon/host] uses this so it's only needed
-    if you want a file server as part a larger application.
   - Generate self signed certificates and be your own Certificate Authority.
     These certificate functions are used by [ask.systems/daemon/portal] and the
     [ask.systems/daemon/portal/gate] client library. You only need them if you
@@ -167,11 +168,10 @@ func (s SecureHTTPDir) CheckPasswordsHandler(h http.Handler) http.Handler {
 //	username1:password_hash1
 //	user2:password_hash2
 //
-// The passwords files are merged by loading the file from the closest-to-root
-// directory first then applying any other passwords files in subdirectories on
-// top. This means you can add additional users for futher subdirectories, or
-// revoke access to a subdirectory by entering a username:revoked line (revoked
-// will actually be interpreted as a sha256 hash which will never match).
+// The passwords file that is used is the first one found when searching first
+// the current directory, then the parent directory, and so on. This means that
+// adding a .passwords file somewhere in the directory tree always makes access
+// more restrictive.
 //
 // The easiest way to use this is [CheckPasswordsHandler], but you will need to
 // call this directly if you want to log errors for example.
@@ -199,20 +199,21 @@ func (s SecureHTTPDir) CheckPasswordsFiles(w http.ResponseWriter, r *http.Reques
 }
 
 // Recursively scan parent directories for the PasswordsFile file and add
-// passwords to the auth checker from the top-most directory first
+// passwords to the auth checker only from the first passwords file seen on the
+// way down
 func (s SecureHTTPDir) registerPasswords(auth *BasicAuthHandler, name string) int {
-	// Register parent directory passwords first, so subdirectories override
-	parentRegistered := 0
-	if name != "/" {
-		parentRegistered = s.registerPasswords(auth, path.Dir(name))
-	}
 	// Just assume name is a dir and look for the .passwords file. If it is a
 	// file, then trying to load a file under it won't work which is fine. Not
 	// checking if it is a dir saves us 2 syscalls per level!
 
-	// Check the password file
+	// Check for the password file
 	passwords, err := s.Dir.Open(path.Join(name, PasswordsFile))
 	if err != nil {
+		// No password file, check the parent dirs
+		parentRegistered := 0
+		if name != "/" {
+			parentRegistered = s.registerPasswords(auth, path.Dir(name))
+		}
 		return parentRegistered
 	}
 	// We found a passwords file, register it!
@@ -223,7 +224,7 @@ func (s SecureHTTPDir) registerPasswords(auth *BasicAuthHandler, name string) in
 		registered++
 	}
 	passwords.Close()
-	return registered + parentRegistered
+	return registered
 }
 
 // Clean the request to get a filepath
