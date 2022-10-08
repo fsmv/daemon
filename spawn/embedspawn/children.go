@@ -148,6 +148,7 @@ func (children *children) StartProgram(cmd *Command) error {
 				continue
 			}
 			binaryCopy, err = copyFile(os.Args[0], filepath.Join(workingDir, name), uid, gid)
+			break
 		}
 	}
 	// Don't leave a dangling binary copy
