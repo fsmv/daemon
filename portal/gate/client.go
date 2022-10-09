@@ -290,7 +290,7 @@ func (c Client) KeepLeaseRenewedTLS(quit <-chan struct{}, lease *Lease, newCert 
 		case <-timer.C:
 		}
 		var err error
-		lease, err = c.RPC.Renew(context.Background(), lease)
+		newLease, err := c.RPC.Renew(context.Background(), lease)
 		if err != nil {
 			/*if err == NotRegisteredError {
 			    // TODO: we would need to save the RegisterRequest options to do
@@ -302,8 +302,11 @@ func (c Client) KeepLeaseRenewedTLS(quit <-chan struct{}, lease *Lease, newCert 
 			    }
 			} else {*/
 			log.Printf("Error from renew: %v", err)
+			timer.Reset(2 * time.Minute)
+			continue
 			//}
 		}
+		lease = newLease
 		if newCert != nil {
 			newCert(lease.Certificate)
 		}
