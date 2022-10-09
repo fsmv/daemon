@@ -107,8 +107,11 @@ func startDashboard(children *children, quit chan struct{}) (dashboardQuit chan 
 	// crashes don't shut down the main process.
 	dashboardQuit = make(chan struct{})
 	go func() {
-		<-quit
-		close(dashboardQuit)
+		select {
+		case <-quit:
+			close(dashboardQuit)
+		case <-dashboardQuit: // If it gets closed, don't close it again
+		}
 	}()
 	lease, tlsConf, err := gate.StartTLSRegistration(&gate.RegisterRequest{
 		Pattern:   pattern,
