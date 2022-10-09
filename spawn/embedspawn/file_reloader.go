@@ -40,13 +40,13 @@ func (f fileRefresher) refreshOnSignal(quit chan struct{}) {
 			for _, refresh := range f {
 				dataFile, err := os.Open(refresh.fileName)
 				if err != nil {
-					log.Print("Failed opening file for refresh %#v. You can send another SIGUSR1 to this binary to retry. Error message: %w", refresh.fileName, err)
+					log.Printf("Failed opening file for refresh %#v. You can send another SIGUSR1 to this binary to retry. Error message: %w", refresh.fileName, err)
 					dataFile.Close()
 					errCount++
 					continue
 				}
 				if n, err := io.Copy(refresh.writePipe, dataFile); err != nil {
-					log.Print("Failed to refresh file on write to the OS pipe for %#v (wrote %v bytes): %w",
+					log.Printf("Failed to refresh file on write to the OS pipe for %#v (wrote %v bytes): %w",
 						refresh.fileName, n, err)
 					errCount++
 				}
