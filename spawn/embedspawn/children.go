@@ -218,26 +218,34 @@ func (children *children) StartProgram(cmd *Command) error {
 	// For chroots copy timezone info into the home dir and give the user access
 	if !cmd.NoChroot {
 		// TODO: There should be some kind of config for which files we copy in
-		// Also maybe we should use symbolic or hard links
+		// Also maybe we should use symbolic or hard links.
+		// I need to standardize the time it stays there too somehow. Maybe it can
+		// stay forever with hard links? Not sure what the best thing is.
+		// We probably at least need /etc/resolv.conf as well.
 		err := os.Mkdir(filepath.Join(workingDir, "/etc/"), 0777)
 		if err != nil {
-			log.Printf("Failed to mkdir for /etc/localtime: %v", err)
-		} else {
-			timezoneFile, err := copyFile("/etc/localtime",
-				filepath.Join(workingDir, "/etc/localtime"), uid, gid)
-			// Don't leave a dangling file
-			go func() {
-				time.Sleep(30 * time.Second) // Give the binary time to load it
-				if timezoneFile != "" {
-					_ = os.Remove(timezoneFile)               // remove the file
-					_ = os.Remove(filepath.Dir(timezoneFile)) // remove the etc folder
-				}
-			}()
-			if err != nil {
-				// Not worth returning over this, it will just be UTC log times
-				log.Printf("Failed to copy /etc/localtime into the chroot dir: %v", err)
-			}
+			log.Printf("Warning: failed to mkdir for /etc/localtime: %v", err)
 		}
+		timezoneFile, err := copyFile("/etc/localtime",
+			filepath.Join(workingDir, "/etc/localtime"), uid, gid)
+		if err != nil {
+			// Not worth returning over this, it will just be UTC log times
+			log.Printf("Warning: failed to copy /etc/localtime into the chroot dir: %v", err)
+		}
+		// Don't leave a dangling file
+		go func() {
+			time.Sleep(30 * time.Second) // Give the binary time to load it
+			if timezoneFile != "" {
+				err = os.Remove(timezoneFile) // remove the file
+				if err != nil {
+					log.Printf("Warning: failed to remove /etc/localtime file in chroot: %v", err)
+				}
+				err = os.Remove(filepath.Dir(timezoneFile)) // remove the etc folder
+				if err != nil {
+					log.Printf("Warning: failed to remove /etc/ dir in chroot: %v", err)
+				}
+			}
+		}()
 	}
 
 	// Start the process
