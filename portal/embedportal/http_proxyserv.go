@@ -39,7 +39,6 @@ type httpProxy struct {
 	rootCert    *tls.Config
 	state       *stateManager
 	defaultHost string
-	adminAuth   *tools.BasicAuthHandler
 }
 
 // forwarder holds the data for a forwarding rule registered with httpProxy
@@ -76,7 +75,7 @@ func (p *httpProxy) Register(
 	}
 
 	useTLS := len(request.CertificateRequest) != 0
-	err = p.saveForwarder(clientAddr, lease, request.StripPattern, useTLS, request.AdminOnly)
+	err = p.saveForwarder(clientAddr, lease, request.StripPattern, useTLS)
 	if err != nil {
 		return nil, err
 	}
@@ -92,7 +91,7 @@ func (p *httpProxy) Register(
 // http request paths. This is needed for third party applications that expect
 // to get requests for / not /pattern/
 func (p *httpProxy) saveForwarder(clientAddr string, lease *gate.Lease,
-	stripPattern, useTLS, adminOnly bool) error {
+	stripPattern, useTLS bool) error {
 
 	var protocol string
 	if useTLS {
@@ -172,9 +171,8 @@ func (p *httpProxy) saveForwarder(clientAddr string, lease *gate.Lease,
 		},
 	}
 	fwd := &forwarder{
-		Handler:   proxy,
-		Lease:     lease,
-		AdminOnly: adminOnly,
+		Handler: proxy,
+		Lease:   lease,
 	}
 	p.forwarders.Store(pattern, fwd)
 	return nil
@@ -272,15 +270,6 @@ func (p *httpProxy) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	if fwd.AdminOnly {
-		if !p.adminAuth.Check(w, req) {
-			if user, _, ok := req.BasicAuth(); ok {
-				log.Printf("%v failed authentication for %v on %v%v", req.RemoteAddr, user, req.Host, req.URL.Path)
-			}
-			return
-		}
-	}
-
 	// handle the request with the selected forwarder
 	fwd.Handler.ServeHTTP(w, req)
 }
@@ -320,14 +309,13 @@ func makeChallengeHandler(webRoot string) (http.Handler, error) {
 
 func startHTTPProxy(l *portLeasor, tlsConfig *tls.Config,
 	httpList, httpsList net.Listener, defaultHost, certChallengeWebRoot string,
-	adminAuth *tools.BasicAuthHandler, state *stateManager,
+	state *stateManager,
 	rootCert *tls.Config, quit chan struct{}) (*httpProxy, error) {
 	ret := &httpProxy{
 		leasor:      l,
 		rootCert:    rootCert,
 		state:       state,
 		defaultHost: defaultHost,
-		adminAuth:   adminAuth,
 	}
 	l.OnCancel(ret.Unregister)
 

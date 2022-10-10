@@ -49,6 +49,9 @@ func Run(flags *flag.FlagSet, args []string) {
 		"The url to serve the dashboard for this spawn instance. If you have\n"+
 		"multiple servers running spawn, they need different URLs.\n"+
 		"Slashes are required.")
+	adminLogins := flags.String("dashboard_logins", "", ""+
+		"A comma separated list of username:password_hash for admins that can access\n"+
+		"the dashboard.")
 	flags.Var(
 		tools.BoolFuncFlag(func(string) error {
 			fmt.Print(configSchema)
@@ -59,6 +62,14 @@ func Run(flags *flag.FlagSet, args []string) {
 		"Print the config schema in proto format, for reference, and exit.",
 	)
 	flags.Parse(args[1:])
+
+	adminAuth := &tools.BasicAuthHandler{Realm: "daemon"}
+	logins := strings.Split(*adminLogins, ",")
+	for i, login := range logins {
+		if err := adminAuth.SetLogin(login); err != nil {
+			log.Printf("Failed to authorize login %v: %v", i, err)
+		}
+	}
 
 	commands, err := ReadConfig(*configFilename)
 	if err != nil {
@@ -94,7 +105,7 @@ func Run(flags *flag.FlagSet, args []string) {
 	if errcnt := children.StartPrograms(commands); errcnt != 0 {
 		log.Printf("%v errors occurred in spawning", errcnt)
 	}
-	if _, err := startDashboard(children, quit); err != nil {
+	if _, err := startDashboard(children, adminAuth, quit); err != nil {
 		log.Print("Failed to start dashboard: ", err)
 		// TODO: retry it? Also check the dashboardQuit signal for retries
 	}

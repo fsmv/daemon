@@ -65,9 +65,17 @@ type dashboard struct {
 	Children *children
 
 	templates *template.Template
+	adminAuth *tools.BasicAuthHandler
 }
 
 func (d *dashboard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if !d.adminAuth.Check(w, r) {
+		if user, _, ok := r.BasicAuth(); ok {
+			log.Printf("%v failed authentication for %v on %v%v", r.RemoteAddr, user, r.Host, r.URL.Path)
+		}
+		return
+	}
+
 	if r.Method == "POST" {
 		err := r.ParseForm()
 		if err != nil {
@@ -98,7 +106,7 @@ func (d *dashboard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func startDashboard(children *children, quit chan struct{}) (dashboardQuit chan struct{}, err error) {
+func startDashboard(children *children, adminAuth *tools.BasicAuthHandler, quit chan struct{}) (dashboardQuit chan struct{}, err error) {
 	pattern := *dashboardUrlFlag
 	_, dashboardUrl = gate.ParsePattern(pattern)
 	logsUrl = dashboardUrl + "logs"
@@ -114,8 +122,7 @@ func startDashboard(children *children, quit chan struct{}) (dashboardQuit chan 
 		}
 	}()
 	lease, tlsConf, err := gate.StartTLSRegistration(&gate.RegisterRequest{
-		Pattern:   pattern,
-		AdminOnly: true,
+		Pattern: pattern,
 	}, dashboardQuit)
 	if err != nil {
 		close(dashboardQuit)
@@ -127,7 +134,7 @@ func startDashboard(children *children, quit chan struct{}) (dashboardQuit chan 
 		close(dashboardQuit)
 		return dashboardQuit, err
 	}
-	http.Handle(dashboardUrl, &dashboard{children, templates})
+	http.Handle(dashboardUrl, &dashboard{children, templates, adminAuth})
 	http.Handle(logsUrl, &logStream{children})
 
 	go tools.RunHTTPServerTLS(lease.Port, tlsConf, dashboardQuit)
