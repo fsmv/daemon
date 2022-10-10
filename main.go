@@ -98,8 +98,7 @@ Example spawn config.pbtxt for running portal only: (change my domain to yours)
 		auto_tls_certs: true
 		args: [
 			"-auto_tls_certs",
-			"-cert_challenge_webroot=/cert-challenge/",
-			"-admin_logins=admin:YOUR_PASSWORD_HASH_HERE"
+			"-cert_challenge_webroot=/cert-challenge/"
 		]
 	}
 
@@ -109,10 +108,6 @@ use the OS to securely pass these resources to portal (which portal knows how to
 detect). Also as a security measure by default spawn runs all servers in a
 chroot so they cannot access files outside of the user's home directory (or the
 working_dir set in the config) in the event it did get hacked.
-
-You need to set at least one user in -admin_logins to access the spawn dashboard
-page to restart your servers and see logs. You can generate the password hash
-with the example under [ask.systems/daemon/tools.BasicAuthHandler].
 
 The rest of the config options are for automatically renewing the Let's Encrypt
 TLS certificate. If you don't want to bother you can just restart the portal
@@ -160,11 +155,15 @@ running spawn at boot. I think the easiest way is using cron again with
 
 To use cron to run spawn run sudo crontab -e again and add:
 
-	@reboot /root/daemon -portal_token $TOKEN spawn >/dev/null >2>&1 &
+	@reboot /root/daemon -portal_token $TOKEN spawn -dashboard_logins=admin:YOUR_PASSWORD_HASH_HERE >/dev/null >2>&1 &
 
 Spawn will pass the portal token, and address if you set it, to child binaries
 via the PORTAL_TOKEN and PORTAL_ADDR environment variables. The syntax after the
 command is shell script to ignore spawn's output and run it in the background.
+
+You need to set at least one user in -dashboard_logins to access the dashboard
+page to restart your servers and see logs. You can generate the password hash
+with the example under [ask.systems/daemon/tools.BasicAuthHandler].
 
 Optionally I recommend using syslog, which is a service that collects, combines
 and compresses logs which most unix operating systems have by default. With go
