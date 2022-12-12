@@ -35,11 +35,19 @@ message RegisterRequest {
 	// use an random lease port.
 	// Must be outside the range of portal's automatic ports.
 	uint32 fixed_port = 2;
+
 	// If true, remove the pattern in the URL of HTTP requests we forward to the
 	// backend to hide that it is behind a reverse proxy.
 	//
 	// Ignored for TCP proxies.
 	bool strip_pattern = 3;
+	// If true, do not redirect HTTP requests to HTTPS. This means the data will
+	// be sent in plain-text readable to anyone if the client requests it. Some
+	// legacy systems require plain HTTP requests. Leave this off by default for
+	// security, that way responses will only be readable by the client.
+	//
+	// Ignored for TCP proxies.
+	bool allow_http = 5;
 
 	// If set, the server will sign the certificate request with portal's
 	// certificate as the root and accept connections to the signed cert. This way

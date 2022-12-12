@@ -46,6 +46,7 @@ type forwarder struct {
 	Handler   http.Handler
 	Lease     *gate.Lease
 	AdminOnly bool
+	AllowHTTP bool
 }
 
 func (p *httpProxy) Unregister(lease *gate.Lease) {
@@ -75,7 +76,7 @@ func (p *httpProxy) Register(
 	}
 
 	useTLS := len(request.CertificateRequest) != 0
-	err = p.saveForwarder(clientAddr, lease, request.StripPattern, useTLS)
+	err = p.saveForwarder(clientAddr, lease, request.StripPattern, request.AllowHttp, useTLS)
 	if err != nil {
 		return nil, err
 	}
@@ -91,7 +92,7 @@ func (p *httpProxy) Register(
 // http request paths. This is needed for third party applications that expect
 // to get requests for / not /pattern/
 func (p *httpProxy) saveForwarder(clientAddr string, lease *gate.Lease,
-	stripPattern, useTLS bool) error {
+	stripPattern, allowHTTP, useTLS bool) error {
 
 	var protocol string
 	if useTLS {
@@ -171,8 +172,9 @@ func (p *httpProxy) saveForwarder(clientAddr string, lease *gate.Lease,
 		},
 	}
 	fwd := &forwarder{
-		Handler: proxy,
-		Lease:   lease,
+		Handler:   proxy,
+		Lease:     lease,
+		AllowHTTP: allowHTTP,
 	}
 	p.forwarders.Store(pattern, fwd)
 	return nil
@@ -260,6 +262,10 @@ func (p *httpProxy) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		http.NotFound(w, req)
 		return
 	}
+	if req.TLS == nil && !fwd.AllowHTTP {
+		tools.RedirectToHTTPS{}.ServeHTTP(w, req)
+		return
+	}
 
 	// If the pattern ends in /, redirect so the url ends in / so relative paths
 	// in the html work right
@@ -299,8 +305,7 @@ func makeChallengeHandler(webRoot string) (http.Handler, error) {
 	if err := dir.TestOpen("/"); err != nil {
 		return nil, err
 	}
-	_, pattern := gate.ParsePattern(certChallengePattern)
-	fileServer := http.StripPrefix(pattern, http.FileServer(dir))
+	fileServer := http.FileServer(dir)
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		log.Printf("%v requested %v", req.RemoteAddr, req.URL)
 		fileServer.ServeHTTP(w, req)
@@ -330,6 +335,7 @@ func startHTTPProxy(l *portLeasor, tlsConfig *tls.Config,
 				Lease: &gate.Lease{
 					Pattern: certChallengePattern,
 				},
+				AllowHTTP: true,
 			})
 			log.Print("Started serving cert challenge path.")
 		}
@@ -345,7 +351,7 @@ func startHTTPProxy(l *portLeasor, tlsConfig *tls.Config,
 	go runServer(quit, "TLS", tlsServer, tls.NewListener(httpsList, tlsConfig))
 	// Start the HTTP server to redirect to HTTPS
 	httpServer := &http.Server{
-		Handler: tools.RedirectToHTTPS{},
+		Handler: ret,
 	}
 	go runServer(quit, "HTTP redirect", httpServer, httpList)
 	// Close the servers on quit signal
