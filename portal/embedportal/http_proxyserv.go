@@ -58,6 +58,12 @@ func (p *httpProxy) Unregister(lease *gate.Lease) {
 func (p *httpProxy) Register(
 	clientAddr string, request *gate.RegisterRequest) (*gate.Lease, error) {
 
+	if request.Pattern == "" {
+		err := fmt.Errorf("Registration pattern must not be empty.")
+		log.Print("Error registering: ", err)
+		return nil, err
+	}
+
 	if oldFwd := p.selectForwarder(gate.ParsePattern(request.Pattern)); oldFwd != nil {
 		if oldFwd.Lease.Pattern == certChallengePattern {
 			err := fmt.Errorf("Clients cannot register the cert challenge path %#v which covers your requested pattern %#v", certChallengePattern, request.Pattern)
@@ -142,7 +148,7 @@ func (p *httpProxy) saveForwarder(clientAddr string, lease *gate.Lease,
 			req.URL.Host = backend.Host
 			// Can't use path.Join(., .) because it calls path.Clean which
 			// causes a redirect loop if the pattern has a trailing / because
-			// this will remove it and the DefaultServMux will redirect no
+			// this will remove it and the DefaultServeMux will redirect no
 			// trailing slash to trailing slash.
 			if req.URL.Path[0] != '/' {
 				req.URL.Path = "/" + req.URL.Path
@@ -182,7 +188,7 @@ func (p *httpProxy) saveForwarder(clientAddr string, lease *gate.Lease,
 
 // urlMatchesPattern returns whether or not the url matches the pattern string.
 func urlMatchesPattern(url, pattern string) bool {
-	if len(pattern) == 0 {
+	if len(pattern) == 0 || len(url) == 0 {
 		return false
 	}
 	// Take the slash out of url if it has one
@@ -256,6 +262,15 @@ func (p *httpProxy) selectForwarder(host, path string) *forwarder {
 // ServeHTTP is the HTTPProxy net/http handler func which selects a registered
 // forwarder to handle the request based on the forwarder's pattern
 func (p *httpProxy) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	if req.URL.Path == "" {
+		// TODO: What are these requests looking for? Should we redirect to '/'?
+		// I don't understand how these are getting through because the go http
+		// server seems to return errors for empty URIs so there has to be something
+		// in there. The parsing code is too complex to guess what it could be.
+		http.Error(w, "Empty path requested.", http.StatusBadRequest)
+		log.Printf("%v requested an empty req.URL.Path. Raw URI: %v", req.RemoteAddr, req.RequestURI)
+		return
+	}
 	fwd := p.selectForwarder(req.Host, req.URL.Path)
 	if fwd == nil {
 		log.Printf("%v requested unregistered path: %v%v", req.RemoteAddr, req.Host, req.URL.Path)
