@@ -22,17 +22,80 @@ var (
 	InvalidLeaseErr   = errors.New("The requested lease does not match the lease we have on record for this port.")
 )
 
+type onCancelFunc func(*gate.Lease)
+
+type clientLeasor struct {
+	leasors    *sync.Map
+	nextLeasor *portLeasor
+
+	ttl       time.Duration
+	startPort uint16
+	endPort   uint16
+	quit      chan struct{}
+
+	onCancel    []onCancelFunc
+	onCancelMut *sync.Mutex
+}
+
+func makeClientLeasor(startPort, endPort uint16, ttl time.Duration, quit chan struct{}) *clientLeasor {
+	return &clientLeasor{
+		nextLeasor:  &portLeasor{},
+		leasors:     &sync.Map{},
+		onCancelMut: &sync.Mutex{},
+
+		ttl:       ttl,
+		startPort: startPort,
+		endPort:   endPort,
+		quit:      quit,
+	}
+}
+
+func (c *clientLeasor) PortLeasorForClient(clientAddr string) *portLeasor {
+	leasor, loaded := c.leasors.LoadOrStore(clientAddr, c.nextLeasor)
+	if !loaded {
+		// Because we have to call LoadOrStore on the leasors map, we need to have a
+		// pointer to space on the heap every time we lookup a client so that we can
+		// start a new leasor if one doesn't exist.
+		//
+		// So, save and re-use the heap space here when we find a client we already
+		// have a leasor for.
+		c.nextLeasor.Start(c.startPort, c.endPort, c.ttl, c.quit, c.copyOnCancel())
+		c.nextLeasor = &portLeasor{}
+	}
+	return leasor.(*portLeasor)
+}
+
+func (c *clientLeasor) copyOnCancel() []onCancelFunc {
+	c.onCancelMut.Lock()
+	defer c.onCancelMut.Unlock()
+	ret := make([]onCancelFunc, len(c.onCancel))
+	copy(ret, c.onCancel)
+	return ret
+}
+
+func (c *clientLeasor) OnCancel(cancelFunc func(*gate.Lease)) {
+	c.onCancelMut.Lock()
+	defer c.onCancelMut.Unlock()
+	c.onCancel = append(c.onCancel, cancelFunc)
+	// Since we still have the mutex lock, this covers all existing leasors. New
+	// leasors can't be created until the mutex is released and they'll get the
+	// new list.
+	c.leasors.Range(func(key, value interface{}) bool {
+		l := value.(*portLeasor)
+		l.OnCancel(cancelFunc)
+		return true
+	})
+}
+
 // Manages a list of leases for ports client servers should listen on.
 // Also handles expiration of the leases.
 //
 // The main purpose is for not having port conflicts when you're running several
-// server binaries on the same machine. Technically we could have a separate
-// port list for each machine connecting to portal but there should be enough
-// ports to just have one list.
+// server binaries on the same machine.
 type portLeasor struct {
 	mut      *sync.Mutex            // Everything in this struct needs the lock
 	leases   map[uint32]*gate.Lease // maps the port to the lease
-	onCancel []func(*gate.Lease)    // All are called when a lease times out
+	onCancel []onCancelFunc         // All are called when a lease times out
 
 	// List of automatic ports to be leased out, in a random order.
 	// Always has values between 0 and n, see unusedPortOffset.
@@ -44,22 +107,22 @@ type portLeasor struct {
 	endPort          uint16
 }
 
-func startPortLeasor(startPort, endPort uint16, ttl time.Duration, quit chan struct{}) *portLeasor {
+func (l *portLeasor) Start(startPort, endPort uint16, ttl time.Duration, quit chan struct{}, onCancel []onCancelFunc) {
 	if endPort < startPort {
 		startPort, endPort = endPort, startPort
 	}
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
-	l := &portLeasor{
+	*l = portLeasor{
 		mut:              &sync.Mutex{},
 		startPort:        startPort,
 		endPort:          endPort,
 		ttl:              ttl,
+		onCancel:         onCancel,
 		leases:           make(map[uint32]*gate.Lease),
 		unusedPortOffset: startPort,
 		unusedPorts:      r.Perm(int(endPort - startPort)),
 	}
 	go l.monitorTTLs(quit)
-	return l
 }
 
 func (l *portLeasor) OnCancel(cancelFunc func(*gate.Lease)) {

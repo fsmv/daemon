@@ -33,7 +33,7 @@ const certChallengePattern = "*/.well-known/acme-challenge/"
 // period called the time to live (TTL). After the TTL has expired, the
 // forwarding rule will be automatically unregistered.
 type httpProxy struct {
-	leasor *portLeasor
+	clientLeasor *clientLeasor
 	// Map from pattern to *forwarder, which must not be modified
 	forwarders  sync.Map
 	rootCert    *tls.Config
@@ -64,6 +64,7 @@ func (p *httpProxy) Register(
 		return nil, err
 	}
 
+	leasor := p.clientLeasor.PortLeasorForClient(clientAddr)
 	if oldFwd := p.selectForwarder(gate.ParsePattern(request.Pattern)); oldFwd != nil {
 		if oldFwd.Lease.Pattern == certChallengePattern {
 			err := fmt.Errorf("Clients cannot register the cert challenge path %#v which covers your requested pattern %#v", certChallengePattern, request.Pattern)
@@ -72,10 +73,10 @@ func (p *httpProxy) Register(
 		}
 		if oldFwd.Lease.Pattern == request.Pattern {
 			log.Printf("Replacing existing lease with the same pattern: %#v", request.Pattern)
-			p.leasor.Unregister(oldFwd.Lease) // this calls also httpProxy.Unregister via callback
+			leasor.Unregister(oldFwd.Lease) // this calls also httpProxy.Unregister via callback
 		}
 	}
-	lease, err := p.leasor.Register(request)
+	lease, err := leasor.Register(request)
 	if err != nil {
 		log.Print("Error registering: ", err)
 		return nil, err
@@ -327,15 +328,14 @@ func makeChallengeHandler(webRoot string) (http.Handler, error) {
 	}), nil
 }
 
-func startHTTPProxy(l *portLeasor, tlsConfig *tls.Config,
+func startHTTPProxy(l *clientLeasor, serveCert, rootCert *tls.Config,
 	httpList, httpsList net.Listener, defaultHost, certChallengeWebRoot string,
-	state *stateManager,
-	rootCert *tls.Config, quit chan struct{}) (*httpProxy, error) {
+	state *stateManager, quit chan struct{}) (*httpProxy, error) {
 	ret := &httpProxy{
-		leasor:      l,
-		rootCert:    rootCert,
-		state:       state,
-		defaultHost: defaultHost,
+		clientLeasor: l,
+		rootCert:     rootCert,
+		state:        state,
+		defaultHost:  defaultHost,
 	}
 	l.OnCancel(ret.Unregister)
 
@@ -362,8 +362,8 @@ func startHTTPProxy(l *portLeasor, tlsConfig *tls.Config,
 	}
 	// Support HTTP/2. See https://pkg.go.dev/net/http#Serve
 	// > HTTP/2 support is only enabled if ... configured with "h2" in the TLS Config.NextProtos.
-	tlsConfig.NextProtos = append(tlsConfig.NextProtos, "h2")
-	go runServer(quit, "TLS", tlsServer, tls.NewListener(httpsList, tlsConfig))
+	serveCert.NextProtos = append(serveCert.NextProtos, "h2")
+	go runServer(quit, "TLS", tlsServer, tls.NewListener(httpsList, serveCert))
 	// Start the HTTP server to redirect to HTTPS
 	httpServer := &http.Server{
 		Handler: ret,

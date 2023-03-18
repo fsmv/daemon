@@ -16,17 +16,17 @@ import (
 const tcpProxyPrefix = ":tcp"
 
 type tcpProxy struct {
-	leasor    *portLeasor
-	tlsConfig *tls.Config
-	quit      chan struct{}
-	cancelers sync.Map
+	clientLeasor *clientLeasor
+	tlsConfig    *tls.Config
+	quit         chan struct{}
+	cancelers    sync.Map
 }
 
-func startTCPProxy(l *portLeasor, tlsConfig *tls.Config, quit chan struct{}) *tcpProxy {
+func startTCPProxy(l *clientLeasor, tlsConfig *tls.Config, quit chan struct{}) *tcpProxy {
 	p := &tcpProxy{
-		leasor:    l,
-		tlsConfig: tlsConfig,
-		quit:      quit,
+		clientLeasor: l,
+		tlsConfig:    tlsConfig,
+		quit:         quit,
 	}
 	l.OnCancel(p.Unregister)
 	return p
@@ -55,7 +55,8 @@ func (p *tcpProxy) Register(clientAddr string, request *gate.RegisterRequest) (*
 		}
 	}()
 	p.unregisterPattern(request.Pattern) // replace existing patterns
-	lease, err := p.leasor.Register(request)
+	leasor := p.clientLeasor.PortLeasorForClient(clientAddr)
+	lease, err := leasor.Register(request)
 	if err != nil {
 		return nil, err
 	}

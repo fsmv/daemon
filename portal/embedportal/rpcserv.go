@@ -26,12 +26,12 @@ import (
 type rcpServ struct {
 	gate.PortalServer
 
-	leasor    *portLeasor
-	tcpProxy  *tcpProxy
-	httpProxy *httpProxy
-	rootCert  *tls.Config
-	state     *stateManager
-	quit      chan struct{}
+	clientLeasor *clientLeasor
+	tcpProxy     *tcpProxy
+	httpProxy    *httpProxy
+	rootCert     *tls.Config
+	state        *stateManager
+	quit         chan struct{}
 }
 
 func hostname(address string) string {
@@ -81,8 +81,8 @@ func (s *rcpServ) loadState(saveData []byte) {
 
 func (s *rcpServ) MyHostname(ctx context.Context, empty *emptypb.Empty) (*gate.Hostname, error) {
 	p, _ := peer.FromContext(ctx)
-	client := hostname(p.Addr.String())
-	return &gate.Hostname{Hostname: client}, nil
+	clientAddr := hostname(p.Addr.String())
+	return &gate.Hostname{Hostname: clientAddr}, nil
 }
 
 // Register registers a new forwarding rule to the rpc client's ip address.
@@ -90,9 +90,9 @@ func (s *rcpServ) MyHostname(ctx context.Context, empty *emptypb.Empty) (*gate.H
 func (s *rcpServ) Register(ctx context.Context, request *gate.RegisterRequest) (*gate.Lease, error) {
 	// Get the RPC client's address (without the port) from gRPC
 	p, _ := peer.FromContext(ctx)
-	client := hostname(p.Addr.String())
+	clientAddr := hostname(p.Addr.String())
 
-	lease, err := s.internalRegister(client, request)
+	lease, err := s.internalRegister(clientAddr, request)
 	if err != nil {
 		return nil, err
 	}
@@ -132,7 +132,10 @@ func (s *rcpServ) internalRegister(client string, request *gate.RegisterRequest)
 
 // Unregister unregisters the forwarding rule with the given pattern
 func (s *rcpServ) Unregister(ctx context.Context, lease *gate.Lease) (*gate.Lease, error) {
-	err := s.leasor.Unregister(lease)
+	p, _ := peer.FromContext(ctx)
+	clientAddr := hostname(p.Addr.String())
+	leasor := s.clientLeasor.PortLeasorForClient(clientAddr)
+	err := leasor.Unregister(lease)
 	if err != nil {
 		log.Print(err)
 		return lease, err
@@ -145,7 +148,10 @@ func (s *rcpServ) Unregister(ctx context.Context, lease *gate.Lease) (*gate.Leas
 
 // Renew renews the lease on a currently registered pattern
 func (s *rcpServ) Renew(ctx context.Context, lease *gate.Lease) (*gate.Lease, error) {
-	newLease, err := s.leasor.Renew(lease)
+	p, _ := peer.FromContext(ctx)
+	clientAddr := hostname(p.Addr.String())
+	leasor := s.clientLeasor.PortLeasorForClient(clientAddr)
+	newLease, err := leasor.Renew(lease)
 	if err != nil {
 		log.Print(err)
 		return nil, err
@@ -174,21 +180,21 @@ func (s *rcpServ) Renew(ctx context.Context, lease *gate.Lease) (*gate.Lease, er
 }
 
 // StartNew creates a new RPCServ and starts it
-func startRPCServer(leasor *portLeasor,
+func startRPCServer(clientLeasor *clientLeasor,
 	tcpProxy *tcpProxy, httpProxy *httpProxy,
 	port uint16, rootCert *tls.Config,
 	saveData []byte, state *stateManager,
 	quit chan struct{}) (*rcpServ, error) {
 
 	s := &rcpServ{
-		leasor:    leasor,
-		state:     state,
-		tcpProxy:  tcpProxy,
-		httpProxy: httpProxy,
-		quit:      quit,
-		rootCert:  rootCert,
+		clientLeasor: clientLeasor,
+		state:        state,
+		tcpProxy:     tcpProxy,
+		httpProxy:    httpProxy,
+		quit:         quit,
+		rootCert:     rootCert,
 	}
-	leasor.OnCancel(s.state.Unregister)
+	clientLeasor.OnCancel(s.state.Unregister)
 	s.loadState(saveData)
 	server := grpc.NewServer(
 		// TODO: Have a flag like -internet_accessable_rpc which makes the RPC

@@ -67,7 +67,7 @@ func Run(flags *flag.FlagSet, args []string) {
 	quit := make(chan struct{})
 	tools.CloseOnQuitSignals(quit)
 
-	tlsConfig, err := loadTLSConfig(
+	serveCert, err := loadTLSConfig(
 		strings.Split(*tlsCertSpec, ","),
 		strings.Split(*tlsKeySpec, ","),
 		*autoTLSCerts, quit)
@@ -99,12 +99,12 @@ func Run(flags *flag.FlagSet, args []string) {
 		log.Fatalf("Failed to create a self signed certificate for the RPC server: %v", err)
 	}
 
-	l := startPortLeasor(portRangeStart, portRangeEnd, leaseTTL, quit)
-	tcpProxy := startTCPProxy(l, tlsConfig, quit)
-	httpProxy, err := startHTTPProxy(l, tlsConfig,
+	l := makeClientLeasor(portRangeStart, portRangeEnd, leaseTTL, quit)
+	tcpProxy := startTCPProxy(l, serveCert, quit)
+	httpProxy, err := startHTTPProxy(l, serveCert, rootCert,
 		httpListener, httpsListener,
 		*defaultHost, *certChallengeWebRoot,
-		state, rootCert, quit)
+		state, quit)
 	log.Print("Started HTTP proxy server")
 	if err != nil {
 		log.Fatalf("Failed to start HTTP proxy server: %v", err)
