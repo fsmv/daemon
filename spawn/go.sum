@@ -1,3 +1,7 @@
+ask.systems/daemon/portal v0.0.0-20220928043340-2c4f88f98efc h1:cnmOd2LYts3/BjtzAQE2WPhyK1UpcJIly/YHyaxaK3c=
+ask.systems/daemon/portal v0.0.0-20220928043340-2c4f88f98efc/go.mod h1:ApAFlM/j/WHoeeN99wpE/lWVapbQJGFNUVhsHv+M5ac=
+ask.systems/daemon/tools v0.0.0-20220928043340-2c4f88f98efc h1:3kU2YXCf3TMJxZhGFltKMXn3YXK1L+hN47LEITPHXgU=
+ask.systems/daemon/tools v0.0.0-20220928043340-2c4f88f98efc/go.mod h1:RnfKKUSeRsu4hrYBECwyH8Rxw1s8HILbc5GICoVoILo=
 cloud.google.com/go v0.26.0/go.mod h1:aQUYkXzVsufM+DwF1aE+0xfcU+56JwCaLick0ClmMTw=
 cloud.google.com/go v0.34.0/go.mod h1:aQUYkXzVsufM+DwF1aE+0xfcU+56JwCaLick0ClmMTw=
 github.com/BurntSushi/toml v0.3.1/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03qcyfWMU=

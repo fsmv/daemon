@@ -1,14 +1,14 @@
+// Deprecated: use ask.systems/daemon instead.
 module ask.systems/daemon/spawn
 
 go 1.17
 
-replace ask.systems/daemon/tools => ../tools
-
-replace ask.systems/daemon/portal => ../portal
+retract [v0.0.0-0, v0.0.1]
 
 require (
-	ask.systems/daemon/portal v0.0.0-00010101000000-000000000000
-	ask.systems/daemon/tools v0.0.0-00010101000000-000000000000
+	ask.systems/daemon/portal v0.0.0-20220928043340-2c4f88f98efc
+	ask.systems/daemon/tools v0.0.0-20220928043340-2c4f88f98efc
+	google.golang.org/protobuf v1.27.1
 )
 
 require (
@@ -18,5 +18,4 @@ require (
 	golang.org/x/text v0.3.0 // indirect
 	google.golang.org/genproto v0.0.0-20200526211855-cb27e3aa2013 // indirect
 	google.golang.org/grpc v1.40.0 // indirect
-	google.golang.org/protobuf v1.27.1 // indirect
 )
