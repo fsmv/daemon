@@ -8,10 +8,11 @@
 .status {
 	width: 3.5em;
 	text-align: center;
+	vertical-align: text-bottom;
 }
 .name {
 	min-width: 13em;
-	overflow: hidden;
+	vertical-align: text-bottom;
 }
 .server-list p {
 	margin-top: 0.5em;
@@ -19,6 +20,11 @@
 }
 .server-list form {
 	display: inline;
+}
+.code {
+	font-family: monospace;
+	white-space: pre;
+	user-select: all;
 }
 pre.logs {
 	background-color: #EEE;
@@ -61,6 +67,17 @@ li.server {
 </script>
 	</head>
 	<body onload="Setup();">
+	{{with VersionInfo}}
+	{{if len .Version | ne 0}}
+		<h2>daemon {{.Version}}</h2>
+	{{end}}
+	{{if len .UpdateVersion | ne 0}}
+		<h3>{{.UpdateVersion}} is now available</h3>
+		<p>To update run: <span class="code">
+				CGO_ENABLED=0 go install ask.systems/daemon@latest
+		</span></p>
+	{{end}}
+	{{end}}
 		<ul class="server-list">
 			<li class="server">
 				<span class="status" style="color:darkgreen">UP</span>

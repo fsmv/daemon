@@ -101,7 +101,6 @@ func Run(flags *flag.FlagSet, args []string) {
 
 	children := newChildren(quit)
 	go children.MonitorDeaths(quit)
-	// Mutex to make the death message handler wait for data about the children
 	if errcnt := children.StartPrograms(commands); errcnt != 0 {
 		log.Printf("%v errors occurred in spawning", errcnt)
 	}

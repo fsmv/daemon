@@ -1,12 +1,14 @@
 package embedspawn
 
 import (
+	"bufio"
 	"bytes"
 	"embed"
 	"fmt"
 	"html/template"
 	"log"
 	"net/http"
+	"runtime/debug"
 	"time"
 
 	_ "ask.systems/daemon/portal/flags"
@@ -129,7 +131,11 @@ func startDashboard(children *children, adminAuth *tools.BasicAuthHandler, quit 
 		return dashboardQuit, err
 	}
 
-	templates, err := template.ParseFS(templatesFS, "*.tmpl.html")
+	templates := template.New("templates")
+	templates = templates.Funcs(map[string]interface{}{
+		"VersionInfo": versionInfo,
+	})
+	templates, err = templates.ParseFS(templatesFS, "*.tmpl.html")
 	if err != nil {
 		close(dashboardQuit)
 		return dashboardQuit, err
@@ -139,4 +145,48 @@ func startDashboard(children *children, adminAuth *tools.BasicAuthHandler, quit 
 
 	go tools.RunHTTPServerTLS(lease.Port, tlsConf, dashboardQuit)
 	return dashboardQuit, nil
+}
+
+type versionResult struct {
+	Version       string
+	UpdateVersion string
+}
+
+// Note: go templates do not allow multiple return values from functions, so we
+// have to use a struct
+func versionInfo() versionResult {
+	buildInfo, ok := debug.ReadBuildInfo()
+	if !ok {
+		log.Print("Failed to read build info.")
+		return versionResult{"", ""}
+	}
+	version := buildInfo.Main.Version
+	if version == "(devel)" {
+		// TODO: it would be nice to print some of the extra info that's in the
+		// -version flag like return the revision hash here
+		return versionResult{"development version", ""}
+	}
+
+	// TODO: make this into a helper function in tools when I'm sure about the API
+	latestVersion := ""
+	{
+		resp, err := http.Get("https://proxy.golang.org/ask.systems/daemon/@v/list")
+		if err != nil || resp.StatusCode != http.StatusOK {
+			log.Print("Failed to fetch the latest version from GOPROXY: %v %v", resp.Status, err)
+			return versionResult{version, ""}
+		}
+		defer resp.Body.Close()
+		scanner := bufio.NewScanner(resp.Body)
+		if scanner.Scan() {
+			latestVersion = scanner.Text()
+		}
+	}
+
+	if latestVersion > version {
+		return versionResult{
+			Version:       version,
+			UpdateVersion: latestVersion,
+		}
+	}
+	return versionResult{version, ""}
 }
