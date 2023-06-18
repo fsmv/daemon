@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"runtime/debug"
+	"sort"
 	"time"
 
 	_ "ask.systems/daemon/portal/flags"
@@ -168,6 +169,7 @@ func versionInfo() versionResult {
 	}
 
 	// TODO: make this into a helper function in tools when I'm sure about the API
+	//       maybe also cache the latest version and update on a timer?
 	latestVersion := ""
 	{
 		resp, err := http.Get("https://proxy.golang.org/ask.systems/daemon/@v/list")
@@ -177,8 +179,18 @@ func versionInfo() versionResult {
 		}
 		defer resp.Body.Close()
 		scanner := bufio.NewScanner(resp.Body)
-		if scanner.Scan() {
-			latestVersion = scanner.Text()
+		var versions []string
+		for scanner.Scan() {
+			versions = append(versions, scanner.Text())
+		}
+		if err := scanner.Err(); err != nil {
+			log.Print("Error scanning GOPROXY response: ", err)
+		}
+		sort.Strings(versions)
+		if len(versions) > 0 {
+			latestVersion = versions[len(versions)-1]
+		} else {
+			log.Print("GOPROXY response was empty!")
 		}
 	}
 
