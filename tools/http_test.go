@@ -59,8 +59,9 @@ func ExampleSecureHTTPDir_CheckPasswordsFiles() {
 			if err == nil {
 				fileServer.ServeHTTP(w, r)
 			} else {
-				// This header is added by portal
-				log.Printf("%v failed authentication: %v", r.Header.Get("Orig-Address"), err)
+				// These headers are added by portal (and other reverse proxies)
+				log.Printf("%v:%v failed authentication: %v",
+					r.Header.Get("X-Forwarded-For"), r.Header.Get("X-Forwarded-Port"), err)
 			}
 		})))
 	// Then start the http server

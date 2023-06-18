@@ -31,7 +31,9 @@ func Example() {
 	http.Handle(path, http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		w.Write([]byte("Hello World!"))
 		// portal adds this header to tell you who sent the request to portal
-		log.Printf("Hello from %v", req.Header.Get("Orig-Address"))
+		log.Printf("Hello from %v:%v",
+			req.Header.Get("X-Forwarded-For"),
+			req.Header.Get("X-Forwarded-Port"))
 	}))
 
 	// Run the server and block until the channel is closed and the graceful stop

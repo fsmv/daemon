@@ -171,9 +171,11 @@ func (p *httpProxy) saveForwarder(clientAddr string, lease *gate.Lease,
 				req.Header.Set("User-Agent", "")
 			}
 			// Note: httputil.ReverseProxy automatically adds X-Forwarded-For
+			// https://cs.opensource.google/go/go/+/master:src/net/http/httputil/reverseproxy.go;l=440;drc=2449bbb5e614954ce9e99c8a481ea2ee73d72d61
 			req.Header.Add("X-Forwarded-Host", req.Host)
-			// An extra header I added that's like X-Forwarded-For but includes the port
-			req.Header.Add("Orig-Address", req.RemoteAddr)
+			if _, port, err := net.SplitHostPort(req.RemoteAddr); err == nil {
+				req.Header.Add("X-Forwarded-Port", port)
+			}
 		},
 	}
 	fwd := &forwarder{
