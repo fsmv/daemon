@@ -140,10 +140,6 @@ func (p *httpProxy) saveForwarder(clientAddr string, lease *gate.Lease,
 	proxy := &httputil.ReverseProxy{
 		Transport: transport,
 		Director: func(req *http.Request) {
-			// TODO: does this help anything???
-			//req.Header.Add("X-Forwarded-Host", req.Host)
-			//req.Header.Add("X-Origin-Host", backend.Host)
-
 			// Copied from https://golang.org/src/net/http/httputil/reverseproxy.go?s=2588:2649#L80
 			req.URL.Scheme = backend.Scheme
 			req.URL.Host = backend.Host
@@ -174,7 +170,9 @@ func (p *httpProxy) saveForwarder(clientAddr string, lease *gate.Lease,
 				// explicitly disable User-Agent so it's not set to default value
 				req.Header.Set("User-Agent", "")
 			}
-			// My addition
+			// Note: httputil.ReverseProxy automatically adds X-Forwarded-For
+			req.Header.Add("X-Forwarded-Host", req.Host)
+			// An extra header I added that's like X-Forwarded-For but includes the port
 			req.Header.Add("Orig-Address", req.RemoteAddr)
 		},
 	}
