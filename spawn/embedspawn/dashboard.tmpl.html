@@ -48,10 +48,11 @@ li.server {
 }
 </style>
 <script>
-	const eventSource= new EventSource(`./logs`);
+	var eventSource;
 	var streams = new Map()
 
 	function Setup() {
+		eventSource = new EventSource(`./logs`);
 		[...document.getElementsByClassName("name")].forEach(elm => {
 				StreamLogs(elm.innerHTML)
 			})

@@ -17,7 +17,7 @@ import (
 	"ask.systems/daemon/tools"
 )
 
-const javascriptStreamDelay = 4 * time.Millisecond
+const javascriptStreamDelay = 8 * time.Millisecond
 
 var (
 	//go:embed *.tmpl.html
