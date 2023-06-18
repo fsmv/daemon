@@ -52,6 +52,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -124,6 +125,120 @@ func RunHTTPServer(port uint32, quit chan struct{}) {
 	log.Print("HTTP server exit status:", code)
 }
 
+// Wraps another [http.Handler] and only calls the wrapped handler if BasicAuth
+// passed for one of the registered users. Optionally can call
+// [BasicAuthHandler.Check] in as many handlers as you want, and then you don't
+// have to use the handler wrapping option.
+//
+//   - Options must be setup before any requests and then not changed.
+//   - Methods may be called at any time, it's thread safe.
+//   - This type must not be copied after first use (it holds sync containers)
+type BasicAuthHandler struct {
+	// Realm is passed to the browser and the browser will automatically send the
+	// same credentials for a realm it has logged into before. Optional.
+	Realm   string
+	Handler http.Handler
+
+	// If set, auth checks are performed using this function instead of the
+	// default. CheckPassword is responsible for parsing the encoded parameters
+	// from the authHash string and doing any base64 decoding, as well as doing
+	// the hash comparison (which should be a constant time comparison).
+	//
+	// This allows for using any hash function that's needed with
+	// BasicAuthHandler, or even accept multiple at once. Many are available in
+	// [golang.org/x/crypto].
+	//
+	// If not set [CheckPassword] will be used.
+	// The default will always accept the hashes from [HashPassword] and will
+	// continue to accept hashes from old versions for compatibility.
+	CheckPassword func(authHash, userPassword string) bool
+
+	users      sync.Map // map from username string to password hash []byte
+	init       sync.Once
+	authHeader string
+}
+
+// Authorizes the given user to access the pages protected by this handler.
+//
+// The passwordHash must be a SHA256 [base64.URLEncoding] encoded string. You
+// can generate this with [HashPassword].
+func (h *BasicAuthHandler) SetUser(username string, passwordHash string) error {
+	if username == "" {
+		return errors.New("username must not be empty")
+	}
+	h.users.Store(username, passwordHash)
+	return nil
+}
+
+// Authorizes a user with this handler using a "username:password_hash" string
+//
+// The password_hash must be a SHA256 [base64.URLEncoding] encoded string. You
+// can generate this with [HashPassword].
+func (h *BasicAuthHandler) SetLogin(login string) error {
+	split := strings.Split(login, ":")
+	if len(split) != 2 {
+		return errors.New("Invalid login string. It should be username:password_hash.")
+	}
+	return h.SetUser(split[0], split[1])
+}
+
+// Unauthorize a given username from pages protected by this handler.
+func (h *BasicAuthHandler) RemoveUser(username string) {
+	h.users.Delete(username)
+}
+
+// Check HTTP basic auth and reply with Unauthorized if authentication failed.
+// Returns true if authentication passed and then the users can handle the
+// request.
+//
+// If it returns false auth failed the response has been sent and you can't
+// write more.
+//
+// If you want to log authentication failures, you can use this call instead of
+// wrapping your handler.
+func (h *BasicAuthHandler) Check(w http.ResponseWriter, r *http.Request) bool {
+	// Read the header and if it's not there tell the browser to prompt the user
+	username, password, ok := r.BasicAuth()
+	if !ok {
+		h.init.Do(func() { // Just a cache for the string so we don't malloc every time
+			if h.Realm == "" {
+				h.authHeader = "Basic charset=\"UTF-8\""
+			} else {
+				h.authHeader = fmt.Sprintf(`Basic realm="%v", charset="UTF-8"`, h.Realm)
+			}
+		})
+		w.Header().Set("WWW-Authenticate", h.authHeader)
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return false
+	}
+	// Look up the user's password
+	wantHash, ok := h.users.Load(username)
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return false
+	}
+
+	passMatch := false
+	if h.CheckPassword == nil {
+		passMatch = CheckPassword(wantHash.(string), password)
+	} else {
+		passMatch = h.CheckPassword(wantHash.(string), password)
+	}
+	if !passMatch {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return false
+	}
+	return true // Auth passed
+}
+
+// The [http.Handler] interface function. Only calls the wrapped handler if the
+// request has passed basic auth.
+func (h *BasicAuthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if h.Check(w, r) {
+		h.Handler.ServeHTTP(w, r) // Auth passed! Call the wrapped handler
+	}
+}
+
 // SecureHTTPDir is a replacement for [http.Dir] for use with
 // [http.FileServer]. It allows you to turn off serving directory listings
 // and hidden dotfiles.
@@ -134,20 +249,21 @@ type SecureHTTPDir struct {
 
 	// If false, do not serve or list files or directories starting with '.'
 	AllowDotfiles bool
+
 	// If true, serve a page listing all the files in a directory for any
 	// directories that do not have index.html. If false serve 404 instead, and
 	// index.html will still be served for directories containing it.
 	AllowDirectoryListing bool
 
-	// If you're using [CheckPasswordsFiles] set this to an application identifier
-	// string e.g. "daemon". The browser will remember the realm after a
-	// successful login so the user won't have to keep typing the password, and
-	// this works across multiple paths as well.
+	// If you're using [SecureHTTPDir.CheckPasswordsFiles] set this to an
+	// application identifier string e.g. "daemon". The browser will remember the
+	// realm after a successful login so the user won't have to keep typing the
+	// password, and this works across multiple paths as well.
 	BasicAuthRealm string
 }
 
-// Wraps a given handler and only calls it if [CheckPasswordsFiles] passes.
-// It probably doesn't make sense to use this with anything other than
+// Wraps a given handler and only calls it if [SecureHTTPDir.CheckPasswordsFiles]
+// passes.  It probably doesn't make sense to use this with anything other than
 // [http.FileServer]
 func (s SecureHTTPDir) CheckPasswordsHandler(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -159,22 +275,28 @@ func (s SecureHTTPDir) CheckPasswordsHandler(h http.Handler) http.Handler {
 }
 
 // Call this before handling the request with [http.FileServer] in order to
-// authenticate the user if the directory requested contains [PasswordsFile]
-// files. If the returned error is not nil, then authentication failed and a
-// response has been written and sent. Otherwise nothing is written.
+// authenticate the user if the directory requested (or parent directories)
+// contains a file named the value of [PasswordsFile] (default is .passwords).
+// If the returned error is not nil, then authentication failed and an
+// unauthorized http response has been written and sent. Otherwise nothing is
+// written to the [http.ResponseWriter].
 //
-// You can generate hashes with [PasswordHash] and the format of the files is:
+// The passwords file that is checked is the first one found when searching
+// starting with the current directory, then the parent directory, and so on.
+//
+// This search ordering means that adding a [PasswordsFile] file somewhere in
+// the directory tree makes access more restrictive than the parent directory.
+// If you want to make a subdirectory allow more users than the parent
+// directory, then you must copy all of the parent directory passwords into the
+// [PasswordsFile] of the subdirectory, and then add extra users to that list.
+//
+// You can generate hashes with [HashPassword] and the format of the files is:
 //
 //	username1:password_hash1
 //	user2:password_hash2
 //
-// The passwords file that is used is the first one found when searching first
-// the current directory, then the parent directory, and so on. This means that
-// adding a .passwords file somewhere in the directory tree always makes access
-// more restrictive.
-//
-// The easiest way to use this is [CheckPasswordsHandler], but you will need to
-// call this directly if you want to log errors for example.
+// The easiest way to use this is [SecureHTTPDir.CheckPasswordsHandler], but you
+// will need to call this directly if you want to log errors for example.
 func (s SecureHTTPDir) CheckPasswordsFiles(w http.ResponseWriter, r *http.Request) error {
 	// Never serve the PasswordsFile
 	if path.Base(r.URL.Path) == PasswordsFile {
