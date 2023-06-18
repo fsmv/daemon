@@ -38,9 +38,9 @@ func Run(flags *flag.FlagSet, args []string) {
 		"The path to the config file")
 	path = flags.String("path", "",
 		"A single path to use for relative paths in the config file")
-	spawningDelay = flags.Duration("spawning_delay", 2*time.Second, ""+
+	spawningDelay = flags.Duration("spawning_delay", 200*time.Millisecond, ""+
 		"The amount of time to wait between starting processes.\n"+
-		"Useful especially for feproxy which should go first and be given time\n"+
+		"Useful especially for portal which should go first and be given time\n"+
 		"to start up so others can connect.")
 	dontKillChildren = flags.Bool("dont_kill_children", false, ""+
 		"When not set, send a SIGHUP to child processes when this process dies. This is\n"+
