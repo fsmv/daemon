@@ -72,7 +72,7 @@ func Run(flags *flag.FlagSet, args []string) {
 			addr := req.Header.Get("Orig-Address")
 			if err := dir.CheckPasswordsFiles(w, req); err != nil {
 				if *logRequests {
-					log.Print("%v %v at %v", addr, err, fullPath)
+					log.Printf("%v %v at %v", addr, err, fullPath)
 				}
 				return // Auth failed!
 			}

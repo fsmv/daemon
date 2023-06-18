@@ -24,13 +24,11 @@ if [ -n "$(git diff --cached --name-only)" ]; then
   git stash -q --keep-index --include-untracked
   NEED_POP=$?
 fi
-go build -o test-build
+go build -o test-build && rm test-build; go test ./... > /dev/null
 STATUS=$? # other commands will overwrite $? so save it
 if [ $NEED_POP -eq 0 ]; then
   git stash pop -q
 fi
 if [ $STATUS -ne 0 ]; then
   exit $STATUS
-else
-  rm test-build # clean up our test if the build worked
 fi

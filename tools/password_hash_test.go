@@ -26,5 +26,5 @@ func ExampleBasicAuthHandler_generatePasswordHash() {
 			log.Fatal(err)
 		}
 	}
-	fmt.Println(tools.BasicAuthHash(*Password))
+	fmt.Println(tools.HashPassword(*Password))
 }

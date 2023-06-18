@@ -174,7 +174,7 @@ func versionInfo() versionResult {
 	{
 		resp, err := http.Get("https://proxy.golang.org/ask.systems/daemon/@v/list")
 		if err != nil || resp.StatusCode != http.StatusOK {
-			log.Print("Failed to fetch the latest version from GOPROXY: %v %v", resp.Status, err)
+			log.Printf("Failed to fetch the latest version from GOPROXY: %v %v", resp.Status, err)
 			return versionResult{version, ""}
 		}
 		defer resp.Body.Close()
