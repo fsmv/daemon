@@ -4,6 +4,7 @@
 package embedspawn
 
 import (
+	"bufio"
 	"flag"
 	"fmt"
 	"log"
@@ -64,14 +65,6 @@ func Run(flags *flag.FlagSet, args []string) {
 	)
 	flags.Parse(args[1:])
 
-	adminAuth := &tools.BasicAuthHandler{Realm: "daemon"}
-	logins := strings.Split(*adminLogins, ",")
-	for i, login := range logins {
-		if err := adminAuth.SetLogin(login); err != nil {
-			log.Printf("Failed to authorize login %v: %v", i, err)
-		}
-	}
-
 	commands, err := ReadConfig(*configFilename)
 	if err != nil {
 		log.Fatalf("Failed to read config file. error: \"%v\"", err)
@@ -105,6 +98,34 @@ func Run(flags *flag.FlagSet, args []string) {
 	if errcnt := children.StartPrograms(commands); errcnt != 0 {
 		log.Printf("%v errors occurred in spawning", errcnt)
 	}
+
+	adminAuth := &tools.BasicAuthHandler{Realm: "daemon"}
+	var logins []string
+	if *adminLogins == "" {
+		log.Print("-dashboard_logins not set, prompting on stdin for a temporary password to hash.")
+		fmt.Printf("Temporary password to login on the dashboard with: ")
+		scan := bufio.NewScanner(os.Stdin)
+		scan.Scan()
+		if err := scan.Err(); err != nil {
+			log.Printf("Failed to read stdin: %v", err)
+			log.Println("You won't be able to log into the dashboard.")
+		} else {
+			hash := tools.HashPassword(scan.Text())
+			fmt.Println("You can login on the dashboard with username admin and the password you entered.")
+			login := fmt.Sprintf("admin:%v", hash)
+			fmt.Printf("To keep these settings set -dashboard_logins '%v'\n", login)
+			logins = append(logins, login)
+			log.Print("Temporary dashboard password configured.")
+		}
+	} else {
+		logins = strings.Split(*adminLogins, ",")
+	}
+	for i, login := range logins {
+		if err := adminAuth.SetLogin(login); err != nil {
+			log.Printf("Failed to authorize login %v: %v", i, err)
+		}
+	}
+
 	if _, err := startDashboard(children, adminAuth, quit); err != nil {
 		log.Print("Failed to start dashboard: ", err)
 		// TODO: retry it? Also check the dashboardQuit signal for retries
