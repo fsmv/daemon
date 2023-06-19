@@ -1,5 +1,6 @@
-// If you prefer to run it offline copy this to a new folder and run it locally.
-// go mod init $(basename `pwd`); go mod tidy; go run .
+/*?sr/bin/env go run "$0" "$@"; exit $? #*/
+// If you prefer to run it offline copy this to a new folder and run it locally
+// using the go sh-bang line above. Just chmod +x hash.go && ./hash.go -pw stdin
 package tools_test
 
 import (
