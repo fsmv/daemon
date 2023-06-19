@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"os/user"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -58,6 +59,17 @@ func newChildren(quit chan struct{}) *children {
 }
 
 func (c *children) StartPrograms(programs []*Command) (errCnt int) {
+	// Make portal first if it exists
+	portalIdx := 0
+	for i, cmd := range programs {
+		if path.Base(cmd.Binary) != "portal" {
+			continue
+		}
+		portalIdx = i
+		break
+	}
+	programs[0], programs[portalIdx] = programs[portalIdx], programs[0]
+
 	errCnt = 0
 	for i, cmd := range programs {
 		err := c.StartProgram(cmd)
@@ -74,6 +86,7 @@ func (children *children) StartProgram(cmd *Command) error {
 	if len(cmd.Binary) == 0 {
 		return fmt.Errorf("Binary is required")
 	}
+	isPortal := path.Base(cmd.Binary) == "portal"
 	name := cmd.FullName()
 	attr := &os.ProcAttr{
 		Env: []string{
@@ -184,7 +197,7 @@ func (children *children) StartProgram(cmd *Command) error {
 	if len(cmd.Files) != 0 {
 		var openedFiles []*os.File
 		var filesErr error
-		if cmd.AutoTlsCerts {
+		if cmd.AutoTlsCerts || isPortal {
 			quitFileRefresh = make(chan struct{})
 			refreshFiles, err := startFileRefresh(cmd.Files, quitFileRefresh)
 			if err != nil {
@@ -249,6 +262,7 @@ func (children *children) StartProgram(cmd *Command) error {
 	}
 
 	// Start the process
+	go children.HandleLogs(r, name)
 	proc, err := os.StartProcess(binpath, argv, attr)
 	c := &child{
 		Cmd:             cmd,
@@ -256,7 +270,6 @@ func (children *children) StartProgram(cmd *Command) error {
 		Name:            name,
 		quitFileRefresh: quitFileRefresh,
 	}
-	go children.HandleLogs(r, name)
 	if err != nil {
 		msg := fmt.Errorf("failed starting process: %v", err)
 		if proc != nil && proc.Pid > 0 {
@@ -271,9 +284,50 @@ func (children *children) StartProgram(cmd *Command) error {
 	children.Store(c)
 	log.Printf("Started process: %v; pid: %v", name, proc.Pid)
 	log.Printf("Args: %v", argv)
-	log.Printf("Waiting %v...", *spawningDelay)
-	time.Sleep(*spawningDelay)
+
+	if isPortal {
+		log.Print("Waiting for portal API token...")
+		token, err := children.waitForPortalToken()
+		if err != nil {
+			log.Printf("Did not receive portal token: %v", err)
+		} else {
+			gate.Token = &token
+			log.Print("Token received.")
+		}
+	} else {
+		log.Printf("Waiting %v...", *spawningDelay)
+		time.Sleep(*spawningDelay)
+	}
 	return nil
+}
+
+func (c *children) waitForPortalToken() (string, error) {
+	logs, cancel := c.StreamLogs()
+	defer cancel()
+	ttl := time.After(10 * time.Second)
+	for {
+		select {
+		case <-ttl:
+			return "", errors.New("Deadline exceeded")
+		case line := <-logs:
+			if line.Tag != "portal" {
+				continue
+			}
+			const prefix = "Portal API token: "
+			if idx := strings.Index(line.Line, prefix); idx == -1 {
+				continue
+			} else {
+				token := line.Line[idx+len(prefix):]
+				endIdx := strings.IndexRune(token, ' ')
+				if endIdx == -1 {
+					return "", fmt.Errorf(
+						"Failed to parse portal token line: %#v", line.Line)
+				}
+				token = token[:endIdx]
+				return token, nil
+			}
+		}
+	}
 }
 
 func (c *children) RestartChild(name string) {

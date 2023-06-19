@@ -28,7 +28,7 @@ var configSchema string
 
 var (
 	configFilename   *string
-	path             *string
+	searchPath       *string
 	spawningDelay    *time.Duration
 	dontKillChildren *bool
 )
@@ -36,7 +36,7 @@ var (
 func Run(flags *flag.FlagSet, args []string) {
 	configFilename = flags.String("config", "config.pbtxt",
 		"The path to the config file")
-	path = flags.String("path", "",
+	searchPath = flags.String("path", "",
 		"A single path to use for relative paths in the config file")
 	spawningDelay = flags.Duration("spawning_delay", 200*time.Millisecond, ""+
 		"The amount of time to wait between starting processes.\n"+
@@ -148,7 +148,7 @@ func ReadConfig(filename string) ([]*Command, error) {
 	if err := prototext.Unmarshal(configText, config); err != nil {
 		return nil, err
 	}
-	err = resolveRelativePaths(*path, config.Command)
+	err = resolveRelativePaths(*searchPath, config.Command)
 	return config.Command, err
 }
 

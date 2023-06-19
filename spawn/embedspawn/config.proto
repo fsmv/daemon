@@ -53,8 +53,10 @@ message Command {
 	// In the child process, the files will have fd = 3 + len(Ports) + i, where
 	// Files[i] is the file
 	repeated string files = 6;
+
 	// Set to true if all of the files are tls certs you want to keep
-	// autoupdated. Portal has an -auto_tls_cert fag to support reading this.
+	// autoupdated. This is assumed to be true for portal. You only need this if
+	// you want to make your own binary that gets files refreshed.
 	//
 	// This makes the files in the above array a pipe that will be updated with
 	// the file contents on startup and when spawn in sent the SIGUSR1 signal.

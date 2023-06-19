@@ -82,6 +82,7 @@ func (s *stateManager) SetToken(token string) {
 		token = tools.RandomString(32)
 	}
 
+	// If this changes you have to update the string in spawn so it can find it
 	log.Printf("**** Portal API token: %v ****", token)
 	s.mut.Lock()
 	defer s.mut.Unlock()

@@ -44,17 +44,20 @@ func Run(flags *flag.FlagSet, args []string) {
 		"requests for any hostname that arrives at the server.")
 	tlsCertSpec := flags.String("tls_cert", "", ""+
 		"The filepath to the tls cert file (fullchain.pem).\n"+
-		"Accepts multiple certificates with a comma separated list.")
+		"Accepts multiple certificates with a comma separated list.\n"+
+		"This is not needed with spawn because it uses the SPAWN_FILES env var.")
 	tlsKeySpec := flags.String("tls_key", "", ""+
 		"The filepath to the tls key file (privkey.pem).\n"+
-		"Accepts multiple keys with a comma separated list.")
-	autoTLSCerts := flags.Bool("auto_tls_certs", false, ""+
+		"Accepts multiple keys with a comma separated list.\n"+
+		"This is not needed with spawn because it uses the SPAWN_FILES env var.")
+	autoTLSCerts := flags.Bool("auto_tls_certs", true, ""+
 		"If true update the tls files when SIGUSR1 is received. The\n"+
 		"-tls_cert and -tls_key paths must either both be file paths or both be\n"+
 		"OS pipe fd numbers produced by the auto_tls_certs spawn config option.")
-	certChallengeWebRoot := flags.String("cert_challenge_webroot", "", ""+
+	certChallengeWebRoot := flags.String("cert_challenge_webroot", "./cert-challenge/", ""+
 		"Set to a local folder path to enable hosting the let's encrypt webroot\n"+
-		"challenge path ("+certChallengePattern+") so you can auto-renew with certbot.")
+		"challenge path ("+certChallengePattern+") so you can auto-renew with certbot.\n"+
+		"Set to empty string to turn this off.")
 	httpPort := flags.Int("http_port", 80,
 		"The port to bind to for http traffic.")
 	httpsPort := flags.Int("https_port", 443,

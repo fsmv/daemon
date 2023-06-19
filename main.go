@@ -95,11 +95,6 @@ Example spawn config.pbtxt for running portal only: (change my domain to yours)
 			"/etc/letsencrypt/live/ask.systems/fullchain.pem",
 			"/etc/letsencrypt/live/ask.systems/privkey.pem"
 		]
-		auto_tls_certs: true
-		args: [
-			"-auto_tls_certs",
-			"-cert_challenge_webroot=/cert-challenge/"
-		]
 	}
 
 This will tell spawn to, while running as root, bind the privileged ports (linux
@@ -109,15 +104,10 @@ detect). Also as a security measure by default spawn runs all servers in a
 chroot so they cannot access files outside of the user's home directory (or the
 working_dir set in the config) in the event it did get hacked.
 
-The rest of the config options are for automatically renewing the Let's Encrypt
-TLS certificate. If you don't want to bother you can just restart the portal
-server (from the spawn dashboard page) whenever you renew the cert. To renew
-without any down-time, both spawn and portal need to coordinate to refresh the
-privileged files and the two auto_tls_certs flags set this up on both sides.
-The -cert_challenge_webroot flag is a local directory path inside the chroot,
-which means / is actually /home/www/, this directory
-/home/www/cert-challenge/ is where you will tell certbot to put the
-temporary challenge files to prove you own the domain.
+This will by default set up for autorenewing the certs with lets encrypt. The
+webroot for the certbot challenge is configured with the -cert_challenge_webroot
+flag, the default is ~user/cert-challenge/ where user is the configured user you
+run portal as.
 
 So to renew your TLS certificate you need to put the following commands in an
 executable shell script e.g. /root/renew-cert.sh, which we will run
@@ -141,8 +131,13 @@ terminal, assuming your $GOPATH/bin in in your $PATH, with:
 
 This will run spawn as root which will run portal as www and importantly, portal
 will create a save state file (in /home/www/) and print the newly generated
-API token for registering paths. You will need to pass this to client binaries
-as an argument.
+API token for registering paths. If you're using spawn and the client library
+and only one server machine then the token is setup automatically.
+
+If you set up a secondary machine running spawn you can have the main portal
+server reverse proxy those requests too! Use the spawn -portal_token and
+-portal_addr flags with the token copy-pasted from the portal logs and spawn
+will give the token and address to any binaries it launches.
 
 You can now set up running spawn at boot and enable the spawn dashboard which
 streams logs to the browser and has server restart buttons!
@@ -155,11 +150,7 @@ running spawn at boot. I think the easiest way is using cron again with
 
 To use cron to run spawn run sudo crontab -e again and add:
 
-	@reboot /root/daemon -portal_token $TOKEN spawn -dashboard_logins=admin:YOUR_PASSWORD_HASH_HERE >/dev/null >2>&1 &
-
-Spawn will pass the portal token, and address if you set it, to child binaries
-via the PORTAL_TOKEN and PORTAL_ADDR environment variables. The syntax after the
-command is shell script to ignore spawn's output and run it in the background.
+	@reboot /root/daemon -dashboard_logins=admin:YOUR_PASSWORD_HASH_HERE >/dev/null >2>&1 &
 
 You need to set at least one user in -dashboard_logins to access the dashboard
 page to restart your servers and see logs. You can generate the password hash
