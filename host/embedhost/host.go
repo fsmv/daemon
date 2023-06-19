@@ -37,7 +37,8 @@ func Run(flags *flag.FlagSet, args []string) {
 		"If true, log all paths requested plus the IP of the client.")
 	passwordRealm := flags.String("password_realm", "host", ""+
 		"The string to pass to the browser for the basic auth realm. The browser will\n"+
-		"automatically send the same password if it has authorized with the realm before.")
+		"automatically send the same password if it has authorized with the realm\n"+
+		"before.")
 	flags.Var(tools.BoolFuncFlag(hashPassword), "hash_password",
 		"Set to hash a password for the .passwords file instead of hosting a server.")
 	flags.Parse(args[1:])

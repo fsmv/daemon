@@ -268,7 +268,7 @@ type command struct {
 }
 
 var commands = []command{
-	{"spawn", embedspawn.Run, "" +
+	{"spawn", embedspawn.Run, "" + //                            stop here: |
 		"Launches other processes in a chroot and as different users. Manages\n" +
 		"privileged files."},
 	{"portal", embedportal.Run, "" +
@@ -277,8 +277,9 @@ var commands = []command{
 	{"assimilate", embedassimilate.Run, "" +
 		"Registers third party servers with portal on a fixed port if they\n" +
 		"don't have the client library."},
-	{"host", embedhost.Run,
-		"Hosts a file server for a local folder registered on any path with portal."},
+	{"host", embedhost.Run, "" +
+		"Hosts a file server for a local folder registered on any path with\n" +
+		"portal."},
 }
 
 var namePadding string

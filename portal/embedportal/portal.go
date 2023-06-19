@@ -53,18 +53,18 @@ func Run(flags *flag.FlagSet, args []string) {
 	autoTLSCerts := flags.Bool("auto_tls_certs", true, ""+
 		"If true update the tls files when SIGUSR1 is received. The\n"+
 		"-tls_cert and -tls_key paths must either both be file paths or both be\n"+
-		"OS pipe fd numbers produced by the auto_tls_certs spawn config option.")
+		"OS pipe fd numbers produced by the auto_tls_certs spawn config option.\n")
 	certChallengeWebRoot := flags.String("cert_challenge_webroot", "./cert-challenge/", ""+
 		"Set to a local folder path to enable hosting the let's encrypt webroot\n"+
-		"challenge path ("+certChallengePattern+") so you can auto-renew with certbot.\n"+
-		"Set to empty string to turn this off.")
+		"challenge path ("+certChallengePattern+") so you can auto-renew with\n"+
+		"certbot. Set to empty string to turn this off.")
 	httpPort := flags.Int("http_port", 80,
 		"The port to bind to for http traffic.")
 	httpsPort := flags.Int("https_port", 443,
 		"The port to bind to for https traffic.")
 	saveFilepath := flags.String("save_file", "state.protodata", ""+
 		"The path to the file to store active lease information in so that\n"+
-		"the portal server can safely restart without disrupting proxy service.")
+		"the portal server can safely restart without disrupting proxy service.\n")
 	flags.Parse(args[1:])
 
 	quit := make(chan struct{})
