@@ -20,16 +20,10 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-// # Example config file (by the way textproto supports comments)
-// command {
-// filepath: "host"
-// user: "www"
-// no_chroot: true
-// args: [
-// "--web_root /home/www/",
-// "--url_path /files/"
-// ]
-// }
+// The schema of the config file
+//
+// Write the file in proto text format which is documented here:
+// https://developers.google.com/protocol-buffers/docs/text-format-spec
 type Config struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache

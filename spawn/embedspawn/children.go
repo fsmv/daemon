@@ -100,45 +100,19 @@ func (children *children) StartProgram(cmd *Command) error {
 		attr.Env = append(attr.Env, fmt.Sprintf("PORTAL_TOKEN=%v", *gate.Token))
 	}
 	log.Print("Starting ", name)
-	if len(cmd.User) == 0 {
-		return fmt.Errorf("you must specify a user to run as.")
+	attr.Sys = &syscall.SysProcAttr{}
+
+	creds, u, err := lookupUser(cmd.User)
+	if err != nil {
+		return err
 	}
-	if cmd.User == "root" {
+	if u.Username == "root" {
 		return fmt.Errorf("running as root is not allowed.")
 	}
-	// Set the user, group, and home dir if we're switching users
-	u, err := user.Lookup(cmd.User)
-	if err != nil {
-		return fmt.Errorf("error while looking up user %v, message: %v",
-			cmd.User, err)
+	if cmd.User != "" {
+		attr.Sys.Credential = creds
 	}
-	uid, err := strconv.Atoi(u.Uid)
-	if err != nil {
-		return fmt.Errorf("Uid string not an integer. Uid string: %v", u.Uid)
-	}
-	gid, err := strconv.Atoi(u.Gid)
-	if err != nil {
-		return fmt.Errorf("Gid string not an integer. Gid string: %v", u.Gid)
-	}
-	groupsStr, err := u.GroupIds()
-	if err != nil {
-		return fmt.Errorf("Failed to lookup groups: %v", err)
-	}
-	var groups []uint32
-	for i, group := range groupsStr {
-		id, err := strconv.Atoi(group)
-		if err != nil {
-			return fmt.Errorf("Supplimental gid #%v string not an integer. Gid string: %v", i, id)
-		}
-		groups = append(groups, uint32(id))
-	}
-	attr.Sys = &syscall.SysProcAttr{
-		Credential: &syscall.Credential{
-			Uid:    uint32(uid),
-			Gid:    uint32(gid),
-			Groups: groups,
-		},
-	}
+
 	if !*dontKillChildren {
 		attr.Sys.Pdeathsig = syscall.SIGHUP
 	}
@@ -150,28 +124,46 @@ func (children *children) StartProgram(cmd *Command) error {
 	if workingDir == "" {
 		workingDir = u.HomeDir
 	}
-	// Copy the binary into the home dir and give the user access
-	binaryCopy, err := copyFile(cmd.Binary, filepath.Join(workingDir, name), uid, gid)
+	var binary string
+	var openerr error
+	if cmd.NoChroot {
+		binf, err := os.Open(cmd.Binary)
+		binf.Close()
+		openerr = err
+		binary = cmd.Binary
+	} else {
+		// Copy the binary into the home dir and give the user access
+		binary, openerr = copyFile(cmd.Binary, filepath.Join(workingDir, name), creds.Uid, creds.Gid)
+	}
 	// If it's a megabinary, and there wasn't a user-provided binary load the
 	// command from the megabinary if it's there
-	if err != nil && len(MegabinaryCommands) > 0 && errors.Is(err, fs.ErrNotExist) {
-		subCommand := filepath.Base(cmd.Binary)
+	subcommand := ""
+	if openerr != nil && len(MegabinaryCommands) > 0 && errors.Is(openerr, fs.ErrNotExist) {
+		testCommand := filepath.Base(cmd.Binary)
 		for _, supported := range MegabinaryCommands {
-			if subCommand != supported {
+			if testCommand != supported {
 				continue
 			}
-			binaryCopy, err = copyFile(os.Args[0], filepath.Join(workingDir, name), uid, gid)
+			subcommand = testCommand
+			if cmd.NoChroot {
+				binary = os.Args[0]
+				openerr = nil
+			} else {
+				binary, openerr = copyFile(os.Args[0], filepath.Join(workingDir, name), creds.Uid, creds.Gid)
+			}
 			break
 		}
 	}
 	// Don't leave a dangling binary copy
-	defer func() {
-		if binaryCopy != "" {
-			_ = os.Remove(binaryCopy)
-		}
-	}()
-	if err != nil {
-		return fmt.Errorf("Failed to copy the binary into the working dir: %v", err)
+	if !cmd.NoChroot {
+		defer func() {
+			if binary != "" {
+				_ = os.Remove(binary)
+			}
+		}()
+	}
+	if openerr != nil {
+		return fmt.Errorf("Failed to setup the binary to run: %v", openerr)
 	}
 	// Set up stdout and stderr piping
 	r, w, err := os.Pipe()
@@ -216,17 +208,29 @@ func (children *children) StartProgram(cmd *Command) error {
 
 	var binpath string
 	if cmd.NoChroot {
-		attr.Dir = workingDir
+		if workingDir != "./" {
+			attr.Dir = workingDir
+		}
 		// The copy we'll run is at ~/binary
-		binpath = binaryCopy
+		binpath = binary
 	} else { // Do a chroot
 		attr.Dir = "/"
 		attr.Sys.Chroot = workingDir
 		// The copy we'll run is at /binary in the chroot
-		binpath = "/" + filepath.Base(binaryCopy)
+		binpath = "/" + filepath.Base(binary)
 	}
 	// Finalize the argv
-	argv := append([]string{binpath}, cmd.Args...)
+	var startArgs []string
+	if subcommand != "" && cmd.NoChroot {
+		// if we are using a subcommand and we didn't copy the binary, then we need
+		// to specify the subcommand on the commandline. In chroot mode we just
+		// change the name of the binary to the subcommand and it checks argv[0].
+		// TODO: this could be cleaned up, maybe ditch the argv[0] thing
+		startArgs = []string{binpath, subcommand}
+	} else {
+		startArgs = []string{binpath}
+	}
+	argv := append(startArgs, cmd.Args...)
 
 	// For chroots copy timezone info into the home dir and give the user access
 	if !cmd.NoChroot {
@@ -240,7 +244,7 @@ func (children *children) StartProgram(cmd *Command) error {
 			log.Printf("Warning: failed to mkdir for /etc/localtime: %v", err)
 		}
 		timezoneFile, err := copyFile("/etc/localtime",
-			filepath.Join(workingDir, "/etc/localtime"), uid, gid)
+			filepath.Join(workingDir, "/etc/localtime"), creds.Uid, creds.Gid)
 		if err != nil {
 			// Not worth returning over this, it will just be UTC log times
 			log.Printf("Warning: failed to copy /etc/localtime into the chroot dir: %v", err)
@@ -301,6 +305,46 @@ func (children *children) StartProgram(cmd *Command) error {
 	return nil
 }
 
+func lookupUser(username string) (*syscall.Credential, *user.User, error) {
+	// Set the user, group, and home dir if we're switching users
+	var u *user.User
+	var err error
+	if username == "" {
+		u, err = user.Current()
+	} else {
+		u, err = user.Lookup(username)
+	}
+	if err != nil {
+		return nil, u, fmt.Errorf("error while looking up user %v, message: %v",
+			username, err)
+	}
+	uid, err := strconv.Atoi(u.Uid)
+	if err != nil {
+		return nil, u, fmt.Errorf("Uid string not an integer. Uid string: %v", u.Uid)
+	}
+	gid, err := strconv.Atoi(u.Gid)
+	if err != nil {
+		return nil, u, fmt.Errorf("Gid string not an integer. Gid string: %v", u.Gid)
+	}
+	groupsStr, err := u.GroupIds()
+	if err != nil {
+		return nil, u, fmt.Errorf("Failed to lookup groups: %v", err)
+	}
+	var groups []uint32
+	for i, group := range groupsStr {
+		id, err := strconv.Atoi(group)
+		if err != nil {
+			return nil, u, fmt.Errorf("Supplimental gid #%v string not an integer. Gid string: %v", i, id)
+		}
+		groups = append(groups, uint32(id))
+	}
+	return &syscall.Credential{
+		Uid:    uint32(uid),
+		Gid:    uint32(gid),
+		Groups: groups,
+	}, u, nil
+}
+
 func (c *children) waitForPortalToken() (string, error) {
 	logs, cancel := c.StreamLogs()
 	defer cancel()
@@ -328,6 +372,14 @@ func (c *children) waitForPortalToken() (string, error) {
 			}
 		}
 	}
+}
+
+func (cmd *Command) FullName() string {
+	name := filepath.Base(cmd.Binary)
+	if cmd.Name != "" {
+		name = fmt.Sprintf("%v-%v", name, cmd.Name)
+	}
+	return name
 }
 
 func (c *children) RestartChild(name string) {
@@ -496,7 +548,7 @@ func openFiles(files []string) ([]*os.File, error) {
 }
 
 // Returns the new filepath of the binary (empty string if the file was not created)
-func copyFile(oldName string, newName string, uid, gid int) (string, error) {
+func copyFile(oldName string, newName string, uid, gid uint32) (string, error) {
 	oldf, err := os.Open(oldName)
 	if err != nil {
 		return "", err
@@ -511,7 +563,7 @@ func copyFile(oldName string, newName string, uid, gid int) (string, error) {
 		newf.Close()
 		return newName, err
 	}
-	if err := newf.Chown(uid, gid); err != nil {
+	if err := newf.Chown(int(uid), int(gid)); err != nil {
 		newf.Close()
 		return newName, err
 	}

@@ -1,0 +1,164 @@
+# This is a textproto format file for the config scheme that you can see by
+# running:
+#
+#   daemon spawn -config_schema
+#
+# Textproto format is specified here:
+#  https://developers.google.com/protocol-buffers/docs/text-format-spec
+#
+# You can read a detailed guide to setting up daemon at:
+#  https://pkg.go.dev/ask.systems/daemon
+
+# Each command entry is a process spawn will launch with the permissions of the
+# specified user and with the commandline arguments specified.
+
+# Portal is the reverse proxy server (HTTP and TCP). It accepts public
+# connections on your domain and wraps internal connections in your TLS
+# certificate, so no internal servers need access to the certificate.
+#
+# This config is setup for running as the current user (not root) and testing
+# out daemon without having to configure anything. It will generate a self
+# signed cert in memory so it will be encrypted connections by default.
+command {
+  binary: "portal"
+  # Turn off the default which is to run all binaries in a chroot for security,
+  # we don't want that for just testing because then we don't have to copy files
+  # into the chroot to enable it to work.
+  no_chroot: true
+  # The default working dir is the user's home dir but for local testing we just
+  # want the current dir.
+  working_dir: "./"
+  # Pass in the ports from spawn, portal knows to look for the file descriptors
+  # We could set the arguments and let portal listen itself but this is how it
+  # will be configured if you set up daemon permanently.
+  ports: [8088, 8080]
+  args: [
+    "-http_port=8088",
+    "-https_port=8080",
+    # Set commandline arguments to avoid creating any files because by default
+    # we're running in local testing mode
+    "-save_file=",
+    "-cert_challenge_webroot="
+  ]
+}
+
+# You can add more commands here, like a host instance to run an HTTP file
+# server (commented example below), and continue to test out as your login user;
+# or you can delete the above config and setup running spawn as root for a
+# permanent config.
+
+#command {
+#  binary: "portal"
+#  # It is best to create a special OS user for each server in order to isolate
+#  # permissions. For example portal stores a state file that could be edited.
+#  #
+#  # However you could just run all servers as www for example
+#  user: "portal"
+#  ports: [80, 443] # These are usually only usable by root, spawn passes them in
+#  # Set up the TLS certificates.
+#  #
+#  # - If you don't set this up portal will create a self signed cert that
+#  #   browsers won't accept.
+#  # - portal supports using multiple certificates for hosting multiple domains
+#  # - The easiest way to get a cert that browsers will accept is letsencrypt.
+#  #   Install their certbot tool then with portal on, run:
+#  #
+#  #    certbot certonly -n --webroot -w /home/portal/cert-challenge/ -d <domain>
+#  #
+#  #   Then you can add the files to the config here, and reload the config and
+#  #   restart portal all from the dashboard. Finally to keep the certificate
+#  #   renewed create a script you run with cron containing the command above
+#  #   plus the following to notify spawn and portal it was renewed:
+#  #
+#  #    killall -SIGUSR1 {spawn,portal}
+#  #
+#  #files: [
+#  #  "/etc/letsencrypt/live/<YOUR DOMAIN>/fullchain.pem",
+#  #  "/etc/letsencrypt/live/<YOUR DOMAIN>/privkey.pem",
+#  #]
+#}
+
+# Host is the basic file server. You can serve a static website or just files to
+# download.
+#
+# Host also supports password protecting directories by putting a file named
+# .passwords in the folder with user:password_hash lines for the authorized
+# users. To hash a password you can run: daemon host -hash_password
+#command {
+#  binary: "host"
+#  user: "www"
+#  # If you have multiple instances of the same binary, you can add a name so
+#  # that you can tell which is which on the spawn dashboard
+#  name: "test"
+#  args: [
+#    # If you want to turn off the page that lists the files in the -web_root
+#    # directory, uncomment this argument.
+#    #
+#    # "--serve_directory_listing=false",
+#
+#    # Syslog lets you collect logs and compress old logs for all the servers on
+#    # your machine. All of the daemon binaries support it. When using chroots,
+#    # the simplest way to get syslog to work is to use the network protocol.
+#    #
+#    # "-syslog_remote=127.0.0.1",
+#
+#    # Spawn runs all binaries in a chroot rooted at the user's home directory
+#    # by default. So this path is actually /home/www/public/
+#    #
+#    # It's best to not use the root of the home directory because spawn will
+#    # place some files there to make the chroot work and in general other
+#    # binaries might put things there too.
+#    "-web_root=/public/",
+#    # This is the public URL to register with portal. This pattern is for
+#    # your-domain.example/files/*
+#    #
+#    # If you omit the trailing slash the pattern only matches the exact path not
+#    # not all subdirectories. You can also specify a domain name before the
+#    # first slash if you're using multiple domains.
+#    "-url_path=/test/"
+#  ]
+#}
+
+# Assimilate registers paths on portal on behalf of third-party servers that
+# don't support talking to portal. It supports any number of servers at once.
+#
+# Configure the third party server to listen on a fixed port and set up the
+# forwarding rule here to give it a path on your domain name.
+#
+# For servers with a web interface you can do HTTP forwarding so you can access
+# the web interface through your domain name under a path.
+#
+# For TCP servers you can wrap the connection in TLS encryption by asking portal
+# to open the public encrypted TCP port and configuring portal to forward
+# requests to the private non-encrypted port. You will still have to set up port
+# forwarding for the public port portal opens in your router settings.
+#command {
+#  binary: "assimilate"
+#  user: "assimilate"
+#  args: [
+#    "--syslog_remote=127.0.0.1",
+#
+#    # An example of configuring a third party web interface
+#    #
+#    # Use strip_pattern for servers that don't expect to be running behind a
+#    # reverse proxy. In this case /syncthing/index.html will be sent to the
+#    # syncthing server (running on port 8384) as /index.html
+#    "pattern: '/syncthing/' fixed_port: 8384 strip_pattern: true",
+#    # An example of wrapping TCP connections in TLS encrption
+#    "pattern: ':tcp:50002' fixed_port: 50001", # bitcoin cash fulcrum
+#  ]
+#}
+
+# You can also add command entries for third party binaries or your own go
+# binaries that use the portal client library and tools libaries.
+#
+# Just set the binary field to an absolute file path or a path relative to the
+# spawn -path directory. When you're using the combined daemon binary it simply
+# checks for the built-in names before checking the -path directory.
+#
+# If you use a third-party binary you will probably need to set
+# no_chroot: true in the command config because currently dynamic library
+# don't work in chroots.
+#
+# Client library: https://pkg.go.dev/ask.systems/daemon/portal/gate
+# Tools library: https://pkg.go.dev/ask.systems/daemon/tools

@@ -5,8 +5,10 @@ package embedspawn
 
 import (
 	"bufio"
+	"errors"
 	"flag"
 	"fmt"
+	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
@@ -24,6 +26,9 @@ import (
 
 //go:embed config.proto
 var configSchema string
+
+//go:embed example_config.pbtxt
+var exampleConfig []byte
 
 //go:generate protoc -I ../ ../embedspawn/config.proto --go_out ../ --go_opt=paths=source_relative
 
@@ -63,11 +68,34 @@ func Run(flags *flag.FlagSet, args []string) {
 		"config_schema",
 		"Print the config schema in proto format, for reference, and exit.",
 	)
+	flags.Var(
+		tools.BoolFuncFlag(func(string) error {
+			fmt.Print(string(exampleConfig))
+			os.Exit(2)
+			return nil
+		}),
+		"example_config",
+		"Print the example config.pbtxt and exit.",
+	)
 	flags.Parse(args[1:])
 
-	commands, err := ReadConfig(*configFilename)
-	if err != nil {
-		log.Fatalf("Failed to read config file. error: \"%v\"", err)
+	usedExampleConf := false
+	commands, conferr := ReadConfig(*configFilename)
+	if conferr != nil {
+		if errors.Is(conferr, fs.ErrNotExist) {
+			log.Printf("Writing the example config to %v", *configFilename)
+			err := os.WriteFile(*configFilename, exampleConfig, 0640)
+			if err != nil {
+				log.Printf("Failed to write example config at %v: %v",
+					*configFilename, err)
+				log.Print("Continuing with the example config in memory only")
+			}
+			commands, conferr = loadConfig(exampleConfig)
+			usedExampleConf = true
+		}
+		if conferr != nil {
+			log.Fatalf("Failed to read config file. error: \"%v\"", conferr)
+		}
 	}
 
 	hasChroot := false
@@ -99,6 +127,9 @@ func Run(flags *flag.FlagSet, args []string) {
 		log.Printf("%v errors occurred in spawning", errcnt)
 	}
 
+	// Give portal time to start up if portal was the only child to start
+	time.Sleep(*spawningDelay)
+
 	adminAuth := &tools.BasicAuthHandler{Realm: "daemon"}
 	var logins []string
 	if *adminLogins == "" {
@@ -129,18 +160,17 @@ func Run(flags *flag.FlagSet, args []string) {
 	if _, err := startDashboard(children, adminAuth, quit); err != nil {
 		log.Print("Failed to start dashboard: ", err)
 		// TODO: retry it? Also check the dashboardQuit signal for retries
+	} else {
+		if usedExampleConf {
+			// Sleep for the async "Starting server..." log
+			time.Sleep(5 * time.Millisecond)
+			log.Printf("Since you used the example conf, the dashboard url is:\n"+
+				"\thttps://127.0.0.1:8080%v", *dashboardUrlFlag)
+		}
 	}
 
 	<-quit
 	log.Print("Goodbye.")
-}
-
-func (cmd *Command) FullName() string {
-	name := filepath.Base(cmd.Binary)
-	if cmd.Name != "" {
-		name = fmt.Sprintf("%v-%v", name, cmd.Name)
-	}
-	return name
 }
 
 func resolveRelativePaths(path string, commands []*Command) error {
@@ -166,11 +196,15 @@ func ReadConfig(filename string) ([]*Command, error) {
 	if err != nil {
 		return nil, err
 	}
+	return loadConfig(configText)
+}
+
+func loadConfig(configText []byte) ([]*Command, error) {
 	config := &Config{}
 	if err := prototext.Unmarshal(configText, config); err != nil {
 		return nil, err
 	}
-	err = resolveRelativePaths(*searchPath, config.Command)
+	err := resolveRelativePaths(*searchPath, config.Command)
 	return config.Command, err
 }
 

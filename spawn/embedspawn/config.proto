@@ -5,18 +5,6 @@ option go_package = "ask.systems/daemon/spawn/embedspawn";
 //
 // Write the file in proto text format which is documented here:
 // https://developers.google.com/protocol-buffers/docs/text-format-spec
-/*
-# Example config file (by the way textproto supports comments)
-command {
-	filepath: "host"
-	user: "www"
-	no_chroot: true
-	args: [
-		"--web_root /home/www/",
-		"--url_path /files/"
-	]
-}
-*/
 message Config {
 	repeated Command command = 1;
 }

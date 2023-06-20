@@ -318,8 +318,10 @@ func main() {
 	flag.Usage = func() {
 		fmt.Fprintf(flag.CommandLine.Output(), ""+
 			"Usage: %s [global flags] [subcommand] [subcommand flags]\n"+
-			"Run any subcommand with -help for the subcommand's flags.\n\nSubcommands:\n",
-			flag.CommandLine.Name())
+			"Run any subcommand with -help for the subcommand's flags.\n\n"+
+			"** Start by running %s spawn! It will give you an example config. **\n\n"+
+			"Subcommands:\n",
+			flag.CommandLine.Name(), flag.CommandLine.Name())
 		for _, cmd := range commands {
 			paddedDescription := strings.ReplaceAll(cmd.description,
 				"\n", fmt.Sprintf("\n"+namePadding, ""))

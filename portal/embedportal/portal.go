@@ -58,10 +58,12 @@ func Run(flags *flag.FlagSet, args []string) {
 		"Set to a local folder path to enable hosting the let's encrypt webroot\n"+
 		"challenge path ("+certChallengePattern+") so you can auto-renew with\n"+
 		"certbot. Set to empty string to turn this off.")
-	httpPort := flags.Int("http_port", 80,
-		"The port to bind to for http traffic.")
-	httpsPort := flags.Int("https_port", 443,
-		"The port to bind to for https traffic.")
+	httpPort := flags.Int("http_port", 80, ""+
+		"The port to bind to for http traffic.\n"+
+		"This is overridden if spawn provides ports.")
+	httpsPort := flags.Int("https_port", 443, ""+
+		"The port to bind to for https traffic.\n"+
+		"This is overridden if spawn provides ports.")
 	saveFilepath := flags.String("save_file", "state.protodata", ""+
 		"The path to the file to store active lease information in so that\n"+
 		"the portal server can safely restart without disrupting proxy service.\n")

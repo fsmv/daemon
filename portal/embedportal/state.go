@@ -42,6 +42,11 @@ func newStateManager(saveFilepath string) *stateManager {
 }
 
 func (s *stateManager) saveUnsafe() {
+	if s.saveFilepath == "" {
+		log.Print("No save file, state is only saved in memory.")
+		return
+	}
+
 	// Build the save state proto from the current in memory state
 	state := &State{}
 	if token := s.token.Load(); token != nil {
