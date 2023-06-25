@@ -6,8 +6,10 @@
 # Textproto format is specified here:
 #  https://developers.google.com/protocol-buffers/docs/text-format-spec
 #
-# You can read a detailed guide to setting up daemon at:
-#  https://pkg.go.dev/ask.systems/daemon
+# For setup instructions also read the README.md in the code repository:
+# https://github.com/fsmv/daemon
+#
+# For documentation see: https://pkg.go.dev/ask.systems/daemon
 
 # Each command entry is a process spawn will launch with the permissions of the
 # specified user and with the commandline arguments specified.
@@ -18,7 +20,9 @@
 #
 # This config is setup for running as the current user (not root) and testing
 # out daemon without having to configure anything. It will generate a self
-# signed cert in memory so it will be encrypted connections by default.
+# signed cert in memory so it will be encrypted connections by default. You will
+# need to accept warnings from your browser because of the self-signed cert, see
+# the permanent setup below and the README instructions for an official cert.
 command {
   binary: "portal"
   # Turn off the default which is to run all binaries in a chroot for security,
@@ -28,11 +32,11 @@ command {
   # The default working dir is the user's home dir but for local testing we just
   # want the current dir.
   working_dir: "./"
-  # Pass in the ports from spawn, portal knows to look for the file descriptors
-  # We could set the arguments and let portal listen itself but this is how it
-  # will be configured if you set up daemon permanently.
-  ports: [8088, 8080]
+  # You can list the arguments to any of the commands with, for example:
+  # daemon portal -help (and shared args with: daemon -help)
   args: [
+    # Set the ports to listen on, these ports are not root-only so portal
+    # doesn't need them passed in by spawn like below.
     "-http_port=8088",
     "-https_port=8080",
     # Set commandline arguments to avoid creating any files because by default
@@ -44,8 +48,8 @@ command {
 
 # You can add more commands here, like a host instance to run an HTTP file
 # server (commented example below), and continue to test out as your login user;
-# or you can delete the above config and setup running spawn as root for a
-# permanent config.
+# or you can delete the above config and use the config below to setup running
+# spawn as root for a permanent installation.
 
 #command {
 #  binary: "portal"
@@ -88,7 +92,7 @@ command {
 #  binary: "host"
 #  user: "www"
 #  # If you have multiple instances of the same binary, you can add a name so
-#  # that you can tell which is which on the spawn dashboard
+#  # that you can tell which is which on the spawn dashboard and in the logs
 #  name: "test"
 #  args: [
 #    # If you want to turn off the page that lists the files in the -web_root
@@ -97,8 +101,9 @@ command {
 #    # "--serve_directory_listing=false",
 #
 #    # Syslog lets you collect logs and compress old logs for all the servers on
-#    # your machine. All of the daemon binaries support it. When using chroots,
-#    # the simplest way to get syslog to work is to use the network protocol.
+#    # your machine. All of the daemon binaries support it, so if you use this
+#    # add it to portal too. When using chroots, the simplest way to get syslog
+#    # to work is to use the network protocol.
 #    #
 #    # "-syslog_remote=127.0.0.1",
 #
@@ -112,10 +117,10 @@ command {
 #    # This is the public URL to register with portal. This pattern is for
 #    # your-domain.example/files/*
 #    #
-#    # If you omit the trailing slash the pattern only matches the exact path not
-#    # not all subdirectories. You can also specify a domain name before the
-#    # first slash if you're using multiple domains.
-#    "-url_path=/test/"
+#    # If you omit the trailing slash the pattern only matches the exact path,
+#    # not all subdirectories like this pattern. You can also specify a domain
+#    # name before the first slash if you're using multiple domains with portal.
+#    "-url_path=/files/"
 #  ]
 #}
 
@@ -138,19 +143,28 @@ command {
 #  args: [
 #    "--syslog_remote=127.0.0.1",
 #
-#    # An example of configuring a third party web interface
+#    # For assimilate, after the flags it takes any number of textproto
+#    # arguments, which are the portal RegisterRequest to send. You can see the
+#    # proto file by running: daemon assimilate -register_request_proto
+#
+#    # An example of configuring a third party web interface.
 #    #
 #    # Use strip_pattern for servers that don't expect to be running behind a
-#    # reverse proxy. In this case /syncthing/index.html will be sent to the
-#    # syncthing server (running on port 8384) as /index.html
+#    # reverse proxy. In this case a request for /syncthing/index.html will be
+#    # sent to the syncthing server (running on the same IP as assimilate and
+#    # port 8384) as a request for /index.html
 #    "pattern: '/syncthing/' fixed_port: 8384 strip_pattern: true",
-#    # An example of wrapping TCP connections in TLS encrption
-#    "pattern: ':tcp:50002' fixed_port: 50001", # bitcoin cash fulcrum
+#
+#    # An example of wrapping TCP connections in TLS encryption.
+#    #
+#    # Portal will listen on port 50002 and unwrap TLS, and then forward the
+#    # packets to the IP of the machine assimilate is running on at port 50001
+#    "pattern: ':tcp:50002' fixed_port: 50001",
 #  ]
 #}
 
 # You can also add command entries for third party binaries or your own go
-# binaries that use the portal client library and tools libaries.
+# binaries that use the portal client library and tools libraries.
 #
 # Just set the binary field to an absolute file path or a path relative to the
 # spawn -path directory. When you're using the combined daemon binary it simply

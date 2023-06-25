@@ -25,8 +25,6 @@ do this is to import the [ask.systems/daemon/portal/flags] library:
 
 When running portal client binaries on the commandline you can use the
 PORTAL_ADDR and PORTAL_TOKEN environment variables to easily set the values.
-This doesn't work when you use spawn because spawn does not propegate the root
-environment variables to child processes.
 
 [gRPC]: https://grpc.io/
 [protos]: https://developers.google.com/protocol-buffers

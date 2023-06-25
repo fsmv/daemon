@@ -32,15 +32,17 @@ func Run(flags *flag.FlagSet, args []string) {
 		"web_root and sub-folders. If false serve 404 for directory paths, but still\n"+
 		"serve index.html.")
 	serveDotfiles := flags.Bool("serve_dotfiles", false, ""+
-		"If true, serve 404 for any files starting with . such as .passwords")
+		"If true, serve files starting with . such as .passwords, instead of\n"+
+		"serving 404 which is the default for security.")
 	logRequests := flags.Bool("log_requests", true, ""+
 		"If true, log all paths requested plus the IP of the client.")
 	passwordRealm := flags.String("password_realm", "host", ""+
 		"The string to pass to the browser for the basic auth realm. The browser will\n"+
 		"automatically send the same password if it has authorized with the realm\n"+
 		"before.")
-	flags.Var(tools.BoolFuncFlag(hashPassword), "hash_password",
-		"Set to hash a password for the .passwords file instead of hosting a server.")
+	flags.Var(tools.BoolFuncFlag(hashPassword), "hash_password", ""+
+		"Set this flag to run a password hash utility for the .passwords file,\n"+
+		"instead of hosting a server.")
 	flags.Parse(args[1:])
 
 	quit := make(chan struct{})
