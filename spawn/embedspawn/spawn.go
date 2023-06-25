@@ -12,7 +12,6 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"runtime/debug"
 	"strings"
 	"time"
 
@@ -96,26 +95,6 @@ func Run(flags *flag.FlagSet, args []string) {
 		if conferr != nil {
 			log.Fatalf("Failed to read config file. error: \"%v\"", conferr)
 		}
-	}
-
-	hasChroot := false
-	for _, cmd := range commands {
-		if !cmd.NoChroot {
-			hasChroot = true
-			break
-		}
-	}
-	// TODO: we can use buildinfo.Read on the child binaries to check them
-	// individually as well. That would be nicer.
-	//
-	// Technically spawn shouldn't need to be statically linked but on some
-	// platforms (linux) apparently os.ProcAttr.Sys.Chroot is ignored when
-	// CGO_ENABLED=1. I guess I could just call the syscall.Chroot myself...
-	if hasChroot && cgoEnabled() {
-		log.Print("Warning: This binary was not compiled with CGO_ENABLED=0 set.\n" +
-			"Chroots will not work because the binary is not staticaly linked. All child binaries\n" +
-			"without the no_chroot: true setting must be compiled with CGO_ENABLED=0 as well.\n" +
-			"To install daemon properly: CGO_ENABLED=0 go install ask.systems/daemon@latest")
 	}
 
 	quit := make(chan struct{})
@@ -206,22 +185,4 @@ func loadConfig(configText []byte) ([]*Command, error) {
 	}
 	err := resolveRelativePaths(*searchPath, config.Command)
 	return config.Command, err
-}
-
-// Returns true if this binary was not compiled with CGO_ENABLED=0, which means
-// that the binary will not be static linked and won't work in a chroot.
-func cgoEnabled() bool {
-	buildInfo, ok := debug.ReadBuildInfo()
-	if !ok {
-		log.Printf("Warning: could not read build tags, assuming CGO_ENABLED=1")
-		return true
-	}
-	for _, setting := range buildInfo.Settings {
-		if !strings.HasPrefix(setting.Key, "CGO_ENABLED") {
-			continue
-		}
-		return setting.Value == "1"
-	}
-	log.Printf("Warning: could not find the build tag, assuming CGO_ENABLED=1")
-	return true
 }

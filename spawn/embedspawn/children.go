@@ -1,6 +1,7 @@
 package embedspawn
 
 import (
+	"debug/elf"
 	"errors"
 	"fmt"
 	"io"
@@ -99,6 +100,9 @@ func (children *children) StartProgram(cmd *Command) error {
 		attr.Env = append(attr.Env, fmt.Sprintf("PORTAL_ADDR=%v", *gate.Address))
 		attr.Env = append(attr.Env, fmt.Sprintf("PORTAL_TOKEN=%v", *gate.Token))
 	}
+	if !cmd.NoChroot {
+		attr.Env = append(attr.Env, "LD_LIBRARY_PATH=/lib/")
+	}
 	log.Print("Starting ", name)
 	attr.Sys = &syscall.SysProcAttr{}
 
@@ -133,7 +137,7 @@ func (children *children) StartProgram(cmd *Command) error {
 		binary = cmd.Binary
 	} else {
 		// Copy the binary into the home dir and give the user access
-		binary, openerr = copyFile(cmd.Binary, filepath.Join(workingDir, name), creds.Uid, creds.Gid)
+		binary, openerr = chrootFile(cmd.Binary, filepath.Join(workingDir, name), creds.Uid, creds.Gid)
 	}
 	// If it's a megabinary, and there wasn't a user-provided binary load the
 	// command from the megabinary if it's there
@@ -149,21 +153,71 @@ func (children *children) StartProgram(cmd *Command) error {
 				binary = os.Args[0]
 				openerr = nil
 			} else {
-				binary, openerr = copyFile(os.Args[0], filepath.Join(workingDir, name), creds.Uid, creds.Gid)
+				binary, openerr = chrootFile(os.Args[0], filepath.Join(workingDir, name), creds.Uid, creds.Gid)
 			}
 			break
 		}
 	}
-	// Don't leave a dangling binary copy
+	if openerr != nil {
+		return fmt.Errorf("Failed to setup the binary to run: %w", openerr)
+	}
+
+	// Setup the dynamic libs in the chroot
 	if !cmd.NoChroot {
+		var libErr error
+		var copiedLibs []string
+		libs, interp, err := requiredLibs(binary)
+		if err != nil {
+			//_ = os.Remove(binary)
+			return fmt.Errorf("Failed to lookup dynamic libraries: %w", err)
+		}
+		for lib, _ := range libs {
+			newLib, err := chrootFile(lib,
+				filepath.Join(workingDir, "lib", filepath.Base(lib)),
+				creds.Uid, creds.Gid)
+			if err != nil {
+				libErr = fmt.Errorf("Failed to make %#v available in chroot: %w", lib, err)
+				break
+			}
+			copiedLibs = append(copiedLibs, newLib)
+		}
+		if libErr == nil {
+			for lib, _ := range interp {
+				newLib, err := chrootFile(lib,
+					filepath.Join(workingDir, lib),
+					creds.Uid, creds.Gid)
+				if err != nil {
+					/*if errors.Is(err, fs.ErrExist) {
+						continue
+					}*/
+					libErr = fmt.Errorf("Failed to make %#v available in chroot: %w", lib, err)
+					break
+				}
+				copiedLibs = append(copiedLibs, newLib)
+			}
+		}
+
+		// Don't leave dangling chroot files
 		defer func() {
 			if binary != "" {
 				_ = os.Remove(binary)
 			}
+			for _, lib := range copiedLibs {
+				_ = os.Remove(lib)
+			}
+			_ = os.Remove(filepath.Join(workingDir, "lib"))
+			// Remove all parent directories of interp libs, there might be multiple
+			for lib, _ := range interp {
+				for path := filepath.Dir(lib); path != "/"; path = filepath.Dir(path) {
+					_ = os.Remove(filepath.Join(workingDir, path))
+				}
+			}
 		}()
-	}
-	if openerr != nil {
-		return fmt.Errorf("Failed to setup the binary to run: %v", openerr)
+
+		// Wait to return so we delete any libs that didn't error
+		if libErr != nil {
+			return libErr
+		}
 	}
 	// Set up stdout and stderr piping
 	r, w, err := os.Pipe()
@@ -243,7 +297,7 @@ func (children *children) StartProgram(cmd *Command) error {
 		if err != nil {
 			log.Printf("Warning: failed to mkdir for /etc/localtime: %v", err)
 		}
-		timezoneFile, err := copyFile("/etc/localtime",
+		timezoneFile, err := chrootFile("/etc/localtime",
 			filepath.Join(workingDir, "/etc/localtime"), creds.Uid, creds.Gid)
 		if err != nil {
 			// Not worth returning over this, it will just be UTC log times
@@ -548,7 +602,21 @@ func openFiles(files []string) ([]*os.File, error) {
 }
 
 // Returns the new filepath of the binary (empty string if the file was not created)
-func copyFile(oldName string, newName string, uid, gid uint32) (string, error) {
+func chrootFile(oldName string, newName string, uid, gid uint32) (string, error) {
+	dir := filepath.Dir(newName)
+	err := os.MkdirAll(dir, 0750)
+	if err != nil {
+		return "", err
+	}
+	for path := dir; path != "/"; path = filepath.Dir(path) {
+		err = os.Chown(path, int(uid), int(gid))
+		if err != nil {
+			return "", err
+		}
+	}
+	// TODO: we could call os.Link to hardlink the files but it breaks if the
+	// source file is a symbolic link
+	log.Printf("Failed to hardlink %#v into chroot trying to copy instead.", oldName)
 	oldf, err := os.Open(oldName)
 	if err != nil {
 		return "", err
@@ -568,4 +636,63 @@ func copyFile(oldName string, newName string, uid, gid uint32) (string, error) {
 		return newName, err
 	}
 	return newName, newf.Close()
+}
+
+func requiredLibs(filename string) (libs map[string]struct{}, interp map[string]struct{}, err error) {
+	libs = make(map[string]struct{})
+	interp = make(map[string]struct{})
+	err = requiredLibsImpl(filename, libs, interp)
+	return
+}
+
+func requiredLibsImpl(filename string, libs map[string]struct{}, interp map[string]struct{}) error {
+	f, err := os.Open(filename)
+	if err != nil {
+		return err
+	}
+	bin, err := elf.NewFile(f)
+	if err != nil {
+		return err
+	}
+
+	// Read the path to the ld shared library which is also needed
+	for _, prog := range bin.Progs {
+		if prog.Type != elf.PT_INTERP {
+			continue
+		}
+		interpData := make([]byte, prog.Filesz-1) // -1 to cut off the \0 on the end
+		_, err := prog.ReadAt(interpData, 0)
+		if err != nil {
+			return fmt.Errorf("Failed to read interp data from elf: %w", err)
+		}
+		interp[string(interpData)] = struct{}{}
+		break
+	}
+
+	// Read the libraries used by the binary (loaded by the interp)
+	imports, err := bin.ImportedLibraries()
+	if err != nil {
+		return err
+	}
+	for _, lib := range imports {
+		rootLib := filepath.Join("/lib", lib)
+		usrLib := filepath.Join("/usr/lib", lib)
+		if _, ok := libs[rootLib]; ok {
+			continue
+		}
+		if _, ok := libs[usrLib]; ok {
+			continue
+		}
+		foundLib := rootLib
+		err = requiredLibsImpl(rootLib, libs, interp)
+		if errors.Is(err, fs.ErrNotExist) {
+			foundLib = usrLib
+			err = requiredLibsImpl(usrLib, libs, interp)
+		}
+		if err != nil {
+			return err
+		}
+		libs[foundLib] = struct{}{}
+	}
+	return nil
 }

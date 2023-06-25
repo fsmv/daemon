@@ -77,7 +77,7 @@ li.server {
 	{{if len .UpdateVersion | ne 0}}
 		<h3>{{.UpdateVersion}} is now available</h3>
 		<p>To update run:
-			<span class="code">CGO_ENABLED=0 go install ask.systems/daemon@latest</span>
+			<span class="code">sudo go install ask.systems/daemon@latest</span>
 		</p>
 	{{end}}
 	{{end}}

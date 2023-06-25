@@ -10,17 +10,15 @@ the daemon system into one simple package using subcommand arguments.
 
 # Installing
 
-	CGO_ENABLED=0 go install ask.systems/daemon@latest
+	sudo go install ask.systems/daemon@latest
 
-Why turn off cgo?
+You need to install it as root because you will run spawn as root so it is best
+for security to make the binary owned by root, otherwise the user that owns the
+binary could edit it and run any code as root. The easiest way to do this and
+allow for updating daemon is to just run go install as root.
 
-With the focus on security, daemon supports running servers in chroot, which
-means system libraries are not available to load by dynamic linking. Using the
-CGO_ENABLED=0 turns off C implementations used by certain go standard library
-packages, this produces a fully static linked binary that works in the chroot.
-
-So you should also compile your own go server binaries with CGO_ENABLED=0.
-For more information and options see: https://www.arp242.net/static-go.html
+Alternatively you can go install as your own user then move and chown the
+binary.
 
 # Setup and explanation
 
@@ -223,9 +221,6 @@ Make sure to take a look at the utility functions in [ask.systems/daemon/tools]!
 Take a look at the package example for the client library
 [ask.systems/daemon/portal/gate] for a simple go client of portal with encrypted
 internal traffic. It uses the standard [net/http.Handle] system.
-
-Remember: Make sure to compile your binaries with CGO_ENABLED=0 go build to
-allow them to run in a chroot.
 
 You can then copy your binary to /root/ next to daemon and add an entry to
 your /root/config.pbtxt with binary name and arguments. By default spawn

@@ -7,7 +7,7 @@ stays running so that it can keep the lease for the fixed port and path renewed.
 
 Install assimilate standalone with:
 
-	CGO_ENABLED=0 go install ask.systems/daemon/assimilate@latest
+	go install ask.systems/daemon/assimilate@latest
 
 You can also use assimilate as a subcommand of the combined [ask.systems/daemon]
 binary.

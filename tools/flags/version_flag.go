@@ -16,7 +16,7 @@ Provides:
 If you'd like to have the -version flag but exclude the syslog flags then you
 can compile your binary with:
 
-	CGO_ENABLED=0 go build -tags nosyslog
+	go build -tags nosyslog
 */
 package flags
 

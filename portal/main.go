@@ -7,7 +7,7 @@ gRPC, and then relays the backend's response back to the client.
 
 Install portal standalone with:
 
-	CGO_ENABLED=0 go install ask.systems/daemon/portal@latest
+	go install ask.systems/daemon/portal@latest
 
 You can also use portal as a subcommand of the combined [ask.systems/daemon]
 binary.

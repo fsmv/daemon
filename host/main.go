@@ -14,7 +14,7 @@ can use host -hash_password. Be careful about who has write access to
 
 Install host standalone with:
 
-	CGO_ENABLED=0 go install ask.systems/daemon/host@latest
+	go install ask.systems/daemon/host@latest
 
 You can also use host as a subcommand of the combined [ask.systems/daemon]
 binary.

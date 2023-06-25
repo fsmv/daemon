@@ -4,7 +4,7 @@ listed in the [textproto] config.pbtxt file.
 
 Install spawn standalone with:
 
-	CGO_ENABLED=0 go install ask.systems/daemon/spawn@latest
+	go install ask.systems/daemon/spawn@latest
 
 You can also use spawn as a subcommand of the combined [ask.systems/daemon]
 binary.
