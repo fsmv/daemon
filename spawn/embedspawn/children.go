@@ -128,17 +128,11 @@ func (children *children) StartProgram(cmd *Command) error {
 	if workingDir == "" {
 		workingDir = u.HomeDir
 	}
-	var binary string
-	var openerr error
-	if cmd.NoChroot {
-		binf, err := os.Open(cmd.Binary)
-		binf.Close()
-		openerr = err
-		binary = cmd.Binary
-	} else {
-		// Copy the binary into the home dir and give the user access
-		binary, openerr = chrootFile(cmd.Binary, filepath.Join(workingDir, name), creds.Uid, creds.Gid)
-	}
+
+	// Copy the binary into the home dir and give the user access.
+	// Do it even if not in a chroot so we make sure it is accessable to the user.
+	binary, openerr := chrootFile(cmd.Binary, filepath.Join(workingDir, name), creds.Uid, creds.Gid)
+
 	// If it's a megabinary, and there wasn't a user-provided binary load the
 	// command from the megabinary if it's there
 	subcommand := ""
@@ -158,12 +152,28 @@ func (children *children) StartProgram(cmd *Command) error {
 			break
 		}
 	}
+
+	// TODO: in the edge case that cmd.Binary and workingDir/name are the exact
+	// same file, we want to allow the copy the fail (or skip the copy) and not
+	// delete the binary.
+	//
+	// For example: this can happen if you use spawn and portal as separate
+	// binaries and use working_dir: "./" for portal (i.e. the example config).
+	//
+	// The work-around would be to use a sub-directory for the binaries
 	if openerr != nil {
 		return fmt.Errorf("Failed to setup the binary to run: %w", openerr)
 	}
 
-	// Setup the dynamic libs in the chroot
-	if !cmd.NoChroot {
+	if cmd.NoChroot {
+		// Just remove the binary, we don't copy over anything extra in this case
+		defer func() {
+			if binary != "" {
+				_ = os.Remove(binary)
+			}
+		}()
+	} else {
+		// Setup the dynamic libs in the chroot
 		var libErr error
 		var copiedLibs []string
 		libs, interp, err := requiredLibs(binary)
@@ -208,7 +218,7 @@ func (children *children) StartProgram(cmd *Command) error {
 			_ = os.Remove(filepath.Join(workingDir, "lib"))
 			// Remove all parent directories of interp libs, there might be multiple
 			for lib, _ := range interp {
-				for path := filepath.Dir(lib); path != "/"; path = filepath.Dir(path) {
+				for path := filepath.Dir(lib); path != "/" && path != "."; path = filepath.Dir(path) {
 					_ = os.Remove(filepath.Join(workingDir, path))
 				}
 			}
@@ -608,7 +618,7 @@ func chrootFile(oldName string, newName string, uid, gid uint32) (string, error)
 	if err != nil {
 		return "", err
 	}
-	for path := dir; path != "/"; path = filepath.Dir(path) {
+	for path := dir; path != "/" && path != "."; path = filepath.Dir(path) {
 		err = os.Chown(path, int(uid), int(gid))
 		if err != nil {
 			return "", err
