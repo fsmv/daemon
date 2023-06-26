@@ -41,7 +41,7 @@ func (l *logStream) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Streaming is not supported.", http.StatusInternalServerError)
 		return
 	}
-	logs, cancel := l.Children.StreamLogs()
+	logs, cancel := l.Children.StreamLogs(false /*includeHistory*/)
 	defer cancel()
 	log.Print("Logs streaming connection started.")
 
@@ -71,6 +71,11 @@ type dashboard struct {
 	adminAuth *tools.BasicAuthHandler
 }
 
+type dashboardData struct {
+	Children map[string]*child
+	Logs     map[string]string
+}
+
 func (d *dashboard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if !d.adminAuth.Check(w, r) {
 		if user, _, ok := r.BasicAuth(); ok {
@@ -97,10 +102,13 @@ func (d *dashboard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	d.Children.Lock()
+	d.Children.Lock() // Needed for d.Children.ByName
 	defer d.Children.Unlock()
 	var buff bytes.Buffer
-	err := d.templates.ExecuteTemplate(&buff, "dashboard.tmpl.html", d.Children.ByName)
+	err := d.templates.ExecuteTemplate(&buff, "dashboard.tmpl.html", dashboardData{
+		Children: d.Children.ByName,
+		Logs:     d.Children.DumpLogs(),
+	})
 	if err == nil {
 		w.Write(buff.Bytes())
 	} else {

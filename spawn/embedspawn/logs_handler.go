@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"strings"
 )
 
 const (
@@ -15,12 +16,18 @@ const (
 	kLogsTag = "spawn"
 )
 
+type subscribeRequest struct {
+	sub            chan<- logMessage
+	includeHistory bool
+}
+
 type logHandler struct {
 	logLines map[string]*ringBuffer
 	// Broadcasting system
 	quit        chan struct{}
 	publish     chan logMessage
-	subscribe   chan chan<- logMessage
+	subscribe   chan subscribeRequest
+	history     chan chan<- map[string]string
 	subscribers map[chan<- logMessage]struct{}
 }
 
@@ -30,7 +37,8 @@ func newLogHandler(quit chan struct{}) *logHandler {
 		logLines:    make(map[string]*ringBuffer),
 		subscribers: make(map[chan<- logMessage]struct{}),
 		publish:     make(chan logMessage, kPublishChannelSize),
-		subscribe:   make(chan chan<- logMessage),
+		subscribe:   make(chan subscribeRequest),
+		history:     make(chan chan<- map[string]string),
 	}
 	go h.run()
 	return h
@@ -43,21 +51,31 @@ func (h *logHandler) run() {
 		select {
 		case <-h.quit:
 			return
-		case sub := <-h.subscribe:
-			if _, ok := h.subscribers[sub]; ok {
-				delete(h.subscribers, sub)
-			} else {
-				// New subscribers get the history buffer
-				//
-				// TODO: if we send id: int after the data in the SSE stream then after
-				// reconnecting it will send a Last-Event-ID header so we can restart
-				// from the place we stopped at
+		case req := <-h.subscribe:
+			// New subscribers get the history buffer
+			//
+			// TODO: if we send id: int after the data in the SSE stream then after
+			// reconnecting it will send a Last-Event-ID header so we can restart
+			// from the place we stopped at
+			if req.includeHistory {
 				for tag, log := range h.logLines {
-					log.Write(sub, tag)
+					log.Write(req.sub, tag)
 				}
-
-				h.subscribers[sub] = struct{}{}
 			}
+
+			if _, ok := h.subscribers[req.sub]; ok {
+				delete(h.subscribers, req.sub)
+				close(req.sub)
+			} else {
+				h.subscribers[req.sub] = struct{}{}
+			}
+		case out := <-h.history:
+			ret := make(map[string]string)
+			for tag, ring := range h.logLines {
+				ret[tag] = ring.Dump()
+			}
+			out <- ret
+			close(out)
 		case m := <-h.publish:
 			// Make a new ring buffer if needed and push to the buffer
 			log, ok := h.logLines[m.Tag]
@@ -107,13 +125,22 @@ func (h *logHandler) HandleLogs(logs io.ReadCloser, tag string) {
 	}
 }
 
-func (h *logHandler) StreamLogs() (stream <-chan logMessage, cancel func()) {
+func (h *logHandler) StreamLogs(includeHistory bool) (stream <-chan logMessage, cancel func()) {
 	sub := make(chan logMessage, kSubscriptionChannelSize)
-	h.subscribe <- sub
-	return sub, func() {
-		h.subscribe <- sub
-		close(sub)
+	req := subscribeRequest{
+		sub:            sub,
+		includeHistory: includeHistory,
 	}
+	h.subscribe <- req
+	return sub, func() {
+		h.subscribe <- req
+	}
+}
+
+func (h *logHandler) DumpLogs() map[string]string {
+	result := make(chan map[string]string, 1)
+	h.history <- result
+	return <-result
 }
 
 type logMessage struct {
@@ -135,6 +162,19 @@ func (r *ringBuffer) Push(line string) {
 		r.filled = true
 		r.nextLine = 0
 	}
+}
+
+func (r *ringBuffer) Dump() string {
+	var out strings.Builder
+	if r.filled {
+		for _, line := range r.buffer[r.nextLine:] {
+			out.WriteString(line)
+		}
+	}
+	for _, line := range r.buffer[:r.nextLine] {
+		out.WriteString(line)
+	}
+	return out.String()
 }
 
 // Not thread safe, simultaneous push will break it

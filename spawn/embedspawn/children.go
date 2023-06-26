@@ -400,7 +400,7 @@ func lookupUser(username string) (*syscall.Credential, *user.User, error) {
 }
 
 func (c *children) waitForPortalToken() (string, error) {
-	logs, cancel := c.StreamLogs()
+	logs, cancel := c.StreamLogs(true /*includeHistory*/)
 	defer cancel()
 	ttl := time.After(10 * time.Second)
 	for {

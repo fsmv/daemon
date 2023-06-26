@@ -48,8 +48,7 @@ pre.logs {
 	/* 60 for the status width + 5 for the margin + 2 for the border */
 	margin: 0.5em 67px 0;
 	overflow: auto;
-	max-height: 15em;
-	min-height: 1.5em;
+	height: 15em;
 	border: 1px solid black;
 	padding-left: 0.5em;
 
@@ -127,9 +126,9 @@ li.server {
 				<form method="post">
 					<button type="submit" name="submit" value="reload-config" class="button reload-config">📝 Reload Config</button>
 				</form>
-				<pre class="logs" id="logs-spawn"></pre>
+				<pre class="logs" id="logs-spawn">{{index .Logs "spawn"}}</pre>
 			</li>
-			{{range .}}
+			{{range .Children}}
 			<li class="server" id="{{.Name}}">
 				{{if .Up}}<span class="status status-up">UP</span>{{else}}<span class="status status-down">DOWN</span>{{end}}<span class="name">{{.Name}}</span>
 
@@ -138,7 +137,7 @@ li.server {
 					<button type="submit" name="submit" value="restart" class="button restart-server">🔄 Restart Server</button>
 				</form>
 
-				<pre class="logs" id="logs-{{.Name}}"></pre>
+				<pre class="logs" id="logs-{{.Name}}">{{index $.Logs .Name}}</pre>
 
 				{{if not .Up }}
 				<p>{{.Message}}</p>
