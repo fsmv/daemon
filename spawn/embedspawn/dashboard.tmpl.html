@@ -2,6 +2,9 @@
 <html>
 	<head>
 <style>
+body {
+	background-color: #DCA;
+}
 #content {
 	margin: 0 auto;
 	max-width: 80em;
@@ -10,8 +13,19 @@
 	display: inline-block;
 }
 .status {
-	width: 3.5em;
+	width: 60px;
 	vertical-align: text-bottom;
+	border-radius: 1em;
+	text-align: center;
+	margin-right: 5px;
+}
+.status-up {
+	color: darkgreen;
+	border: 1px solid darkgreen;
+}
+.status-down {
+	color: darkred;
+	border: 1px solid darkred;
 }
 .name {
 	min-width: 13em;
@@ -30,11 +44,14 @@
 	user-select: all;
 }
 pre.logs {
-	background-color: #EEE;
-	margin: 0.5em 4.5em 0;
+	background-color: #BA8;
+	/* 60 for the status width + 5 for the margin + 2 for the border */
+	margin: 0.5em 67px 0;
 	overflow: auto;
 	max-height: 15em;
 	min-height: 1.5em;
+	border: 1px solid black;
+	padding-left: 0.5em;
 
 	/* Make the text stay scrolled at the bottom when appending */
 	display: flex;
@@ -46,7 +63,30 @@ ul.server-list {
 	padding: 0;
 }
 li.server {
-	margin-bottom: 0.5em;
+	margin-bottom: 1em;
+}
+.button {
+	border: 1px solid black;
+	border-radius: 0.4em;
+	padding: 0.2em 0.5em;
+}
+.reload-config {
+	background-color: mistyrose;
+}
+.reload-config:hover {
+	background-color: lightpink;
+}
+.reload-config:active {
+	background-color: hotpink;
+}
+.restart-server {
+	background-color: antiquewhite;
+}
+.restart-server:hover {
+	background-color: burlywood;
+}
+.restart-server:active {
+	background-color: darkgoldenrod;
 }
 </style>
 <script>
@@ -82,27 +122,20 @@ li.server {
 	{{end}}
 	{{end}}
 		<ul class="server-list">
-			<li class="server">
-				<span class="status" style="color:darkgreen">UP</span>
-				<span class="name">spawn</span>
+			<li class="server" id="spawn">
+				<span class="status status-up">UP</span><span class="name">spawn</span>
 				<form method="post">
-					<button type="submit" name="submit" value="reload-config">Reload Config</button>
+					<button type="submit" name="submit" value="reload-config" class="button reload-config">📝 Reload Config</button>
 				</form>
 				<pre class="logs" id="logs-spawn"></pre>
 			</li>
 			{{range .}}
-			<li class="server">
-				{{if .Up}}
-				<span class="status" style="color:darkgreen">UP</span>
-				{{else}}
-				<span class="status" style="color:red">DOWN</span>
-				{{end}}
-
-				<span class="name">{{.Name}}</span>
+			<li class="server" id="{{.Name}}">
+				{{if .Up}}<span class="status status-up">UP</span>{{else}}<span class="status status-down">DOWN</span>{{end}}<span class="name">{{.Name}}</span>
 
 				<form method="post">
 					<input type="hidden" name="name" value="{{.Name}}" />
-					<button type="submit" name="submit" value="restart">Restart Server</button>
+					<button type="submit" name="submit" value="restart" class="button restart-server">🔄 Restart Server</button>
 				</form>
 
 				<pre class="logs" id="logs-{{.Name}}"></pre>
