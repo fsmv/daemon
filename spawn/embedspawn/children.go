@@ -168,7 +168,7 @@ func (children *children) StartProgram(cmd *Command) error {
 		var copiedLibs []string
 		libs, interp, err := requiredLibs(binary)
 		if err != nil {
-			//_ = os.Remove(binary)
+			_ = os.Remove(binary)
 			return fmt.Errorf("Failed to lookup dynamic libraries: %w", err)
 		}
 		for lib, _ := range libs {
@@ -187,9 +187,9 @@ func (children *children) StartProgram(cmd *Command) error {
 					filepath.Join(workingDir, lib),
 					creds.Uid, creds.Gid)
 				if err != nil {
-					/*if errors.Is(err, fs.ErrExist) {
+					if errors.Is(err, fs.ErrExist) {
 						continue
-					}*/
+					}
 					libErr = fmt.Errorf("Failed to make %#v available in chroot: %w", lib, err)
 					break
 				}
