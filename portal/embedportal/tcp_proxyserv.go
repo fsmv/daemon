@@ -63,6 +63,7 @@ func (p *tcpProxy) Register(clientAddr string, request *gate.RegisterRequest) (*
 	port := strings.TrimPrefix(request.Pattern, tcpProxyPrefix)
 	listener, err := tls.Listen("tcp", port, p.tlsConfig) // hopefully the old listener has closed by now
 	if err != nil {
+		leasor.Unregister(lease)
 		return nil, fmt.Errorf("Failed to listen on the requested port for TCP Proxy (%v): %v", lease.Port, err)
 	}
 	serverAddress := fmt.Sprintf("%v:%v", clientAddr, lease.Port)

@@ -34,11 +34,6 @@ type rcpServ struct {
 	quit         chan struct{}
 }
 
-func hostname(address string) string {
-	portIdx := strings.Index(address, ":")
-	return address[:portIdx]
-}
-
 func (s *rcpServ) loadState(saveData []byte) {
 	state := &State{}
 	if err := proto.Unmarshal(saveData, state); err != nil {
@@ -69,7 +64,7 @@ func (s *rcpServ) loadState(saveData []byte) {
 		// Note: Don't check for expired leases, if we restart everyone gets an
 		// extension on their leases. We will remove leases from the file as the
 		// expire while we're online.
-		_, err := s.internalRegister(registration.ClientAddr, registration.Request)
+		_, err := s.internalRegister(registration.Lease.Address, registration.Request)
 		if err != nil {
 			log.Printf("Failed to recreate registration: %v\n%v", err, registration)
 			continue
@@ -81,7 +76,10 @@ func (s *rcpServ) loadState(saveData []byte) {
 
 func (s *rcpServ) MyHostname(ctx context.Context, empty *emptypb.Empty) (*gate.Hostname, error) {
 	p, _ := peer.FromContext(ctx)
-	clientAddr := hostname(p.Addr.String())
+	clientAddr, _, err := net.SplitHostPort(p.Addr.String())
+	if err != nil {
+		return nil, err
+	}
 	return &gate.Hostname{Hostname: clientAddr}, nil
 }
 
@@ -90,7 +88,30 @@ func (s *rcpServ) MyHostname(ctx context.Context, empty *emptypb.Empty) (*gate.H
 func (s *rcpServ) Register(ctx context.Context, request *gate.RegisterRequest) (*gate.Lease, error) {
 	// Get the RPC client's address (without the port) from gRPC
 	p, _ := peer.FromContext(ctx)
-	clientAddr := hostname(p.Addr.String())
+
+	var clientAddr string
+	if request.Hostname == "" {
+		var err error
+		clientAddr, _, err = net.SplitHostPort(p.Addr.String())
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		ipAddrs, err := net.LookupIP(request.Hostname)
+		if err != nil || len(ipAddrs) < 1 {
+			return nil, fmt.Errorf("Failed to resolve request.Hostname to an IP: %w", err)
+		}
+		// We have to register the resolved IP because it's possible to request
+		// different hostname strings that resolve to the same IP. Since this is
+		// used to make sure we don't hand out duplicate ports we need to make sure
+		// that we get the same port leasor for all of the alias hostnames.
+		//
+		// This isn't perfect because one machine can have multiple IPs but mostly
+		// this will be used with fixed_ports only anyway so there shouldn't be
+		// conflicts. Also I think you can actually set the bind address and have
+		// multiple servers on the same port.
+		clientAddr = ipAddrs[0].String()
+	}
 
 	lease, err := s.internalRegister(clientAddr, request)
 	if err != nil {
@@ -114,17 +135,16 @@ func (s *rcpServ) Register(ctx context.Context, request *gate.RegisterRequest) (
 	return lease, nil
 }
 
-func (s *rcpServ) internalRegister(client string, request *gate.RegisterRequest) (lease *gate.Lease, err error) {
+func (s *rcpServ) internalRegister(clientAddr string, request *gate.RegisterRequest) (lease *gate.Lease, err error) {
 	if strings.HasPrefix(request.Pattern, tcpProxyPrefix) {
-		lease, err = s.tcpProxy.Register(client, request)
+		lease, err = s.tcpProxy.Register(clientAddr, request)
 	} else {
-		lease, err = s.httpProxy.Register(client, request)
+		lease, err = s.httpProxy.Register(clientAddr, request)
 	}
 	if err == nil {
 		s.state.NewRegistration(&Registration{
-			ClientAddr: client,
-			Request:    request,
-			Lease:      lease,
+			Request: request,
+			Lease:   lease,
 		})
 	}
 	return
@@ -132,9 +152,7 @@ func (s *rcpServ) internalRegister(client string, request *gate.RegisterRequest)
 
 // Unregister unregisters the forwarding rule with the given pattern
 func (s *rcpServ) Unregister(ctx context.Context, lease *gate.Lease) (*gate.Lease, error) {
-	p, _ := peer.FromContext(ctx)
-	clientAddr := hostname(p.Addr.String())
-	leasor := s.clientLeasor.PortLeasorForClient(clientAddr)
+	leasor := s.clientLeasor.PortLeasorForClient(lease.Address)
 	err := leasor.Unregister(lease)
 	if err != nil {
 		log.Print(err)
@@ -148,9 +166,7 @@ func (s *rcpServ) Unregister(ctx context.Context, lease *gate.Lease) (*gate.Leas
 
 // Renew renews the lease on a currently registered pattern
 func (s *rcpServ) Renew(ctx context.Context, lease *gate.Lease) (*gate.Lease, error) {
-	p, _ := peer.FromContext(ctx)
-	clientAddr := hostname(p.Addr.String())
-	leasor := s.clientLeasor.PortLeasorForClient(clientAddr)
+	leasor := s.clientLeasor.PortLeasorForClient(lease.Address)
 	newLease, err := leasor.Renew(lease)
 	if err != nil {
 		log.Print(err)

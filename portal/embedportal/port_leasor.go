@@ -59,7 +59,7 @@ func (c *clientLeasor) PortLeasorForClient(clientAddr string) *portLeasor {
 		//
 		// So, save and re-use the heap space here when we find a client we already
 		// have a leasor for.
-		c.nextLeasor.Start(c.startPort, c.endPort, c.ttl, c.quit, c.copyOnCancel())
+		c.nextLeasor.Start(clientAddr, c.startPort, c.endPort, c.ttl, c.quit, c.copyOnCancel())
 		c.nextLeasor = &portLeasor{}
 	}
 	return leasor.(*portLeasor)
@@ -105,15 +105,17 @@ type portLeasor struct {
 	ttl              time.Duration
 	startPort        uint16
 	endPort          uint16
+	clientAddr       string
 }
 
-func (l *portLeasor) Start(startPort, endPort uint16, ttl time.Duration, quit chan struct{}, onCancel []onCancelFunc) {
+func (l *portLeasor) Start(clientAddr string, startPort, endPort uint16, ttl time.Duration, quit chan struct{}, onCancel []onCancelFunc) {
 	if endPort < startPort {
 		startPort, endPort = endPort, startPort
 	}
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
 	*l = portLeasor{
 		mut:              &sync.Mutex{},
+		clientAddr:       clientAddr,
 		startPort:        startPort,
 		endPort:          endPort,
 		ttl:              ttl,
@@ -143,6 +145,9 @@ func (l *portLeasor) Register(request *gate.RegisterRequest) (*gate.Lease, error
 
 	newLease := &gate.Lease{
 		Pattern: request.Pattern,
+		// We don't use the Hostname field in the request because this field will be
+		// resolved to the RPC sender address if the request didn't set one.
+		Address: l.clientAddr,
 	}
 
 	// Either use the fixed port or select a port automatically

@@ -8,7 +8,6 @@ message Registration {
 	// Note: the Certificate field is not filled in the stored copy because it is
 	// not passed through. It could have been done but it wasn't necessary.
 	Lease lease = 2;
-	string client_addr = 3;
 }
 
 message State {

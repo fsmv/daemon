@@ -85,6 +85,7 @@ func (p *httpProxy) Register(
 	useTLS := len(request.CertificateRequest) != 0
 	err = p.saveForwarder(clientAddr, lease, request.StripPattern, request.AllowHttp, useTLS)
 	if err != nil {
+		leasor.Unregister(lease)
 		return nil, err
 	}
 	log.Printf("Registered forwarder to %v:%v, Pattern: %#v, Timeout: %v",

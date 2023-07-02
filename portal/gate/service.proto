@@ -35,6 +35,14 @@ message RegisterRequest {
 	// use an random lease port.
 	// Must be outside the range of portal's automatic ports.
 	uint32 fixed_port = 2;
+	// Optional: If set, forward the requests for pattern to this IP/hostname.
+	// If unset, forward requests to the IP that sent the RegisterRequest.
+	//
+	// It is easiest to just run assimilate on the machine you want the forwarding
+	// rule for, but if you have a cpanel-only host or otherwise don't have access
+	// to run arbitrary code then you can use this setting to run assimilate on
+	// another machine.
+	string hostname = 6;
 
 	// If true, remove the pattern in the URL of HTTP requests we forward to the
 	// backend to hide that it is behind a reverse proxy.
@@ -57,6 +65,7 @@ message RegisterRequest {
 
 message Lease {
 	string pattern = 1;
+	string address = 5;
 	uint32 port = 2;
 	google.protobuf.Timestamp timeout = 3;
 
