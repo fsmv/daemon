@@ -626,7 +626,6 @@ func chrootFile(oldName string, newName string, uid, gid uint32) (string, error)
 	}
 	// TODO: we could call os.Link to hardlink the files but it breaks if the
 	// source file is a symbolic link
-	log.Printf("Failed to hardlink %#v into chroot trying to copy instead.", oldName)
 	oldf, err := os.Open(oldName)
 	if err != nil {
 		return "", err
