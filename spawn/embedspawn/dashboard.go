@@ -95,10 +95,10 @@ func (d *dashboard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		case "restart":
 			name := r.Form.Get("name")
 			log.Print("Restart request for ", name)
-			go d.Children.RestartChild(name)
+			d.Children.RestartChild(name)
 		case "reload-config":
 			log.Print("Reloading config")
-			go d.Children.ReloadConfig()
+			d.Children.ReloadConfig()
 		}
 	}
 
