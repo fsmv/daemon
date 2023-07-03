@@ -137,14 +137,12 @@ func (children *children) StartProgram(cmd *Command) error {
 
 	// If it's a megabinary, and there wasn't a user-provided binary load the
 	// command from the megabinary if it's there
-	subcommand := ""
 	if openerr != nil && len(MegabinaryCommands) > 0 && errors.Is(openerr, fs.ErrNotExist) {
 		testCommand := filepath.Base(cmd.Binary)
 		for _, supported := range MegabinaryCommands {
 			if testCommand != supported {
 				continue
 			}
-			subcommand = testCommand
 			binary, openerr = copyFile(os.Args[0], filepath.Join(workingDir, name), creds.Uid, creds.Gid, true /*exclusive*/)
 			break
 		}
@@ -257,17 +255,7 @@ func (children *children) StartProgram(cmd *Command) error {
 		binpath = "/" + filepath.Base(binary)
 	}
 	// Finalize the argv
-	var startArgs []string
-	if subcommand != "" && cmd.NoChroot {
-		// if we are using a subcommand and we didn't copy the binary, then we need
-		// to specify the subcommand on the commandline. In chroot mode we just
-		// change the name of the binary to the subcommand and it checks argv[0].
-		// TODO: this could be cleaned up, maybe ditch the argv[0] thing
-		startArgs = []string{binpath, subcommand}
-	} else {
-		startArgs = []string{binpath}
-	}
-	argv := append(startArgs, cmd.Args...)
+	argv := append([]string{binpath}, cmd.Args...)
 
 	// For chroots copy timezone info into the home dir and give the user access
 	var chrootedFiles []string
