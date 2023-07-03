@@ -100,6 +100,8 @@ func (d *dashboard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			log.Print("Reloading config")
 			d.Children.ReloadConfig()
 		}
+		http.Redirect(w, r, r.URL.Path, http.StatusSeeOther)
+		return
 	}
 
 	d.Children.Lock() // Needed for d.Children.ByName
