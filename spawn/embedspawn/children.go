@@ -197,7 +197,7 @@ func (children *children) StartProgram(cmd *Command) error {
 
 		// Wait to return so we delete any libs that didn't error
 		if libErr != nil {
-			return libErr
+			return fmt.Errorf("Failed to copy libraries for %v: %w", name, libErr)
 		}
 	}
 	// Set up stdout and stderr piping
@@ -571,9 +571,15 @@ func chrootFiles(uid, gid uint32, root string, filenames []string) ([]string, er
 		}
 
 		// Make all the parent directories inside the chroot
-		var direrr error
+		var dirs []string
 		for dir := filepath.Dir(filename); dir != "/" && dir != "."; dir = filepath.Dir(dir) {
 			newDir := filepath.Join(root, dir)
+			dirs = append(dirs, newDir)
+		}
+		var direrr error
+		// We have to go in reverse order so we make parent dirs first
+		for i := len(dirs) - 1; i >= 0; i-- {
+			newDir := dirs[i]
 			direrr = makeOwnedDir(newDir, uid, gid)
 			if direrr != nil {
 				rerr = errors.Join(rerr, direrr)
@@ -602,7 +608,7 @@ func chrootFiles(uid, gid uint32, root string, filenames []string) ([]string, er
 			}
 		}
 	}
-	newFiles := make([]string, len(newFilesMap))
+	newFiles := make([]string, 0, len(newFilesMap))
 	for newFile, _ := range newFilesMap {
 		newFiles = append(newFiles, newFile)
 	}
