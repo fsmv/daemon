@@ -96,6 +96,8 @@ func (d *dashboard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			name := r.Form.Get("name")
 			log.Print("Restart request for ", name)
 			d.Children.RestartChild(name)
+			http.Redirect(w, r, fmt.Sprintf("%v#%v", r.URL.Path, name), http.StatusSeeOther)
+			return
 		case "reload-config":
 			log.Print("Reloading config")
 			d.Children.ReloadConfig()
