@@ -13,6 +13,7 @@ import (
 	"os/user"
 	"path"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -35,6 +36,7 @@ type child struct {
 	Name            string
 	Cmd             *Command
 	Proc            *os.Process
+	ChrootFiles     []string
 	quitFileRefresh chan struct{}
 }
 
@@ -131,7 +133,7 @@ func (children *children) StartProgram(cmd *Command) error {
 
 	// Copy the binary into the home dir and give the user access.
 	// Do it even if not in a chroot so we make sure it is accessable to the user.
-	binary, openerr := chrootFile(cmd.Binary, filepath.Join(workingDir, name), creds.Uid, creds.Gid)
+	binary, openerr := copyFile(cmd.Binary, filepath.Join(workingDir, name), creds.Uid, creds.Gid, true /*exclusive*/)
 
 	// If it's a megabinary, and there wasn't a user-provided binary load the
 	// command from the megabinary if it's there
@@ -143,12 +145,7 @@ func (children *children) StartProgram(cmd *Command) error {
 				continue
 			}
 			subcommand = testCommand
-			if cmd.NoChroot {
-				binary = os.Args[0]
-				openerr = nil
-			} else {
-				binary, openerr = chrootFile(os.Args[0], filepath.Join(workingDir, name), creds.Uid, creds.Gid)
-			}
+			binary, openerr = copyFile(os.Args[0], filepath.Join(workingDir, name), creds.Uid, creds.Gid, true /*exclusive*/)
 			break
 		}
 	}
@@ -174,38 +171,21 @@ func (children *children) StartProgram(cmd *Command) error {
 		}()
 	} else {
 		// Setup the dynamic libs in the chroot
-		var libErr error
-		var copiedLibs []string
+		var libFiles []string
+
 		libs, interp, err := requiredLibs(binary)
 		if err != nil {
 			_ = os.Remove(binary)
 			return fmt.Errorf("Failed to lookup dynamic libraries: %w", err)
 		}
 		for lib, _ := range libs {
-			newLib, err := chrootFile(lib,
-				filepath.Join(workingDir, "lib", filepath.Base(lib)),
-				creds.Uid, creds.Gid)
-			if err != nil {
-				libErr = fmt.Errorf("Failed to make %#v available in chroot: %w", lib, err)
-				break
-			}
-			copiedLibs = append(copiedLibs, newLib)
+			libFiles = append(libFiles, lib)
 		}
-		if libErr == nil {
-			for lib, _ := range interp {
-				newLib, err := chrootFile(lib,
-					filepath.Join(workingDir, lib),
-					creds.Uid, creds.Gid)
-				if err != nil {
-					if errors.Is(err, fs.ErrExist) {
-						continue
-					}
-					libErr = fmt.Errorf("Failed to make %#v available in chroot: %w", lib, err)
-					break
-				}
-				copiedLibs = append(copiedLibs, newLib)
-			}
+		for lib, _ := range interp {
+			libFiles = append(libFiles, lib)
 		}
+
+		copiedLibs, libErr := chrootFiles(creds.Uid, creds.Gid, workingDir, libFiles)
 
 		// Don't leave dangling chroot files
 		defer func() {
@@ -214,13 +194,6 @@ func (children *children) StartProgram(cmd *Command) error {
 			}
 			for _, lib := range copiedLibs {
 				_ = os.Remove(lib)
-			}
-			_ = os.Remove(filepath.Join(workingDir, "lib"))
-			// Remove all parent directories of interp libs, there might be multiple
-			for lib, _ := range interp {
-				for path := filepath.Dir(lib); path != "/" && path != "."; path = filepath.Dir(path) {
-					_ = os.Remove(filepath.Join(workingDir, path))
-				}
 			}
 		}()
 
@@ -297,36 +270,17 @@ func (children *children) StartProgram(cmd *Command) error {
 	argv := append(startArgs, cmd.Args...)
 
 	// For chroots copy timezone info into the home dir and give the user access
+	var chrootedFiles []string
 	if !cmd.NoChroot {
 		// TODO: There should be some kind of config for which files we copy in
-		// Also maybe we should use symbolic or hard links.
-		// I need to standardize the time it stays there too somehow. Maybe it can
-		// stay forever with hard links? Not sure what the best thing is.
-		// We probably at least need /etc/resolv.conf as well.
-		err := os.Mkdir(filepath.Join(workingDir, "/etc/"), 0777)
+		chrootedFiles, err = chrootFiles(creds.Uid, creds.Gid, workingDir, []string{
+			"/etc/localtime",
+			"/etc/resolv.conf",
+			"/etc/ssl/",
+		})
 		if err != nil {
-			log.Printf("Warning: failed to mkdir for /etc/localtime: %v", err)
+			log.Print("Warning, some chroot files were not successful:\n", err)
 		}
-		timezoneFile, err := chrootFile("/etc/localtime",
-			filepath.Join(workingDir, "/etc/localtime"), creds.Uid, creds.Gid)
-		if err != nil {
-			// Not worth returning over this, it will just be UTC log times
-			log.Printf("Warning: failed to copy /etc/localtime into the chroot dir: %v", err)
-		}
-		// Don't leave a dangling file
-		go func() {
-			time.Sleep(30 * time.Second) // Give the binary time to load it
-			if timezoneFile != "" {
-				err = os.Remove(timezoneFile) // remove the file
-				if err != nil {
-					log.Printf("Warning: failed to remove /etc/localtime file in chroot: %v", err)
-				}
-				err = os.Remove(filepath.Dir(timezoneFile)) // remove the etc folder
-				if err != nil {
-					log.Printf("Warning: failed to remove /etc/ dir in chroot: %v", err)
-				}
-			}
-		}()
 	}
 
 	// Start the process
@@ -336,6 +290,7 @@ func (children *children) StartProgram(cmd *Command) error {
 		Cmd:             cmd,
 		Proc:            proc,
 		Name:            name,
+		ChrootFiles:     chrootedFiles,
 		quitFileRefresh: quitFileRefresh,
 	}
 	if err != nil {
@@ -506,6 +461,12 @@ func (c *children) ReportDown(pid int, message error) {
 		log.Printf("Got death message for unregistered child: %v", message)
 		return
 	}
+
+	for _, file := range child.ChrootFiles {
+		os.Remove(file)
+	}
+	child.ChrootFiles = nil
+
 	// Don't accumulate old Child structs in the ByPID map forever, we will still
 	// have it in the ByName map until it gets reloaded then the GC will delete it
 	delete(c.ByPID, pid)
@@ -611,19 +572,99 @@ func openFiles(files []string) ([]*os.File, error) {
 	return ret, nil
 }
 
-// Returns the new filepath of the binary (empty string if the file was not created)
-func chrootFile(oldName string, newName string, uid, gid uint32) (string, error) {
-	dir := filepath.Dir(newName)
-	err := os.MkdirAll(dir, 0750)
-	if err != nil {
-		return "", err
-	}
-	for path := dir; path != "/" && path != "."; path = filepath.Dir(path) {
-		err = os.Chown(path, int(uid), int(gid))
+func chrootFiles(uid, gid uint32, root string, filenames []string) ([]string, error) {
+	newFilesMap := make(map[string]struct{})
+	var rerr error
+	for _, filename := range filenames {
+		stat, err := os.Stat(filename)
 		if err != nil {
-			return "", err
+			rerr = errors.Join(rerr, err)
+			continue
+		}
+
+		// Make all the parent directories inside the chroot
+		var direrr error
+		for dir := filepath.Dir(filename); dir != "/" && dir != "."; dir = filepath.Dir(dir) {
+			newDir := filepath.Join(root, dir)
+			direrr = makeOwnedDir(newDir, uid, gid)
+			if direrr != nil {
+				rerr = errors.Join(rerr, direrr)
+				break
+			}
+			newFilesMap[newDir] = struct{}{}
+		}
+		if direrr != nil {
+			continue
+		}
+
+		if stat.IsDir() {
+			err := copyDirectory(filename, filepath.Join(root, filename), uid, gid, newFilesMap)
+			if err != nil {
+				rerr = errors.Join(rerr, err)
+				continue
+			}
+		} else { // Just chroot a single file
+			newName, err := copyFile(filename, filepath.Join(root, filename), uid, gid, false /*exclusive*/)
+			if newName != "" {
+				newFilesMap[newName] = struct{}{}
+			}
+			if err != nil {
+				rerr = errors.Join(rerr, err)
+				continue
+			}
 		}
 	}
+	newFiles := make([]string, len(newFilesMap))
+	for newFile, _ := range newFilesMap {
+		newFiles = append(newFiles, newFile)
+	}
+	// Sort so we remove files before directories
+	sort.Slice(newFiles, func(i, j int) bool {
+		return newFiles[i] > newFiles[j]
+	})
+	return newFiles, rerr
+}
+
+func copyDirectory(dir, newDir string, uid, gid uint32, copiedFiles map[string]struct{}) error {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	var rerr error
+	for _, entry := range entries {
+		if entry.IsDir() {
+			name := entry.Name()
+			newSubdir := filepath.Join(newDir, name)
+			err := makeOwnedDir(newSubdir, uid, gid)
+			if err != nil {
+				rerr = errors.Join(rerr, err)
+				continue
+			}
+			copiedFiles[newSubdir] = struct{}{}
+			err = copyDirectory(filepath.Join(dir, name), newSubdir, uid, gid, copiedFiles)
+			if err != nil {
+				rerr = errors.Join(rerr, err)
+			}
+			continue
+		}
+		name := entry.Name()
+		newName, err := copyFile(
+			filepath.Join(dir, name),
+			filepath.Join(newDir, name),
+			uid, gid, false /*exclusive*/)
+		if newName != "" {
+			copiedFiles[newName] = struct{}{}
+		}
+		if err != nil {
+			rerr = errors.Join(rerr, err)
+			continue
+		}
+	}
+	return rerr
+}
+
+// Returns the new filepath of the binary (empty string if the file was not created)
+func copyFile(oldName string, newName string, uid, gid uint32, exclusive bool) (string, error) {
 	// TODO: we could call os.Link to hardlink the files but it breaks if the
 	// source file is a symbolic link
 	oldf, err := os.Open(oldName)
@@ -631,7 +672,11 @@ func chrootFile(oldName string, newName string, uid, gid uint32) (string, error)
 		return "", err
 	}
 	defer oldf.Close()
-	newf, err := os.OpenFile(newName, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0550)
+	flags := os.O_RDWR | os.O_CREATE
+	if exclusive {
+		flags |= os.O_EXCL
+	}
+	newf, err := os.OpenFile(newName, flags, 0550)
 	if err != nil {
 		newf.Close()
 		return newName, err
@@ -645,6 +690,19 @@ func chrootFile(oldName string, newName string, uid, gid uint32) (string, error)
 		return newName, err
 	}
 	return newName, newf.Close()
+}
+
+func makeOwnedDir(dir string, uid, gid uint32) error {
+	err := os.Mkdir(dir, 0750)
+	if err != nil && !errors.Is(err, fs.ErrExist) {
+		return err
+	}
+	err = os.Chown(dir, int(uid), int(gid))
+	if err != nil {
+		os.Remove(dir)
+		return err
+	}
+	return nil
 }
 
 func requiredLibs(filename string) (libs map[string]struct{}, interp map[string]struct{}, err error) {

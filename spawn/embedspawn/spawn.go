@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	_ "embed"
@@ -149,6 +150,18 @@ func Run(flags *flag.FlagSet, args []string) {
 	}
 
 	<-quit
+	if !*dontKillChildren {
+		shutdownErr := errors.New("Shutting down.")
+		for _, child := range children.ByPID {
+			proc := child.Proc
+			if proc != nil {
+				log.Print("Killing ", child.Name)
+				proc.Signal(syscall.SIGTERM)
+			}
+			// Note: this deletes the chroot files (and logs messages)
+			children.ReportDown(proc.Pid, shutdownErr)
+		}
+	}
 	log.Print("Goodbye.")
 }
 
