@@ -70,9 +70,13 @@ func (s *stateManager) saveUnsafe() {
 		log.Print("Failed to marshal save state to store leases: ", err)
 		return
 	}
-	if err := os.WriteFile(s.saveFilepath, saveData, 0660); err != nil {
-		log.Print("Failed to write save state file to store leases: ", err)
+	tmpFilepath := s.saveFilepath + ".tmp"
+	if err := os.WriteFile(tmpFilepath, saveData, 0660); err != nil {
+		log.Print("Failed to write temp save state file to store leases: ", err)
 		return
+	}
+	if err := os.Rename(tmpFilepath, s.saveFilepath); err != nil {
+		log.Print("Failed to overwrite save state file to store leases: ", err)
 	}
 	log.Print("Saved leases state file")
 }
