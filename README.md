@@ -17,16 +17,16 @@ encryption.
  - 🔛 Launch backend servers isolated in a chroot as unprivileged users,
    configured in a simple
    [textproto](https://developers.google.com/protocol-buffers/docs/text-format-spec)
-   file.
+   file
  - 🤖 Backends automatically register their paths on the domain via gRPC
-   (there's also support for servers that can't send the RPCs) and recieve a
+   (there's also support for servers that can't send the RPCs) and receive a
    port assignment and get their TLS certificate signed by the portal
    Certificate Authority
  - 📚 There's a
    [client library](https://pkg.go.dev/ask.systems/daemon/portal/gate) to do all
    this in one function call, and a
    [tools library](https://pkg.go.dev/ask.systems/daemon/tools) full of helpful
-   functions for writing a go webserver.
+   functions for writing a go webserver
  - 👾 Install as one binary that runs each server, or as individual binaries
 
 # Programs
@@ -40,12 +40,12 @@ encryption.
    - Runs the dashboard to restart the processes or view logs
  - [portal](https://pkg.go.dev/ask.systems/daemon/portal), the reverse proxy,
    sets up the forwarding rules via gRPC dynamically instead of a using a static
-   config file.
+   config file
    - So you can run a development server and have it register a temporary
      path without needing access to your TLS certificate
    - It works over the internet too (everything is TLS encrypted), so you can
      put many servers behind one URL without needing to configure all of the
-     backends centrally.
+     backends centrally
  - [host](https://pkg.go.dev/ask.systems/daemon/host) a simple
    static website or file server that supports password protection
  - [assimilate](https://pkg.go.dev/ask.systems/daemon/assimilate) which
@@ -80,12 +80,12 @@ hosting a static website (there's an example in the file commented out).
 ### 1. You need to run spawn as root
 
 This is so that it can access the TLS certs, open port 80,
-and run the other servers as less priveledged users in a chroot. The easiest way
+and run the other servers as less privileged users in a chroot. The easiest way
 to set it up so that you can quickly update daemon is to install with:
 
     sudo go install ask.systems/daemon@latest
 
-This will run the go compiler as root and download from the offical goproxy
+This will run the go compiler as root and download from the official goproxy
 server but I think it's trustworthy. If you prefer you can just copy the binary
 to a root owned place after installing it with non-root.
 
@@ -97,7 +97,7 @@ meant for ports 80 & 443
 You can print the example config with `daemon spawn -example_config`. Spawn also
 will create the file if you run it with no arguments (and run portal too).
 
-You should make the `config.pbtxt` only accessable to root, because anyone who
+You should make the `config.pbtxt` only accessible to root, because anyone who
 can write it can run arbitrary binaries as any user, also you might have API
 keys in it so you probably don't want people reading it either.
 
@@ -106,8 +106,8 @@ home dir for the user because daemon uses it  to store save files or files to
 host by default. I recommend making a dedicated user for portal in particular,
 but you can use the usually-existing www user for host and assimilate, or you
 can make new users for each server. It's best to keep servers isolated so they
-can't access eachothers files in case one has a vulnerability or bug, especially
-with servers you download.
+can't access each others files in case one has a vulnerability or bug,
+especially with servers you download.
 
 ### 3. Setup a https://letsencrypt.org/ TLS certificate for your domain name
 
@@ -121,7 +121,7 @@ certificate for the first time. Certbot will make your certificate only readable
 by root and you should leave it that way and leave it in the path certbot puts
 it in.
 
-To setup autorenewing I prefer to use cron (but you can use systemd timers or
+To setup auto-renewing I prefer to use cron (but you can use systemd timers or
 whatever else) to run the following script weekly:
 
     certbot certonly -n --webroot -w /home/portal/cert-challenge/ -d <domain>
@@ -180,8 +180,8 @@ go install ask.systems/daemon/host@latest
 ```
 
 Tip: The portal client library reads the `PORTAL_ADDR` and `PORTAL_TOKEN`
-environment variables automatically so if you set those up in your shell
+environment variables automatically. So if you set those up in your shell
 dotfiles you can just run daemon binaries or go servers you wrote yourself with
-no setup and automatically have it serve on your damain name with TLS publicly
-and internally, even if you're on a completely different network from your
-portal machine.
+no other setup. That way it will automatically serve on your domain name with
+TLS publicly and internally, even if you're on a completely different network
+from your portal machine.
