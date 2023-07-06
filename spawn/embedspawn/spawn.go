@@ -154,10 +154,12 @@ func Run(flags *flag.FlagSet, args []string) {
 		shutdownErr := errors.New("Shutting down.")
 		for _, child := range children.ByPID {
 			proc := child.Proc
-			if proc != nil {
-				log.Print("Killing ", child.Name)
-				proc.Signal(syscall.SIGTERM)
+			if proc == nil {
+				continue
 			}
+			log.Print("Killing ", child.Name)
+			proc.Signal(syscall.SIGTERM)
+			proc.Wait()
 			// Note: this deletes the chroot files (and logs messages)
 			children.ReportDown(proc.Pid, shutdownErr)
 		}
