@@ -1,6 +1,7 @@
 package embedspawn
 
 import (
+	"bufio"
 	"debug/elf"
 	"errors"
 	"fmt"
@@ -46,6 +47,8 @@ type children struct {
 	// Note the PID map will contain all old instances of servers
 	ByPID  map[int]*child
 	ByName map[string]*child
+
+	libPaths []string
 }
 
 func newChildren(quit chan struct{}) *children {
@@ -54,6 +57,7 @@ func newChildren(quit chan struct{}) *children {
 		newLogHandler(quit),
 		make(map[int]*child),
 		make(map[string]*child),
+		libraryPaths(),
 	}
 	r, w := io.Pipe()
 	log.SetOutput(io.MultiWriter(log.Writer(), tools.NewTimestampWriter(w)))
@@ -171,7 +175,7 @@ func (children *children) StartProgram(cmd *Command) error {
 		// Setup the dynamic libs in the chroot
 		var libFiles []string
 
-		libs, interp, err := requiredLibs(binary)
+		libs, interp, err := requiredLibs(children.libPaths, binary)
 		if err != nil {
 			_ = os.Remove(binary)
 			return fmt.Errorf("Failed to lookup dynamic libraries: %w", err)
@@ -699,14 +703,14 @@ func makeOwnedDir(dir string, uid, gid uint32) error {
 	return nil
 }
 
-func requiredLibs(filename string) (libs map[string]struct{}, interp map[string]struct{}, err error) {
+func requiredLibs(paths []string, filename string) (libs map[string]struct{}, interp map[string]struct{}, err error) {
 	libs = make(map[string]struct{})
 	interp = make(map[string]struct{})
-	err = requiredLibsImpl(filename, libs, interp)
+	err = requiredLibsImpl(paths, filename, libs, interp)
 	return
 }
 
-func requiredLibsImpl(filename string, libs map[string]struct{}, interp map[string]struct{}) error {
+func requiredLibsImpl(paths []string, filename string, libs map[string]struct{}, interp map[string]struct{}) error {
 	f, err := os.Open(filename)
 	if err != nil {
 		return err
@@ -735,25 +739,74 @@ func requiredLibsImpl(filename string, libs map[string]struct{}, interp map[stri
 	if err != nil {
 		return err
 	}
+
 	for _, lib := range imports {
-		rootLib := filepath.Join("/lib", lib)
-		usrLib := filepath.Join("/usr/lib", lib)
-		if _, ok := libs[rootLib]; ok {
-			continue
+		for _, path := range paths {
+			libPath := filepath.Join(path, lib)
+			if _, ok := libs[libPath]; ok {
+				continue
+			}
+			err := requiredLibsImpl(paths, libPath, libs, interp)
+			if errors.Is(err, fs.ErrNotExist) {
+				continue
+			}
+			if err != nil {
+				return err
+			}
+			libs[libPath] = struct{}{}
 		}
-		if _, ok := libs[usrLib]; ok {
-			continue
-		}
-		foundLib := rootLib
-		err = requiredLibsImpl(rootLib, libs, interp)
-		if errors.Is(err, fs.ErrNotExist) {
-			foundLib = usrLib
-			err = requiredLibsImpl(usrLib, libs, interp)
-		}
-		if err != nil {
-			return err
-		}
-		libs[foundLib] = struct{}{}
 	}
 	return nil
+}
+
+func readLibPaths(filename string) ([]string, error) {
+	f, err := os.Open(filename)
+	if err != nil {
+		return nil, err
+	}
+	var ret []string
+	lines := bufio.NewScanner(f)
+	for lines.Scan() {
+		line := strings.TrimSpace(lines.Text())
+
+		if strings.HasPrefix(line, "/") {
+			if comment := strings.IndexRune(line, '#'); comment != -1 {
+				line = strings.TrimSpace(line[:comment])
+			}
+			ret = append(ret, line)
+			continue
+		}
+
+		const include = "include "
+		if strings.HasPrefix(line, include) {
+			confs, err := filepath.Glob(line[len(include):])
+			if err != nil {
+				return ret, err
+			}
+			for _, conf := range confs {
+				paths, err := readLibPaths(conf)
+				if err != nil {
+					return ret, err
+				}
+				ret = append(ret, paths...)
+			}
+			continue
+		}
+	}
+	if err := lines.Err(); err != nil {
+		return ret, err
+	}
+	return ret, nil
+}
+
+func libraryPaths() []string {
+	defaultPaths := []string{
+		"/lib64", "/usr/lib64",
+		"/lib", "/usr/lib",
+	}
+	paths, err := readLibPaths("/etc/ld.so.conf")
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		log.Printf("Warning: failed to parse /etc/ld.so.conf paths: %v", err)
+	}
+	return append(defaultPaths, paths...)
 }
