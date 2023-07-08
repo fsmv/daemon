@@ -146,7 +146,11 @@ func (children *children) StartProgram(cmd *Command) error {
 			if testCommand != supported {
 				continue
 			}
-			binary, openerr = copyFile(os.Args[0], filepath.Join(workingDir, name), creds.Uid, creds.Gid, true /*exclusive*/)
+			megabinary, err := os.Executable()
+			if err != nil {
+				return fmt.Errorf("Could not find current executable: %v", err)
+			}
+			binary, openerr = copyFile(megabinary, filepath.Join(workingDir, name), creds.Uid, creds.Gid, true /*exclusive*/)
 			break
 		}
 	}
