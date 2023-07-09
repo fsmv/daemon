@@ -1,4 +1,4 @@
-//go:build !nosyslog
+//go:build !nosyslog && !windows
 
 package flags
 
