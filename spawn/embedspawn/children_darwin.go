@@ -5,9 +5,9 @@ import (
 	"debug/macho"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
-	"path/filepath"
 )
 
 func maybeSetDeathSig(attr *os.ProcAttr) {
@@ -41,16 +41,13 @@ func requiredLibsImpl(paths []string, filename string, libs map[string]struct{},
 
 	// Read the path to the ld shared library which is also needed?
 	for _, load := range bin.Loads {
-		loadBytes, ok := load.(macho.LoadBytes)
-		if !ok {
-			continue
-		}
+		loadBytes := load.Raw()
 		if len(loadBytes) < 4 {
 			continue
 		}
 		// https://cs.opensource.google/go/go/+/master:src/debug/macho/file.go;l=277;drc=e8fbad5de87f34d2e7632f94cac418c7436174ce
 		cmd := macho.LoadCmd(bin.ByteOrder.Uint32(loadBytes[0:4]))
-		if cmd != macho.LoadCmdDylinker {
+		if cmd != 0xe /*LC_LOAD_DYLINKER*/ { // pulled this from mach-o/loader.h
 			continue
 		}
 		// Based the following code on:
@@ -76,20 +73,17 @@ func requiredLibsImpl(paths []string, filename string, libs map[string]struct{},
 	}
 
 	for _, lib := range imports {
-		for _, path := range paths {
-			libPath := filepath.Join(path, lib)
-			if _, ok := libs[libPath]; ok {
-				continue
-			}
-			err := requiredLibsImpl(paths, libPath, libs, interp)
-			if errors.Is(err, fs.ErrNotExist) {
-				continue
-			}
-			if err != nil {
-				return err
-			}
-			libs[libPath] = struct{}{}
+		if _, ok := libs[lib]; ok {
+			continue
 		}
+		err := requiredLibsImpl(paths, lib, libs, interp)
+		if errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("on macOS Big Sur (v11.0.1) and above chroots are impossible (without turning off SIP) because the system libraries are 'protected' and can't be copied in. Error message: %w", err)
+		}
+		if err != nil {
+			return err
+		}
+		libs[lib] = struct{}{}
 	}
 	return nil
 }

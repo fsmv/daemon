@@ -16,14 +16,21 @@ if [ -n "$PROTO_DIFFS" ]; then
   fi
 fi
 
-# Check if what we're about to commit builds the megabinary
+# Check if what we're about to commit builds at the repo root
+#
 # Do stashes so we only compile what we're about to commit and ignore the rest
 # Don't panic if you get stash problems, it saves your work!
 NEED_POP=-1
-if [ -n "$(git diff --cached --name-only)" ]; then
+if [ -n "$(git diff --name-only)" ]; then
   git stash -q --keep-index --include-untracked
   NEED_POP=$?
 fi
+
+MAC_DIFFS=$(git diff --cached --name-only | grep '_darwin\.go')
+if [ -n "$MAC_DIFFS" ]; then
+  GOOS=darwin go build -o test-build && rm test-build
+fi
+
 go build -o test-build && rm test-build; go test ./... > /dev/null
 STATUS=$? # other commands will overwrite $? so save it
 if [ $NEED_POP -eq 0 ]; then
