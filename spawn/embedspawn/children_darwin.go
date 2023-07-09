@@ -87,3 +87,13 @@ func requiredLibsImpl(paths []string, filename string, libs map[string]struct{},
 	}
 	return nil
 }
+
+// Apparently NGROUP_MAX is 16 in macOS and sometimes the groups list is huge
+// for some reason so be a little cautious and set the limit lower.
+func limitGroupsForMac(groups []uint32) []uint32 {
+	const maxGroups = 8
+	if len(groups) > maxGroups {
+		groups = groups[:maxGroups]
+	}
+	return groups
+}

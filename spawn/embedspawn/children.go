@@ -348,14 +348,14 @@ func lookupUser(username string) (*syscall.Credential, *user.User, error) {
 	for i, group := range groupsStr {
 		id, err := strconv.Atoi(group)
 		if err != nil {
-			return nil, u, fmt.Errorf("Supplimental gid #%v string not an integer. Gid string: %v", i, id)
+			return nil, u, fmt.Errorf("Supplemental gid #%v string not an integer. Gid string: %v", i, id)
 		}
 		groups = append(groups, uint32(id))
 	}
 	return &syscall.Credential{
 		Uid:    uint32(uid),
 		Gid:    uint32(gid),
-		Groups: groups,
+		Groups: limitGroupsForMac(groups),
 	}, u, nil
 }
 

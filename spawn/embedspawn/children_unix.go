@@ -64,3 +64,7 @@ func requiredLibsImpl(paths []string, filename string, libs map[string]struct{},
 	}
 	return nil
 }
+
+func limitGroupsForMac(groups []uint32) []uint32 {
+	return groups
+}
