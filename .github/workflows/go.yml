@@ -32,7 +32,7 @@ jobs:
     - name: Test quickstart
       shell: bash
       run: |
-        (go build -o daemon -v ./... && (mkdir -p quicktest && mv daemon quicktest/)) || exit 1
+        (go build -o daemon -v && (mkdir -p quicktest && mv daemon quicktest/)) || exit 1
         cd quicktest && (echo "password" | ./daemon spawn 2&>1 > logs.txt &; sleep 5; killall daemon)
         if [ -n "$(grep 'Token received' quicktest/logs.txt)" ]; then exit 1; fi
         if [ -n "$(grep 'Obtained TLS lease' quicktest/logs.txt)" ]; then exit 1; fi
