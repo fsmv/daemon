@@ -30,7 +30,7 @@ jobs:
 
     - name: Quickstart
       run: |
-        (go build -o daemon -v && (mkdir -p quicktest && mv daemon quicktest/)) || exit 1
+        (go build -o daemon -v ./ && (mkdir -p quicktest && mv daemon quicktest/)) || exit 1
         cd quicktest
         echo "password" | ./daemon spawn >logs.txt 2>&1 & sleep 5; killall daemon
         if [ -n "$(grep 'Token received' logs.txt)" ]; then exit 1; fi
@@ -56,9 +56,9 @@ jobs:
     - name: Quickstart
       shell: bash
       run: |
-        (go build -o daemon -v && (mkdir -p quicktest && mv daemon quicktest/)) || exit 1
+        (go build -o daemon -v ./ && (mkdir -p quicktest && mv daemon quicktest/)) || exit 1
         cd quicktest
-        echo "password" | ./daemon spawn >logs.txt 2>&1 & sleep 5; taskkill /F /IM daemon /T
+        echo "password" | ./daemon spawn >logs.txt 2>&1 & sleep 5; taskkill -im daemon.exe -f -t
         if [ -n "$(grep 'Token received' logs.txt)" ]; then exit 1; fi
         if [ -n "$(grep 'Obtained TLS lease' logs.txt)" ]; then exit 1; fi
         if [ -n "$(grep 'https://127.0.0.1:8080/daemon/' logs.txt)" ]; then exit 1; fi
