@@ -14,6 +14,12 @@ func maybeSetDeathSig(attr *os.ProcAttr) {
 	// macos doesn't support Pdeathsig
 }
 
+// This is unused on macOS, binaries contain the absolute path.
+// See requiredLibsImpl below
+func libraryPaths() []string {
+	return nil
+}
+
 // The macho library doesn't provide this!
 //
 // I based this struct on the others like macho.DylibCmd and the output of

@@ -1,3 +1,5 @@
+//go:build !windows
+
 package embedspawn
 
 import (
@@ -16,7 +18,7 @@ type refreshFile struct {
 
 type fileRefresher []refreshFile
 
-func (f fileRefresher) refreshOnSignal(quit chan struct{}) {
+func (f fileRefresher) refreshOnSignal(quit <-chan struct{}) {
 	sigs := make(chan os.Signal, 1)
 	sigs <- syscall.SIGUSR1 // trigger the initial run (buffered)
 	signal.Notify(sigs, syscall.SIGUSR1)
@@ -61,7 +63,7 @@ func (f fileRefresher) refreshOnSignal(quit chan struct{}) {
 	}
 }
 
-func startFileRefresh(files []string, quit chan struct{}) ([]*os.File, error) {
+func startFileRefresh(files []string, quit <-chan struct{}) ([]*os.File, error) {
 	var ret []*os.File
 
 	var refresher fileRefresher
