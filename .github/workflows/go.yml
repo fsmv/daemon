@@ -12,7 +12,7 @@ jobs:
 
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
 
     steps:
     - uses: actions/checkout@v3
@@ -30,36 +30,17 @@ jobs:
 
     - name: Quickstart
       run: |
-        (go build -o daemon -v ./ && (mkdir -p quicktest && mv daemon quicktest/)) || exit 1
+        endtest() {
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            taskkill -im $1 -f -t
+          else
+            killall $1
+          fi
+        }
+        if [ "$RUNNER_OS" = "Windows" ]; then BIN=daemon.exe; else BIN=daemon; fi
+        (go build -o $BIN -v ./ && (mkdir -p quicktest && mv $BIN quicktest/)) || exit 1
         cd quicktest
-        echo "password" | ./daemon spawn >logs.txt 2>&1 & sleep 5; killall daemon
-        cat logs.txt
-        if [ -z "$(grep 'Token received' logs.txt)" ]; then exit 2; fi
-        if [ -z "$(grep 'Obtained TLS lease' logs.txt)" ]; then exit 3; fi
-        if [ -z "$(grep 'https://127.0.0.1:8080/daemon/' logs.txt)" ]; then exit 4; fi
-  check_windows:
-    runs-on: windows-latest
-
-    steps:
-    - uses: actions/checkout@v3
-
-    - name: Set up Go
-      uses: actions/setup-go@v4
-      with:
-        go-version: '>=1.17'
-
-    - name: Build
-      run: go build -v ./...
-
-    - name: Test
-      run: go test -v ./...
-
-    - name: Quickstart
-      shell: bash
-      run: |
-        (go build -o daemon.exe -v ./ && (mkdir -p quicktest && mv daemon.exe quicktest/)) || exit 1
-        cd quicktest
-        echo "password" | ./daemon.exe spawn >logs.txt 2>&1 & sleep 5; taskkill -im daemon.exe -f -t
+        echo "password" | ./$BIN spawn >logs.txt 2>&1 & sleep 5; endtest $BIN
         cat logs.txt
         if [ -z "$(grep 'Token received' logs.txt)" ]; then exit 2; fi
         if [ -z "$(grep 'Obtained TLS lease' logs.txt)" ]; then exit 3; fi

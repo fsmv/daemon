@@ -77,6 +77,15 @@ hosting a static website (there's an example in the file commented out).
 
 ## Setting it up to keep it
 
+Note: while daemon runs on most operating systems, the latest versions of macOS,
+and all versions of Windows do not support chroots. Windows also doesn't support
+changing the user.
+
+So if you're not using Linux or BSD you will need to make some adjustments to
+your config.
+
+See [Operating Systems Support](#operating-systems-support)
+
 ### 1. You need to run spawn as root
 
 This is so that it can access the TLS certs, open port 80,
@@ -185,3 +194,46 @@ dotfiles you can just run daemon binaries or go servers you wrote yourself with
 no other setup. That way it will automatically serve on your domain name with
 TLS publicly and internally, even if you're on a completely different network
 from your portal machine.
+
+# Operating Systems Support
+
+## Linux and BSD
+
+All features of daemon work on Linux and BSD-based operating systems.
+
+## macOS
+
+Everything works before v11.0.1, which is when they started to use the
+[dynamic linker cache](https://developer.apple.com/documentation/macos-release-notes/macos-big-sur-11_0_1-release-notes#Kernel)
+, which prevents us from building a working chroot environment (also
+[SIP](https://developer.apple.com/documentation/security/hardened_runtime)
+would prevent using the libraries even if we could extract them from the cache).
+Additionally it's not possible to statically link the system libraries in macOS.
+I believe as of Big Sur it is not reasonably possible to create a chroot in
+macOS.
+
+So you will have to use the `no_chroot: true` config setting on all commands in
+newer versions.
+
+## Windows
+
+In windows chroot doesn't exist. Additionally I believe there's no way using the
+go process API to change to a less privileged user as we start a process.
+
+There are also no signals sent to processes in Windows, so to renew the TLS
+certificate we can't use that killall command in the script. Luckily, there is
+also no root user in windows so when you run certbot the files will be
+accessible by any process you run. So, you can just have portal open the files
+directly using the `-tls_cert` and `-tls_key` flags, portal will reopen the
+files automatically 1 hour before expiration.
+
+So the config changes you need to make are:
+
+ 1. Use the `no_chroot: true` option on all commands
+ 2. Do not set the `user: "username"` field on any command
+ 3. For the permanent portal config, instead of using the files field in the
+    command to configure your TLS cert paths, use the `-tls_cert` and `-tls_key`
+    args. Also there's no reason to use the ports field on windows, you can
+    just use the default values for the port flags (so delete that line).
+ 4. In textproto syntax any \ characters need to be escaped so windows paths
+    will look like `"-tls_cert=C:\\Certbot\\..."`
