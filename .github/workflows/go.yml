@@ -7,7 +7,7 @@ on:
     branches: [ "main" ]
 
 jobs:
-  check:
+  - check:
     runs-on: ${{ matrix.os }}
 
     strategy:
@@ -37,7 +37,7 @@ jobs:
         if [ -n "$(grep 'Obtained TLS lease' logs.txt)" ]; then exit 1; fi
         if [ -n "$(grep 'https://127.0.0.1:8080/daemon/' logs.txt)" ]; then exit 1; fi
 
-  check:
+  - check:
     runs-on: windows-latest
 
     steps:
