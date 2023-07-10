@@ -34,9 +34,9 @@ jobs:
         cd quicktest
         echo "password" | ./daemon spawn >logs.txt 2>&1 & sleep 5; killall daemon
         cat logs.txt
-        if [ -n "$(grep 'Token received' logs.txt)" ]; then exit 2; fi
-        if [ -n "$(grep 'Obtained TLS lease' logs.txt)" ]; then exit 3; fi
-        if [ -n "$(grep 'https://127.0.0.1:8080/daemon/' logs.txt)" ]; then exit 4; fi
+        if [ -z "$(grep 'Token received' logs.txt)" ]; then exit 2; fi
+        if [ -z "$(grep 'Obtained TLS lease' logs.txt)" ]; then exit 3; fi
+        if [ -z "$(grep 'https://127.0.0.1:8080/daemon/' logs.txt)" ]; then exit 4; fi
   check_windows:
     runs-on: windows-latest
 
@@ -61,6 +61,6 @@ jobs:
         cd quicktest
         echo "password" | ./daemon.exe spawn >logs.txt 2>&1 & sleep 5; taskkill -im daemon.exe -f -t
         cat logs.txt
-        if [ -n "$(grep 'Token received' logs.txt)" ]; then exit 2; fi
-        if [ -n "$(grep 'Obtained TLS lease' logs.txt)" ]; then exit 3; fi
-        if [ -n "$(grep 'https://127.0.0.1:8080/daemon/' logs.txt)" ]; then exit 4; fi
+        if [ -z "$(grep 'Token received' logs.txt)" ]; then exit 2; fi
+        if [ -z "$(grep 'Obtained TLS lease' logs.txt)" ]; then exit 3; fi
+        if [ -z "$(grep 'https://127.0.0.1:8080/daemon/' logs.txt)" ]; then exit 4; fi
