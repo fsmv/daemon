@@ -33,9 +33,10 @@ jobs:
         (go build -o daemon -v ./ && (mkdir -p quicktest && mv daemon quicktest/)) || exit 1
         cd quicktest
         echo "password" | ./daemon spawn >logs.txt 2>&1 & sleep 5; killall daemon
-        if [ -n "$(grep 'Token received' logs.txt)" ]; then exit 1; fi
-        if [ -n "$(grep 'Obtained TLS lease' logs.txt)" ]; then exit 1; fi
-        if [ -n "$(grep 'https://127.0.0.1:8080/daemon/' logs.txt)" ]; then exit 1; fi
+        cat logs.txt
+        if [ -n "$(grep 'Token received' logs.txt)" ]; then exit 2; fi
+        if [ -n "$(grep 'Obtained TLS lease' logs.txt)" ]; then exit 3; fi
+        if [ -n "$(grep 'https://127.0.0.1:8080/daemon/' logs.txt)" ]; then exit 4; fi
   check_windows:
     runs-on: windows-latest
 
@@ -56,9 +57,10 @@ jobs:
     - name: Quickstart
       shell: bash
       run: |
-        (go build -o daemon -v ./ && (mkdir -p quicktest && mv daemon quicktest/)) || exit 1
+        (go build -o daemon.exe -v ./ && (mkdir -p quicktest && mv daemon.exe quicktest/)) || exit 1
         cd quicktest
-        echo "password" | ./daemon spawn >logs.txt 2>&1 & sleep 5; taskkill -im daemon.exe -f -t
-        if [ -n "$(grep 'Token received' logs.txt)" ]; then exit 1; fi
-        if [ -n "$(grep 'Obtained TLS lease' logs.txt)" ]; then exit 1; fi
-        if [ -n "$(grep 'https://127.0.0.1:8080/daemon/' logs.txt)" ]; then exit 1; fi
+        echo "password" | ./daemon.exe spawn >logs.txt 2>&1 & sleep 5; taskkill -im daemon.exe -f -t
+        cat logs.txt
+        if [ -n "$(grep 'Token received' logs.txt)" ]; then exit 2; fi
+        if [ -n "$(grep 'Obtained TLS lease' logs.txt)" ]; then exit 3; fi
+        if [ -n "$(grep 'https://127.0.0.1:8080/daemon/' logs.txt)" ]; then exit 4; fi
