@@ -376,7 +376,7 @@ func copyBinary(bin, out string, exclusive bool, uid, gid uint32) (string, error
 			if err != nil {
 				return "", fmt.Errorf("Could not find current executable: %v", err)
 			}
-			binary, openerr = copyFile(megabinary, out, uid, gid, true /*exclusive*/)
+			binary, openerr = copyFile(megabinary, out, uid, gid, exclusive)
 			break
 		}
 	}

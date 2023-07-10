@@ -34,6 +34,9 @@ func (children *children) StartProgram(cmd *Command) error {
 	}
 	name := cmd.FullName()
 	attr := &os.ProcAttr{
+		// Note: on windows we need to pass in the existing environment variables
+		// because there are some important system variables that are needed to
+		// start the process
 		Env: append(os.Environ(), []string{
 			fmt.Sprintf("SPAWN_FILES=%v", len(cmd.Files)),
 			fmt.Sprintf("SPAWN_PORTS=%v", len(cmd.Ports)),

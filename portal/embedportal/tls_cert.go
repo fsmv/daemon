@@ -89,9 +89,23 @@ func (t *tlsRefresher) keepCertRefreshed(idx int, cert, key *os.File, pipes bool
 		key.Close()
 	}
 
-	// Start the first refresh immediately
 	timer := time.NewTimer(time.Duration(0))
 	sig := t.refreshSignal()
+
+	refresh := func() {
+		tlsCert, err := t.refreshCert(idx, cert, key, pipes)
+		if err == nil && len(tlsCert.Certificate) > 0 {
+			if tlsCert.Leaf == nil {
+				tlsCert.Leaf, err = x509.ParseCertificate(tlsCert.Certificate[0])
+			}
+			// Try to refresh 1 hour before cert expiration
+			if err != nil {
+				timer.Reset(time.Until(tlsCert.Leaf.NotAfter) - time.Hour)
+			}
+		}
+	}
+	// Start the first refresh immediately
+	refresh()
 
 	// Close in a separate go routine in case we're blocked on pipe read
 	go func() {
@@ -105,16 +119,7 @@ func (t *tlsRefresher) keepCertRefreshed(idx int, cert, key *os.File, pipes bool
 			return
 		case <-timer.C:
 		case <-sig:
-			cert, err := t.refreshCert(idx, cert, key, pipes)
-			if err == nil && len(cert.Certificate) > 0 {
-				if cert.Leaf == nil {
-					cert.Leaf, err = x509.ParseCertificate(cert.Certificate[0])
-				}
-				// Try to refresh 1 hour before cert expiration
-				if err != nil {
-					timer.Reset(time.Until(cert.Leaf.NotAfter) - time.Hour)
-				}
-			}
+			refresh()
 		}
 	}
 }
