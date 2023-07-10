@@ -204,8 +204,8 @@ All features of daemon work on Linux and BSD-based operating systems.
 ## macOS
 
 Everything works before v11.0.1, which is when they started to use the
-[dynamic linker cache](https://developer.apple.com/documentation/macos-release-notes/macos-big-sur-11_0_1-release-notes#Kernel)
-, which prevents us from building a working chroot environment (also
+[dynamic linker cache](https://developer.apple.com/documentation/macos-release-notes/macos-big-sur-11_0_1-release-notes#Kernel),
+which prevents us from building a working chroot environment (also
 [SIP](https://developer.apple.com/documentation/security/hardened_runtime)
 would prevent using the libraries even if we could extract them from the cache).
 Additionally it's not possible to statically link the system libraries in macOS.

@@ -30,7 +30,7 @@ jobs:
 
     - name: Quickstart
       run: |
-        endtest() {
+        function endtest () {
           if [ "$RUNNER_OS" = "Windows" ]; then
             taskkill -im $1 -f -t
           else
