@@ -24,13 +24,20 @@ import (
 //go:generate protoc -I ../ ../gate/service.proto --go_out ../ --go-grpc_out ../ --go_opt=paths=source_relative --go-grpc_opt=paths=source_relative
 
 const (
-	rpcPort        = 2048
-	portRangeStart = 2049
-	portRangeEnd   = 4096
-	leaseTTL       = 24 * time.Hour
+	leaseTTL = 24 * time.Hour
 )
 
 func Run(flags *flag.FlagSet, args []string) {
+	rpcPort := flags.Uint("rpc_port", 2048, ""+
+		"The port to bind for the portal RPC server that clients use to register\n"+
+		"with. You shouldn't need to change this unless there's a conflict or you\n"+
+		"run multiple instances of portal.")
+	portRangeStart := flags.Uint("port_range_start", 2049, ""+
+		"The (inclusive) start of the port range to lease-out to clients when they\n"+
+		"register.")
+	portRangeEnd := flags.Uint("port_range_end", 4096, ""+
+		"The (inclusive) end of the port range to lease-out to clients when they\n"+
+		"register. A separate list of of used ports is kept per-backend-IP.\n")
 	defaultHost := flags.String("default_hostname", "", ""+
 		"Set this to the domain name that patterns registered without a hostname\n"+
 		"should be served under. If unset, patterns without a hostname will match\n"+
@@ -51,6 +58,9 @@ func Run(flags *flag.FlagSet, args []string) {
 		"Set to a local folder path to enable hosting the let's encrypt webroot\n"+
 		"challenge path ("+certChallengePattern+") so you can auto-renew with\n"+
 		"certbot. Set to empty string to turn this off.")
+	// Note: these are signed ints because of the -fd feature
+	// see: listenerFromPortOrFD
+	// TODO: maybe take it out for flags or document it
 	httpPort := flags.Int("http_port", 80, ""+
 		"The port to bind to for http traffic.\n"+
 		"This is overridden if spawn provides ports.")
@@ -97,7 +107,7 @@ func Run(flags *flag.FlagSet, args []string) {
 		log.Fatalf("Failed to create a self signed certificate for the RPC server: %v", err)
 	}
 
-	l := makeClientLeasor(portRangeStart, portRangeEnd, leaseTTL, quit)
+	l := makeClientLeasor(uint16(*portRangeStart), uint16(*portRangeEnd), leaseTTL, quit)
 	tcpProxy := startTCPProxy(l, serveCert, quit)
 	httpProxy, err := startHTTPProxy(l, serveCert, rootCert,
 		httpListener, httpsListener,
@@ -109,7 +119,7 @@ func Run(flags *flag.FlagSet, args []string) {
 	}
 
 	_, err = startRPCServer(l,
-		tcpProxy, httpProxy, rpcPort,
+		tcpProxy, httpProxy, uint16(*rpcPort),
 		rootCert, saveData, state, quit)
 	log.Print("Started rpc server on port ", rpcPort)
 	if err != nil {
