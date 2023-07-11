@@ -73,8 +73,14 @@ func (p *tcpProxy) Register(clientAddr string, request *gate.RegisterRequest) (*
 	return lease, nil
 }
 
-func handleConnection(publicConn net.Conn, serverAddress string, quit chan struct{}) {
-	privateConn, err := net.Dial("tcp", serverAddress)
+func handleConnection(publicConn net.Conn, serverAddress string, tlsConf *tls.Config, quit chan struct{}) {
+	var privateConn net.Conn
+	var err error
+	if tlsConf != nil {
+		privateConn, err = tls.Dial("tcp", serverAddress, tlsConf)
+	} else {
+		privateConn, err = net.Dial("tcp", serverAddress)
+	}
 	if err != nil {
 		log.Printf("Failed to connect to TCP Proxy backend (for client %v): %v",
 			publicConn.RemoteAddr(), err)
@@ -116,6 +122,23 @@ func startTCPForward(tlsListener net.Listener, serverAddress string, quit chan s
 		<-quit // stop listening when we quit
 		tlsListener.Close()
 	}()
+
+	// TODO: when assimilate supports certificate requests, make it so we
+	// verify using the portal root CA (and maybe system CAs) when the cert
+	// request was used.
+	conf := &tls.Config{
+		InsecureSkipVerify: true,
+	}
+	// Detect TLS support
+	conn, err := tls.Dial("tcp", serverAddress, conf)
+	if err == nil {
+		conn.Close()
+	} else {
+		log.Printf("Warning: TLS is not supported for the %v TCP backend. This internal traffic will not be encrypted. Message: %v",
+			serverAddress, err)
+		conf = nil
+	}
+
 	go func() {
 		for {
 			publicConn, err := tlsListener.Accept()
@@ -124,9 +147,10 @@ func startTCPForward(tlsListener net.Listener, serverAddress string, quit chan s
 					serverAddress, err)
 				break
 			}
+
 			// Use a goroutine just to not wait until the Dial is done before we
 			// can accept connections again
-			go handleConnection(publicConn, serverAddress, quit)
+			go handleConnection(publicConn, serverAddress, conf, quit)
 		}
 		tlsListener.Close()
 	}()

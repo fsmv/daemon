@@ -96,6 +96,11 @@ type RegisterRequest struct {
 	// rule for, but if you have a cpanel-only host or otherwise don't have access
 	// to run arbitrary code then you can use this setting to run assimilate on
 	// another machine.
+	//
+	// If you use this you need to be mindful of TLS and the network you're
+	// sending the data over. Ideally you should set up a self-signed certificate
+	// on the other machine and portal will detect TLS support. Otherwise make
+	// sure you only use this with a trusted local network.
 	Hostname string `protobuf:"bytes,6,opt,name=hostname,proto3" json:"hostname,omitempty"`
 	// If true, remove the pattern in the URL of HTTP requests we forward to the
 	// backend to hide that it is behind a reverse proxy.

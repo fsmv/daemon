@@ -10,7 +10,6 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
-	"strconv"
 	"strings"
 	"sync"
 
@@ -82,8 +81,7 @@ func (p *httpProxy) Register(
 		return nil, err
 	}
 
-	useTLS := len(request.CertificateRequest) != 0
-	err = p.saveForwarder(clientAddr, lease, request.StripPattern, request.AllowHttp, useTLS)
+	err = p.saveForwarder(clientAddr, lease, request)
 	if err != nil {
 		leasor.Unregister(lease)
 		return nil, err
@@ -100,15 +98,58 @@ func (p *httpProxy) Register(
 // http request paths. This is needed for third party applications that expect
 // to get requests for / not /pattern/
 func (p *httpProxy) saveForwarder(clientAddr string, lease *gate.Lease,
-	stripPattern, allowHTTP, useTLS bool) error {
+	request *gate.RegisterRequest) error {
 
 	var protocol string
-	if useTLS {
+	addrPort := fmt.Sprintf("%v:%v", clientAddr, lease.Port)
+
+	// TODO: when assimilate supports writing cert files, maybe make it so
+	// normally we only accept the portal root CA (and maybe add the system root
+	// CAs as well) and only skip verify if the hostname field was set.
+	//
+	// Then if people can run assimilate on the same machine as their server
+	// they'll have to use the protal signed cert so that we can actually verify
+	// it instead of turning that off.
+	var conf *tls.Config
+	if len(request.CertificateRequest) == 0 {
+		conf = &tls.Config{
+			InsecureSkipVerify: true,
+		}
+	} else {
+		roots := p.state.RootCAs()
+		// Note: We can use conf.VerifyPeerCertificate to only allow talking to
+		// client that we registered with. This is pointless right now because we
+		// allow any client with a valid token (same as the clients that have a
+		// valid cert signed by us) to replace any lease. We assume validated
+		// clients are not malicious right now.
+		conf = &tls.Config{
+			RootCAs:   roots,
+			ClientCAs: roots,
+			// Use the server cert for client auth
+			GetClientCertificate: func(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
+				return p.rootCert.GetCertificate(nil)
+			},
+		}
+	}
+
+	// Detect TLS support
+	conn, err := tls.Dial("tcp", addrPort, conf)
+	if err == nil {
+		conn.Close()
 		protocol = "https://"
 	} else {
-		protocol = "http://"
+		if len(request.CertificateRequest) != 0 {
+			log.Printf("Error: failed to connect using TLS for the %v backend. When certificate_request is used, you must serve with that certificate. Message: %v",
+				lease.Pattern, err)
+			protocol = "https://"
+		} else {
+			log.Printf("Warning: TLS is not supported for the %v backend. This internal traffic will not be encrypted. Message: %v",
+				lease.Pattern, err)
+			protocol = "http://"
+		}
 	}
-	backend, err := url.Parse(protocol + clientAddr + ":" + strconv.Itoa(int(lease.Port)))
+
+	backend, err := url.Parse(protocol + addrPort)
 	if err != nil {
 		return err
 	}
@@ -119,22 +160,7 @@ func (p *httpProxy) saveForwarder(clientAddr string, lease *gate.Lease,
 	// Accept certificates signed by the latest portal cert
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.DialTLSContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
-		roots := p.state.RootCAs()
-		dialConf := &tls.Config{
-			RootCAs:   roots,
-			ClientCAs: roots,
-			// Use the server cert for client auth
-			GetClientCertificate: func(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
-				return p.rootCert.GetCertificate(nil)
-			},
-		}
-
-		// Note: We can use dialConf.VerifyPeerCertificate to only allow talking to
-		// client that we registered with. This is pointless right now because we
-		// allow any client with a valid token (same as the clients that have a
-		// valid cert signed by us) to replace any lease. We assume validated
-		// clients are not malicious right now.
-		dialer := &tls.Dialer{Config: dialConf}
+		dialer := &tls.Dialer{Config: conf}
 		return dialer.DialContext(ctx, network, addr)
 	}
 
@@ -151,7 +177,7 @@ func (p *httpProxy) saveForwarder(clientAddr string, lease *gate.Lease,
 			if req.URL.Path[0] != '/' {
 				req.URL.Path = "/" + req.URL.Path
 			}
-			if stripPattern {
+			if request.StripPattern {
 				if pattern[len(pattern)-1] != '/' { // if the pattern doesn't end in / then it's exact match only
 					req.URL.Path = "/"
 				} else {
@@ -182,7 +208,7 @@ func (p *httpProxy) saveForwarder(clientAddr string, lease *gate.Lease,
 	fwd := &forwarder{
 		Handler:   proxy,
 		Lease:     lease,
-		AllowHTTP: allowHTTP,
+		AllowHTTP: request.AllowHttp,
 	}
 	p.forwarders.Store(pattern, fwd)
 	return nil
