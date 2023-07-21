@@ -189,10 +189,9 @@ func (children *children) StartProgram(cmd *Command) error {
 			gate.Token = &token
 			log.Print("Token received.")
 		}
-	} else {
-		log.Printf("Waiting %v...", *spawningDelay)
-		time.Sleep(*spawningDelay)
 	}
+	log.Printf("Waiting %v...", *spawningDelay)
+	time.Sleep(*spawningDelay)
 	return nil
 }
 
