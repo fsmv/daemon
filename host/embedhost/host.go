@@ -72,7 +72,7 @@ func Run(flags *flag.FlagSet, args []string) {
 	http.Handle(servePath, http.StripPrefix(prefix, http.HandlerFunc(
 		func(w http.ResponseWriter, req *http.Request) {
 			fullPath := prefix + req.URL.String()
-			addr := req.Header.Get("X-Forwarded-For") + ":" + req.Header.Get("X-Forwarded-Port")
+			addr := req.Header.Get("X-Forwarded-For") + ":" + req.Header.Get("X-Forwarded-For-Port")
 			if err := dir.CheckPasswordsFiles(w, req); err != nil {
 				if *logRequests {
 					log.Printf("%v %v at %v", addr, err, fullPath)

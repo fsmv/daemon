@@ -33,7 +33,7 @@ func Example() {
 		// portal adds this header to tell you who sent the request to portal
 		log.Printf("Hello from %v:%v",
 			req.Header.Get("X-Forwarded-For"),
-			req.Header.Get("X-Forwarded-Port"))
+			req.Header.Get("X-Forwarded-For-Port"))
 	}))
 
 	// Run the server and block until the channel is closed and the graceful stop

@@ -105,6 +105,10 @@ type RegisterRequest struct {
 	// If true, remove the pattern in the URL of HTTP requests we forward to the
 	// backend to hide that it is behind a reverse proxy.
 	//
+	// For example: If the pattern is /foo/ and the request is for /foo/index.html
+	//   - If true  the request to the backend is /index.html
+	//   - If false the request to the backend is /foo/index.html
+	//
 	// Ignored for TCP proxies.
 	StripPattern bool `protobuf:"varint,3,opt,name=strip_pattern,json=stripPattern,proto3" json:"strip_pattern,omitempty"`
 	// If true, do not redirect HTTP requests to HTTPS. This means the data will
