@@ -167,7 +167,6 @@ func (p *httpProxy) saveForwarder(clientAddr string, lease *gate.Lease,
 	proxy := &httputil.ReverseProxy{
 		Transport: transport,
 		Director: func(req *http.Request) {
-			origScheme := strings.TrimSuffix(req.URL.Scheme, ":")
 			// Copied from https://golang.org/src/net/http/httputil/reverseproxy.go?s=2588:2649#L80
 			req.URL.Scheme = backend.Scheme
 			req.URL.Host = backend.Host
@@ -200,8 +199,12 @@ func (p *httpProxy) saveForwarder(clientAddr string, lease *gate.Lease,
 			}
 			// Note: httputil.ReverseProxy automatically adds X-Forwarded-For
 			// https://cs.opensource.google/go/go/+/master:src/net/http/httputil/reverseproxy.go;l=440;drc=2449bbb5e614954ce9e99c8a481ea2ee73d72d61
-			req.Header.Add("X-Forwarded-Host", req.Host)    // This includes the port if non-standard
-			req.Header.Add("X-Forwarded-Proto", origScheme) // https or http
+			req.Header.Add("X-Forwarded-Host", req.Host) // This includes the port if non-standard
+			if req.TLS == nil {
+				req.Header.Add("X-Forwarded-Proto", "http")
+			} else {
+				req.Header.Add("X-Forwarded-Proto", "https")
+			}
 			if _, port, err := net.SplitHostPort(req.RemoteAddr); err == nil {
 				req.Header.Add("X-Forwarded-For-Port", port) // The client's port
 			}
