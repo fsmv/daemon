@@ -123,8 +123,7 @@ func (p *httpProxy) saveForwarder(clientAddr string, lease *gate.Lease,
 		// valid cert signed by us) to replace any lease. We assume validated
 		// clients are not malicious right now.
 		conf = &tls.Config{
-			RootCAs:   roots,
-			ClientCAs: roots,
+			RootCAs: roots,
 			// Use the server cert for client auth
 			GetClientCertificate: func(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
 				return p.rootCert.GetCertificate(nil)
@@ -160,7 +159,12 @@ func (p *httpProxy) saveForwarder(clientAddr string, lease *gate.Lease,
 	// Accept certificates signed by the latest portal cert
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.DialTLSContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
-		dialer := &tls.Dialer{Config: conf}
+		usedConf := conf
+		if conf.RootCAs != nil {
+			usedConf = conf.Clone()
+			usedConf.RootCAs = p.state.RootCAs()
+		}
+		dialer := &tls.Dialer{Config: usedConf}
 		return dialer.DialContext(ctx, network, addr)
 	}
 

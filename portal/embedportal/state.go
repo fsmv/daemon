@@ -19,8 +19,13 @@ type stateManager struct {
 
 	registrations map[uint32]*Registration // lease port key
 
-	rootCAs      map[*x509.Certificate]struct{}
-	mutCertPool  *x509.CertPool
+	// Store the rootCAs separately so we can write them to a file, because
+	// unfortunately CertPool has no non-depracted methods to get the certs back.
+	rootCAs map[*x509.Certificate]struct{}
+	// This is what tls.Config expects, so we have to maintain this class
+	// Unfortunately it is not thread safe
+	mutCertPool *x509.CertPool
+	// This is how we make it thread safe, we store clones of the CertPool here
 	readCertPool *atomic.Value
 
 	token *atomic.Value
