@@ -23,6 +23,7 @@ package flags
 import (
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"runtime/debug"
 	"strings"
@@ -41,20 +42,23 @@ func init() {
 		"If set, print version info and exit")
 }
 
-func handleVersionFlag(value string) error {
-	out := flag.CommandLine.Output()
+func writeVersionInfo(out io.Writer) bool {
 	buildInfo, ok := debug.ReadBuildInfo()
 	if !ok {
 		fmt.Fprintln(out, "Failed to read build info.")
-		os.Exit(1)
+		return false
 	}
 
-	// Print the main version info with copyright notice
+	// If the copyright notice exists then we want to add an empty line, but we
+	// don't want to modify the global so the new line needs to be in an extra var
+	maybeNewLine := ""
 	if CopyrightNotice != "" {
-		CopyrightNotice = "\n" + CopyrightNotice
+		maybeNewLine = "\n"
 	}
-	fmt.Fprintf(out, "%v %v\tCompiler: %v%v\n",
-		buildInfo.Path, buildInfo.Main.Version, buildInfo.GoVersion, CopyrightNotice)
+	// Print the main version info with copyright notice
+	fmt.Fprintf(out, "%v %v\tCompiler: %v%v%v\n",
+		buildInfo.Path, buildInfo.Main.Version, buildInfo.GoVersion,
+		maybeNewLine, CopyrightNotice)
 
 	// Print the version control info if it's available with nice formatting
 	maxLen := 0 // find the maximum key length to pad the spaces correctly
@@ -77,7 +81,13 @@ func handleVersionFlag(value string) error {
 		}
 		fmt.Fprintf(out, format, setting.Key[len(prefix):], setting.Value)
 	}
+	return true
+}
 
+func handleVersionFlag(value string) error {
+	if ok := writeVersionInfo(flag.CommandLine.Output()); !ok {
+		os.Exit(1)
+	}
 	os.Exit(0)
 	return nil
 }

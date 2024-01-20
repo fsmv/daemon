@@ -74,7 +74,9 @@ func handleSyslogFlag(value string) error {
 		return err
 	}
 	log.SetFlags(0) // Don't add timestamps because syslog adds them
-	log.SetOutput(io.MultiWriter(Syslog,
-		tools.NewTimestampWriter(os.Stdout))) // But still print timestamps
+	writer := io.MultiWriter(Syslog,
+		tools.NewTimestampWriter(os.Stdout))
+	log.SetOutput(writer)    // But still print timestamps
+	writeVersionInfo(writer) // Print the version info always
 	return nil
 }
