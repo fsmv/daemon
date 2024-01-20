@@ -50,6 +50,12 @@ func makeClientLeasor(startPort, endPort uint16, ttl time.Duration, quit chan st
 	}
 }
 
+func leaseString(lease *gate.Lease) string {
+	return fmt.Sprintf(
+		"{pattern: %v. Port: %v, Timeout: %v}",
+		lease.Pattern, lease.Port, lease.Timeout.AsTime().In(time.Local))
+}
+
 func (c *clientLeasor) PortLeasorForClient(clientAddr string) *portLeasor {
 	leasor, loaded := c.leasors.LoadOrStore(clientAddr, c.nextLeasor)
 	if !loaded {
@@ -153,11 +159,14 @@ func (l *portLeasor) Register(request *gate.RegisterRequest) (*gate.Lease, error
 	// Either use the fixed port or select a port automatically
 	if request.FixedPort != 0 {
 		if request.FixedPort >= 1<<16 {
-			return nil, fmt.Errorf("Error port out of range. Ports only go up to 65535. Requested Port: %v", request.FixedPort)
+			return nil, fmt.Errorf(
+				"Error port out of range. Ports only go up to 65535. Requested Port: %v",
+				request.FixedPort)
 		}
 		if oldLease, ok := l.leases[request.FixedPort]; ok {
 			// TODO: can we notify the old lease holder that we kicked them?
-			log.Printf("Replacing an existing lease for the same port: %#v", oldLease.Pattern)
+			log.Printf("Replacing an existing lease (%v) for the same port",
+				leaseString(oldLease))
 			l.deleteLeaseUnsafe(oldLease)
 		}
 		newLease.Port = request.FixedPort
@@ -171,7 +180,7 @@ func (l *portLeasor) Register(request *gate.RegisterRequest) (*gate.Lease, error
 	newLease.Timeout = timestamppb.New(time.Now().Add(l.ttl))
 
 	l.leases[newLease.Port] = newLease
-	log.Print("New lease registered: ", newLease)
+	log.Print("New lease registered: ", leaseString(newLease))
 	return proto.Clone(newLease).(*gate.Lease), nil
 }
 
@@ -181,14 +190,16 @@ func (l *portLeasor) Renew(lease *gate.Lease) (*gate.Lease, error) {
 
 	foundLease, ok := l.leases[lease.Port]
 	if !ok || foundLease == nil {
-		return nil, UnregisteredErr
+		return nil, fmt.Errorf("%w; Requested lease: %v",
+			UnregisteredErr, leaseString(lease))
 	}
 	if foundLease.Pattern != lease.GetPattern() {
-		return nil, InvalidLeaseErr
+		return nil, fmt.Errorf("%w; Requested lease: %v Stored lease: %v",
+			InvalidLeaseErr, leaseString(lease), leaseString(foundLease))
 	}
 
 	foundLease.Timeout = timestamppb.New(time.Now().Add(l.ttl))
-	log.Print("Lease renewed: ", foundLease)
+	log.Print("Lease renewed: ", leaseString(foundLease))
 	return proto.Clone(foundLease).(*gate.Lease), nil
 }
 
@@ -198,13 +209,14 @@ func (l *portLeasor) Unregister(lease *gate.Lease) error {
 
 	foundLease := l.leases[lease.Port]
 	if foundLease == nil {
-		return UnregisteredErr
+		return fmt.Errorf("%w; Requested lease: %v", UnregisteredErr, leaseString(lease))
 	}
 	if foundLease.Pattern != lease.GetPattern() {
-		return InvalidLeaseErr
+		return fmt.Errorf("%w; Requested lease: %v Stored lease: %v",
+			InvalidLeaseErr, leaseString(lease), leaseString(foundLease))
 	}
 
-	log.Print("Lease unregistered: ", foundLease)
+	log.Print("Lease unregistered: ", leaseString(foundLease))
 	l.deleteLeaseUnsafe(foundLease)
 	return nil
 }

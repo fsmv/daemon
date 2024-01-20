@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -17,6 +18,7 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/peer"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -94,12 +96,13 @@ func (s *rcpServ) Register(ctx context.Context, request *gate.RegisterRequest) (
 		var err error
 		clientAddr, _, err = net.SplitHostPort(p.Addr.String())
 		if err != nil {
-			return nil, err
+			return nil, status.Error(codes.InvalidArgument, err.Error())
 		}
 	} else {
 		ipAddrs, err := net.LookupIP(request.Hostname)
 		if err != nil || len(ipAddrs) < 1 {
-			return nil, fmt.Errorf("Failed to resolve request.Hostname to an IP: %w", err)
+			return nil, status.Errorf(codes.InvalidArgument,
+				"Failed to resolve request.Hostname to an IP: %v", err)
 		}
 		// We have to register the resolved IP because it's possible to request
 		// different hostname strings that resolve to the same IP. Since this is
@@ -156,6 +159,11 @@ func (s *rcpServ) Unregister(ctx context.Context, lease *gate.Lease) (*gate.Leas
 	err := leasor.Unregister(lease)
 	if err != nil {
 		log.Print(err)
+		if errors.Is(err, UnregisteredErr) {
+			return nil, status.Error(codes.NotFound, err.Error())
+		} else if errors.Is(err, InvalidLeaseErr) {
+			return nil, status.Error(codes.AlreadyExists, err.Error())
+		}
 		return lease, err
 	}
 	log.Printf("Unregistered rule with pattern: %v", lease.Pattern)
@@ -170,6 +178,11 @@ func (s *rcpServ) Renew(ctx context.Context, lease *gate.Lease) (*gate.Lease, er
 	newLease, err := leasor.Renew(lease)
 	if err != nil {
 		log.Print(err)
+		if errors.Is(err, UnregisteredErr) {
+			return nil, status.Error(codes.NotFound, err.Error())
+		} else if errors.Is(err, InvalidLeaseErr) {
+			return nil, status.Error(codes.AlreadyExists, err.Error())
+		}
 		return nil, err
 	}
 
@@ -190,8 +203,6 @@ func (s *rcpServ) Renew(ctx context.Context, lease *gate.Lease) (*gate.Lease, er
 	}
 
 	s.state.RenewRegistration(newLease)
-	log.Printf("Renewed lease on pattern: %v. Port: %v, Timeout: %v",
-		newLease.Pattern, newLease.Port, newLease.Timeout.AsTime())
 	return newLease, nil
 }
 
