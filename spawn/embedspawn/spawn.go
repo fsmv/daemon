@@ -40,6 +40,9 @@ var (
 )
 
 func Run(flags *flag.FlagSet, args []string) {
+	// TODO: can we do a defer recover() and capture all spawn panics and make
+	// sure they get syslogged?
+
 	configFilename = flags.String("config", "config.pbtxt",
 		"The path to the config file")
 	searchPath = flags.String("path", "",

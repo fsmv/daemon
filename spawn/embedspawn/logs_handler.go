@@ -6,6 +6,8 @@ import (
 	"io"
 	"log"
 	"strings"
+
+	"ask.systems/daemon/tools/flags"
 )
 
 const (
@@ -101,14 +103,52 @@ func (h *logHandler) run() {
 
 // Publish a logs file or pipe to all of the subscribers of the handler
 func (h *logHandler) HandleLogs(logs io.ReadCloser, tag string) {
+	panicLog := h.panicHandleLogs(logs, tag)
+	if panicLog != "" && flags.Syslog != nil {
+		// Note: this only needs to go to syslog because the panic is already
+		// printed to stdout and displayed on the dashboard.
+		//
+		// It's only syslog that misses it because spawn doesn't normally syslog for
+		// children, they syslog on their own.
+		flags.Syslog.Info(panicLog)
+	}
+}
+
+// Publish a logs file or pipe to all of the subscribers of the handler
+//
+// If a panic was detected it returns the panic logs, otherwise it returns empty
+// string.
+func (h *logHandler) panicHandleLogs(logs io.ReadCloser, tag string) string {
 	defer logs.Close()
 	r := bufio.NewReader(logs)
+	var panicLog strings.Builder
 	for {
 		line, err := r.ReadString('\n')
 		if err != nil {
 			log.Print("Failed reading logs: ", err)
-			return
+			return panicLog.String()
 		}
+
+		// Capture panic logs so spawn can send them over syslog
+		//
+		// The children can't automatically capture and syslog all panics because
+		// you would have to have a defer func in main() which I can't magically add
+		// with an include. So spawn has to do it.
+		if strings.HasPrefix(line, "panic:") { // don't log this!
+			log.Printf("Panic detected in %v!", tag)
+			panicLog.Reset()
+			panicLog.WriteString(tag)
+			panicLog.WriteString(" ")
+			// The if statement below writes the first line of the panic
+		}
+		if panicLog.Len() > 8*1024*1024 /* 8 mb */ {
+			log.Printf("False positive panic in %v? Giving up on capturing since it's over 8mb.", tag)
+			panicLog.Reset()
+		}
+		if panicLog.Len() > 0 { // After we see the start take the rest until crash
+			panicLog.WriteString(line)
+		}
+
 		// For running spawn on commandline and not using syslog, print all the
 		// child logs. Also don't print spawn's logs here because the original log
 		// writer is already printing it, which we want to use so syslog works.
@@ -119,10 +159,11 @@ func (h *logHandler) HandleLogs(logs io.ReadCloser, tag string) {
 		h.publish <- logMessage{Line: line, Tag: tag}
 		select {
 		case <-h.quit:
-			return
+			return panicLog.String()
 		default:
 		}
 	}
+	return panicLog.String()
 }
 
 func (h *logHandler) StreamLogs(includeHistory bool) (stream <-chan logMessage, cancel func()) {
