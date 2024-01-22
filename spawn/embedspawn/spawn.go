@@ -12,6 +12,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"syscall"
 	"time"
@@ -19,7 +20,7 @@ import (
 	_ "embed"
 
 	"ask.systems/daemon/tools"
-	_ "ask.systems/daemon/tools/flags"
+	"ask.systems/daemon/tools/flags"
 
 	"google.golang.org/protobuf/encoding/prototext"
 )
@@ -39,30 +40,27 @@ var (
 	dontKillChildren *bool
 )
 
-func Run(flags *flag.FlagSet, args []string) {
-	// TODO: can we do a defer recover() and capture all spawn panics and make
-	// sure they get syslogged?
-
-	configFilename = flags.String("config", "config.pbtxt",
+func Run(flagset *flag.FlagSet, args []string) {
+	configFilename = flagset.String("config", "config.pbtxt",
 		"The path to the config file")
-	searchPath = flags.String("path", "",
+	searchPath = flagset.String("path", "",
 		"A single path to use for relative paths in the config file")
-	spawningDelay = flags.Duration("spawning_delay", 200*time.Millisecond, ""+
+	spawningDelay = flagset.Duration("spawning_delay", 200*time.Millisecond, ""+
 		"The amount of time to wait between starting processes.\n"+
 		"Useful especially for portal which should go first and be given time\n"+
 		"to start up so others can connect.")
-	dontKillChildren = flags.Bool("dont_kill_children", false, ""+
+	dontKillChildren = flagset.Bool("dont_kill_children", false, ""+
 		"When not set, send a SIGHUP to child processes when this process dies. This\n"+
 		"is on by default so that it is easy to setup restarting your daemon with an\n"+
 		"init system.")
-	dashboardUrlFlag = flags.String("dashboard_url", "/daemon/", ""+
+	dashboardUrlFlag = flagset.String("dashboard_url", "/daemon/", ""+
 		"The url to serve the dashboard for this spawn instance. If you have\n"+
 		"multiple servers running spawn, they need different URLs.\n"+
 		"Slashes are required.")
-	adminLogins := flags.String("dashboard_logins", "", ""+
+	adminLogins := flagset.String("dashboard_logins", "", ""+
 		"A comma separated list of username:password_hash for admins that can access\n"+
 		"the dashboard.")
-	flags.Var(
+	flagset.Var(
 		tools.BoolFuncFlag(func(string) error {
 			fmt.Print(configSchema)
 			os.Exit(2)
@@ -71,7 +69,7 @@ func Run(flags *flag.FlagSet, args []string) {
 		"config_schema",
 		"Print the config schema in proto format, for reference, and exit.",
 	)
-	flags.Var(
+	flagset.Var(
 		tools.BoolFuncFlag(func(string) error {
 			fmt.Print(string(exampleConfig))
 			os.Exit(2)
@@ -80,7 +78,22 @@ func Run(flags *flag.FlagSet, args []string) {
 		"example_config",
 		"Print the example config.pbtxt and exit.",
 	)
-	flags.Parse(args[1:])
+	flagset.Parse(args[1:])
+
+	// Capture panics in spawn and log them in syslog and then just crash
+	defer func() {
+		if value := recover(); value != nil {
+			if flags.Syslog != nil {
+				var panicOut strings.Builder
+				panicOut.WriteString(kLogsTag)
+				panicOut.WriteString(" panic: ")
+				fmt.Fprint(&panicOut, value, "\n\n")
+				panicOut.Write(debug.Stack())
+				flags.Syslog.Info(panicOut.String())
+			}
+			panic(value)
+		}
+	}()
 
 	usedExampleConf := false
 	commands, conferr := ReadConfig(*configFilename)
