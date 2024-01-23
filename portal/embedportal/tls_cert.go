@@ -98,9 +98,9 @@ func (t *tlsRefresher) keepCertRefreshed(idx int, cert, key *os.File, pipes bool
 			if tlsCert.Leaf == nil {
 				tlsCert.Leaf, err = x509.ParseCertificate(tlsCert.Certificate[0])
 			}
-			// Try to refresh 1 hour before cert expiration
+			// Try to refresh when 99% of cert life is done
 			if err != nil {
-				timer.Reset(time.Until(tlsCert.Leaf.NotAfter) - time.Hour)
+				timer.Reset(time.Until(tlsCert.Leaf.NotAfter) / 100)
 			}
 		}
 	}

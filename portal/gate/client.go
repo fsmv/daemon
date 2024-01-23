@@ -278,8 +278,8 @@ func (c Client) KeepLeaseRenewedTLS(quit <-chan struct{}, lease *Lease, newCert 
 		log.Printf("portal lease %#v unregistered and connection closed",
 			lease.Pattern)
 	}()
-	const bufferTime = time.Hour // so we don't let the lease expire
-	timer := time.NewTimer(time.Until(lease.Timeout.AsTime()) - bufferTime)
+	// Wait until 1% of the time is remaining
+	timer := time.NewTimer(time.Until(lease.Timeout.AsTime()) / 100)
 	for {
 		select {
 		case <-quit:
@@ -310,6 +310,6 @@ func (c Client) KeepLeaseRenewedTLS(quit <-chan struct{}, lease *Lease, newCert 
 		}
 		timeout := lease.Timeout.AsTime()
 		log.Printf("Renewed lease, port: %v, ttl: %v", lease.Port, timeout)
-		timer.Reset(time.Until(timeout) - bufferTime)
+		timer.Reset(time.Until(timeout) / 100)
 	}
 }

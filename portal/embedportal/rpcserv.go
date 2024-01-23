@@ -10,6 +10,7 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"time"
 
 	"ask.systems/daemon/portal/gate"
 	"ask.systems/daemon/tools"
@@ -127,8 +128,11 @@ func (s *rcpServ) Register(ctx context.Context, request *gate.RegisterRequest) (
 		if err != nil {
 			return nil, err
 		}
+		// We want the expiration to be at least 2x the lease because if the server
+		// is restarted you get a refreshed TTL and we want the cert to survive
+		// until the next renew happens
 		clientCert, err = tools.SignCertificate(root,
-			request.CertificateRequest, lease.Timeout.AsTime(), false)
+			request.CertificateRequest, time.Now().Add(2*leaseTTL), false)
 		if err != nil {
 			return nil, err
 		}
@@ -162,7 +166,7 @@ func (s *rcpServ) Unregister(ctx context.Context, lease *gate.Lease) (*gate.Leas
 		if errors.Is(err, UnregisteredErr) {
 			return nil, status.Error(codes.NotFound, err.Error())
 		} else if errors.Is(err, InvalidLeaseErr) {
-			return nil, status.Error(codes.AlreadyExists, err.Error())
+			return nil, status.Error(codes.NotFound, err.Error())
 		}
 		return lease, err
 	}
@@ -181,7 +185,7 @@ func (s *rcpServ) Renew(ctx context.Context, lease *gate.Lease) (*gate.Lease, er
 		if errors.Is(err, UnregisteredErr) {
 			return nil, status.Error(codes.NotFound, err.Error())
 		} else if errors.Is(err, InvalidLeaseErr) {
-			return nil, status.Error(codes.AlreadyExists, err.Error())
+			return nil, status.Error(codes.NotFound, err.Error())
 		}
 		return nil, err
 	}

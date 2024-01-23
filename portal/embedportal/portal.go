@@ -98,6 +98,8 @@ func Run(flags *flag.FlagSet, args []string) {
 	onCertRenew := func(cert *tls.Certificate) {
 		if err := state.NewRootCA(cert.Certificate[0]); err != nil {
 			log.Print("Error saving new root CA, new backend connections may not work: ", err)
+		} else {
+			log.Print("Renewed root CA cert.")
 		}
 	}
 
