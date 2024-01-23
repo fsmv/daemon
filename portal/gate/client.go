@@ -55,6 +55,8 @@ var (
 	NotRegisteredError = errors.New("pattern not registered")
 )
 
+const failRetryDelay = 2 * time.Minute
+
 type Client struct {
 	// Call any of the service.proto functions here
 	RPC  PortalClient
@@ -73,6 +75,11 @@ var (
 	// The API authentication token for portal RPCs. Portal logs this on startup.
 	Token *string
 )
+
+func renewDuration(deadline time.Time) time.Duration {
+	remainingTime := time.Until(deadline)
+	return remainingTime - remainingTime/100
+}
 
 // Sets up [Address] and [Token] based on optional
 // [ask.systems/daemon/portal/flags] values and with fallback to using the
@@ -295,7 +302,7 @@ func (c Client) KeepLeaseRenewedTLS(quit <-chan struct{}, lease *Lease, newCert 
 			lease.Pattern)
 	}()
 	// Wait until 1% of the time is remaining
-	timer := time.NewTimer(time.Until(lease.Timeout.AsTime()) / 100)
+	timer := time.NewTimer(renewDuration(lease.Timeout.AsTime()))
 	for {
 		select {
 		case <-quit:
@@ -306,7 +313,7 @@ func (c Client) KeepLeaseRenewedTLS(quit <-chan struct{}, lease *Lease, newCert 
 		newLease, err := c.RPC.Renew(context.Background(), lease)
 		if err != nil {
 			log.Printf("Error from renew: %v", err)
-			timer.Reset(2 * time.Minute)
+			timer.Reset(failRetryDelay)
 			continue
 		}
 		lease = newLease
@@ -315,7 +322,7 @@ func (c Client) KeepLeaseRenewedTLS(quit <-chan struct{}, lease *Lease, newCert 
 		}
 		timeout := lease.Timeout.AsTime()
 		log.Printf("Renewed lease, port: %v, ttl: %v", lease.Port, timeout)
-		timer.Reset(time.Until(timeout) / 100)
+		timer.Reset(renewDuration(timeout))
 	}
 }
 
@@ -331,7 +338,7 @@ func (c Client) keepRegistrationAlive(quit <-chan struct{}, request *RegisterReq
 	// re-register. Then we don't have to restart the server.
 	request.FixedPort = lease.Port
 	// Wait until 1% of the time is remaining
-	timer := time.NewTimer(time.Until(lease.Timeout.AsTime()) / 100)
+	timer := time.NewTimer(renewDuration(lease.Timeout.AsTime()))
 	for {
 		select {
 		case <-quit:
@@ -339,7 +346,6 @@ func (c Client) keepRegistrationAlive(quit <-chan struct{}, request *RegisterReq
 			return
 		case <-timer.C:
 		}
-		const failRetryDelay = 2 * time.Minute
 		newLease, err := c.RPC.Renew(context.Background(), lease)
 		action := "Renewed"
 		if err != nil && status.Code(err) == codes.NotFound {
@@ -362,6 +368,6 @@ func (c Client) keepRegistrationAlive(quit <-chan struct{}, request *RegisterReq
 		}
 		timeout := lease.Timeout.AsTime()
 		log.Printf("%v lease, port: %v, ttl: %v", action, lease.Port, timeout)
-		timer.Reset(time.Until(timeout) / 100)
+		timer.Reset(renewDuration(timeout))
 	}
 }
