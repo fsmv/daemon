@@ -45,7 +45,9 @@ import (
 
 	"ask.systems/daemon/tools"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
@@ -113,8 +115,8 @@ func ResolveFlags() error {
 }
 
 // Make a connection to the portal RPC service and send the registration
-// request. Also starts a goroutine to renew the lease (using
-// [Client.KeepLeaseRenewed]) until the quit channel is closed.
+// request. Also starts a goroutine to renew (and potentially re-register) the
+// lease until the quit channel is closed.
 //
 // Returns the initial lease or an error if the registration didn't work.
 func StartRegistration(request *RegisterRequest, quit <-chan struct{}) (*Lease, error) {
@@ -131,7 +133,7 @@ func StartRegistration(request *RegisterRequest, quit <-chan struct{}) (*Lease, 
 	}
 	log.Printf("Obtained lease for %#v, port: %v, ttl: %v",
 		lease.Pattern, lease.Port, lease.Timeout.AsTime())
-	go c.KeepLeaseRenewed(quit, lease)
+	go c.keepRegistrationAlive(quit, request, lease, nil)
 	return lease, nil
 }
 
@@ -158,8 +160,8 @@ func MustStartTLSRegistration(request *RegisterRequest, quit <-chan struct{}) (*
 // sign it with portal's private Certificate Authority (the key is never sent
 // over the network).
 //
-// Starts a goroutine to renew the both the lease and the TLS certificate
-// (using [Client.KeepLeaseRenewedTLS]) until the quit channel is closed.
+// Starts a goroutine to renew the both the lease and the TLS certificate (and
+// re-register the lease if necessary) until the quit channel is closed.
 //
 // Returns the initial lease, and a [tls.Config] which automatically
 // renews the certificate seemlessly. Or return an error if the registration
@@ -196,7 +198,7 @@ func StartTLSRegistration(request *RegisterRequest, quit <-chan struct{}) (*Leas
 	// TLS certificate
 	certCache := &atomic.Value{}
 	certCache.Store(lease.Certificate)
-	go c.KeepLeaseRenewedTLS(quit, lease, func(cert []byte) { certCache.Store(cert) })
+	go c.keepRegistrationAlive(quit, request, lease, func(cert []byte) { certCache.Store(cert) })
 	config := &tls.Config{
 		GetCertificate: func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
 			cert := tools.CertificateFromSignedCert(certCache.Load().([]byte), privateKey)
@@ -258,6 +260,13 @@ func (c Client) Close() {
 //
 // When the quit channel is closed this function unregisters the lease and
 // closes the client.
+//
+// Deprecated: It's best to use [StartRegistration] because this function cannot
+// re-register the lease in the unlikely event that the server somehow forgets
+// the lease exists when it tries to renew, because it does not have access to
+// the registration request. In that case this function gets stuck trying to
+// renew forever. The server can't do it because it has forgetten in this
+// scenario.
 func (c Client) KeepLeaseRenewed(quit <-chan struct{}, lease *Lease) {
 	c.KeepLeaseRenewedTLS(quit, lease, nil)
 }
@@ -271,6 +280,13 @@ func (c Client) KeepLeaseRenewed(quit <-chan struct{}, lease *Lease) {
 //
 // When the quit channel is closed this function unregisters the lease and
 // closes the client.
+//
+// Deprecated: It's best to use [StartTLSRegistration] because this function
+// cannot re-register the lease in the unlikely event that the server somehow
+// forgets the lease exists when it tries to renew, because it does not have
+// access to the registration request. In that case this function gets stuck
+// trying to renew forever. The server can't do it because it has forgetten in
+// this scenario.
 func (c Client) KeepLeaseRenewedTLS(quit <-chan struct{}, lease *Lease, newCert func([]byte)) {
 	defer func() {
 		c.RPC.Unregister(context.Background(), lease)
@@ -287,22 +303,11 @@ func (c Client) KeepLeaseRenewedTLS(quit <-chan struct{}, lease *Lease, newCert 
 			return
 		case <-timer.C:
 		}
-		var err error
 		newLease, err := c.RPC.Renew(context.Background(), lease)
 		if err != nil {
-			/*if err == NotRegisteredError {
-			    // TODO: we would need to save the RegisterRequest options to do
-			    // this right. Also would my code work if the port changes?
-			    log.Print("Got NotRegisteredError, attempting to register.")
-			    err = c.client.Invoke("Register", &RegisterRequest{Pattern:lease.Pattern}, lease)
-			    if err != nil {
-			        log.Printf("Error from register: %v", err)
-			    }
-			} else {*/
 			log.Printf("Error from renew: %v", err)
 			timer.Reset(2 * time.Minute)
 			continue
-			//}
 		}
 		lease = newLease
 		if newCert != nil {
@@ -310,6 +315,53 @@ func (c Client) KeepLeaseRenewedTLS(quit <-chan struct{}, lease *Lease, newCert 
 		}
 		timeout := lease.Timeout.AsTime()
 		log.Printf("Renewed lease, port: %v, ttl: %v", lease.Port, timeout)
+		timer.Reset(time.Until(timeout) / 100)
+	}
+}
+
+func (c Client) keepRegistrationAlive(quit <-chan struct{}, request *RegisterRequest, lease *Lease, newCert func(cert []byte)) {
+	defer func() {
+		c.RPC.Unregister(context.Background(), lease)
+		c.Close()
+		log.Printf("portal lease %#v unregistered and connection closed",
+			lease.Pattern)
+	}()
+
+	// Set the FixedPort to the Port we got so we never change the port if we
+	// re-register. Then we don't have to restart the server.
+	request.FixedPort = lease.Port
+	// Wait until 1% of the time is remaining
+	timer := time.NewTimer(time.Until(lease.Timeout.AsTime()) / 100)
+	for {
+		select {
+		case <-quit:
+			timer.Stop()
+			return
+		case <-timer.C:
+		}
+		const failRetryDelay = 2 * time.Minute
+		newLease, err := c.RPC.Renew(context.Background(), lease)
+		action := "Renewed"
+		if err != nil && status.Code(err) == codes.NotFound {
+			log.Print("Tried to renew but the lease wasn't valid, trying to re-register...")
+			newLease, err = c.RPC.Register(context.Background(), request)
+			if err != nil {
+				log.Printf("Failed to re-register lease from portal: %v", err)
+				timer.Reset(failRetryDelay)
+				continue
+			}
+			action = "Re-registered"
+		} else if err != nil {
+			log.Printf("Error from renew: %v", err)
+			timer.Reset(failRetryDelay)
+			continue
+		}
+		lease = newLease
+		if newCert != nil {
+			newCert(lease.Certificate)
+		}
+		timeout := lease.Timeout.AsTime()
+		log.Printf("%v lease, port: %v, ttl: %v", action, lease.Port, timeout)
 		timer.Reset(time.Until(timeout) / 100)
 	}
 }
