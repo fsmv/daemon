@@ -9,7 +9,11 @@ import (
 )
 
 func ExampleClient() {
-	// import _ "ask.systems/daemon/portal/flags" to easily set these values
+	// This call sets the globals from flags and environment variables.
+	// import _ "ask.systems/daemon/portal/flags" to get the flag definitions.
+	if err := gate.ResolveFlags(); err != nil {
+		log.Fatal(err)
+	}
 	client, err := gate.Connect(*gate.Address, *gate.Token)
 	if err != nil {
 		log.Fatal(err)
@@ -22,4 +26,16 @@ func ExampleClient() {
 		log.Fatal(err)
 	}
 	log.Print(resp.Hostname)
+}
+
+func ExampleResolveFlags() {
+	if err := gate.ResolveFlags(); err != nil {
+		log.Fatal(err)
+	}
+	c, err := gate.Connect(*gate.Address, *gate.Token)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer c.Close()
+	log.Print("Connected to portal!")
 }
