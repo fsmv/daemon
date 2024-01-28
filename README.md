@@ -3,10 +3,13 @@
 [![Go Reference](https://pkg.go.dev/badge/ask.systems/daemon.svg)](https://pkg.go.dev/ask.systems/daemon)
 [![chatroom icon](https://patrolavia.github.io/telegram-badge/chat.png)](https://t.me/daemonserver)
 
-daemon is a personal web server that securely routes all requests to your
-domains to the appropriate backends. Made to simplify running the built in
-servers, your own custom servers, and other servers you download using TLS
-encryption.
+daemon is a web server system made of separate processes focused on a reverse
+proxy server that is configured automatically over RPC (or one line of config
+for pre-existing servers). It also has a launcher program that can run your
+(go) servers in a minimal chroot under a separated user.
+
+It's especially good if you want to write go servers and share one URL between
+them easily with automatic TLS support.
 
 # Features
 
@@ -14,7 +17,7 @@ encryption.
    domain name (via reverse proxy)
  - 🧑‍💻 Read the logs of each server streaming real time to the dashboard
    which also lets you reload the config file and restart servers
- - 🔛 Launch backend servers isolated in a chroot as unprivileged users,
+ - 🔛 Launch backend servers isolated in a minimal chroot as unprivileged users,
    configured in a simple
    [textproto](https://developers.google.com/protocol-buffers/docs/text-format-spec)
    file
