@@ -19,6 +19,9 @@ import (
 // initialized if the -syslog or the -syslog_remote flag is set and [flag.Parse]
 // has been called.
 //
+// If you need to compile your code on windows you can only assume
+// io.WriteCloser.
+//
 // Using this writer directly will not also log to stdout
 var Syslog *syslog.Writer
 

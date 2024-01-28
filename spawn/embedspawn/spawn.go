@@ -8,6 +8,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"io/fs"
 	"log"
 	"os"
@@ -89,7 +90,7 @@ func Run(flagset *flag.FlagSet, args []string) {
 				panicOut.WriteString(" panic: ")
 				fmt.Fprint(&panicOut, value, "\n\n")
 				panicOut.Write(debug.Stack())
-				flags.Syslog.Info(panicOut.String())
+				io.WriteString(flags.Syslog, panicOut.String())
 			}
 			panic(value)
 		}

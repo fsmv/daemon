@@ -110,7 +110,7 @@ func (h *logHandler) HandleLogs(logs io.ReadCloser, tag string) {
 		//
 		// It's only syslog that misses it because spawn doesn't normally syslog for
 		// children, they syslog on their own.
-		flags.Syslog.Info(panicLog)
+		io.WriteString(flags.Syslog, panicLog)
 	}
 }
 
