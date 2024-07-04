@@ -41,6 +41,56 @@ var (
 	dontKillChildren *bool
 )
 
+func setupDashboardAuth(adminLogins string, quit <-chan struct{}) (*tools.BasicAuthHandler, error) {
+	adminAuth := &tools.BasicAuthHandler{Realm: "daemon"}
+	var logins []string
+	if adminLogins == "" {
+		// Use a goroutine so that we don't block the main thread on reading stdin
+		// so that we can shut down the program. This is be killed when main exits.
+		loginChan := make(chan string, 0)
+		errChan := make(chan error, 0)
+		defer close(loginChan)
+		defer close(errChan)
+		go func() {
+			log.Print("-dashboard_logins not set, prompting on stdin for a temporary password to hash.")
+			fmt.Printf("Temporary password to login on the dashboard with: ")
+			scan := bufio.NewScanner(os.Stdin)
+			scan.Scan()
+			if err := scan.Err(); err != nil {
+				errChan <- err
+			} else {
+				hash := tools.HashPassword(scan.Text())
+				fmt.Println("You can login on the dashboard with username admin and the password you entered.")
+				login := fmt.Sprintf("admin:%v", hash)
+				fmt.Printf("To keep these settings set -dashboard_logins '%v'\n", login)
+				loginChan <- login
+			}
+		}()
+		select {
+		case err := <-errChan:
+			return nil, fmt.Errorf("Failed to read stdin: %v", err)
+		case login := <-loginChan:
+			logins = append(logins, login)
+			log.Print("Temporary dashboard password configured.")
+		case <-quit:
+			return nil, fmt.Errorf("Cancelled input due to shutting down.")
+		}
+	} else {
+		logins = strings.Split(adminLogins, ",")
+	}
+	var errCnt int
+	for i, login := range logins {
+		if err := adminAuth.SetLogin(login); err != nil {
+			log.Printf("Failed to authorize login %v: %v", i, err)
+			errCnt++
+		}
+	}
+	if errCnt == len(logins) {
+		return nil, errors.New("Registration failed for all configured logins.")
+	}
+	return adminAuth, nil
+}
+
 func Run(flagset *flag.FlagSet, args []string) {
 	configFilename = flagset.String("config", "config.pbtxt",
 		"The path to the config file")
@@ -127,38 +177,14 @@ func Run(flagset *flag.FlagSet, args []string) {
 	// Give portal time to start up if portal was the only child to start
 	time.Sleep(*spawningDelay)
 
-	adminAuth := &tools.BasicAuthHandler{Realm: "daemon"}
-	var logins []string
-	if *adminLogins == "" {
-		log.Print("-dashboard_logins not set, prompting on stdin for a temporary password to hash.")
-		fmt.Printf("Temporary password to login on the dashboard with: ")
-		scan := bufio.NewScanner(os.Stdin)
-		scan.Scan()
-		if err := scan.Err(); err != nil {
-			log.Printf("Failed to read stdin: %v", err)
-			log.Println("You won't be able to log into the dashboard.")
-		} else {
-			hash := tools.HashPassword(scan.Text())
-			fmt.Println("You can login on the dashboard with username admin and the password you entered.")
-			login := fmt.Sprintf("admin:%v", hash)
-			fmt.Printf("To keep these settings set -dashboard_logins '%v'\n", login)
-			logins = append(logins, login)
-			log.Print("Temporary dashboard password configured.")
-		}
+	adminAuth, err := setupDashboardAuth(*adminLogins, quit)
+	if err != nil {
+		log.Print("Failed to setup dashboard auth, not starting the dashboard. Error: ", err)
 	} else {
-		logins = strings.Split(*adminLogins, ",")
-	}
-	for i, login := range logins {
-		if err := adminAuth.SetLogin(login); err != nil {
-			log.Printf("Failed to authorize login %v: %v", i, err)
-		}
-	}
-
-	if _, err := startDashboard(children, adminAuth, quit); err != nil {
-		log.Print("Failed to start dashboard: ", err)
-		// TODO: retry it? Also check the dashboardQuit signal for retries
-	} else {
-		if usedExampleConf {
+		if _, err := startDashboard(children, adminAuth, quit); err != nil {
+			// TODO: retry it? Also check the dashboardQuit signal for retries?
+			log.Print("Failed to start dashboard: ", err)
+		} else if usedExampleConf {
 			// Sleep for the async "Starting server..." log
 			time.Sleep(5 * time.Millisecond)
 			log.Printf("Since you used the example conf, the dashboard url is:\n"+

@@ -129,13 +129,6 @@ func startDashboard(children *children, adminAuth *tools.BasicAuthHandler, quit 
 	// If the main  quit closes, shut down the dashboard. But, if the dashboard
 	// crashes don't shut down the main process.
 	dashboardQuit = make(chan struct{})
-	go func() {
-		select {
-		case <-quit:
-			close(dashboardQuit)
-		case <-dashboardQuit: // If it gets closed, don't close it again
-		}
-	}()
 	lease, tlsConf, err := gate.StartTLSRegistration(&gate.RegisterRequest{
 		Pattern: pattern,
 	}, dashboardQuit)
@@ -156,6 +149,14 @@ func startDashboard(children *children, adminAuth *tools.BasicAuthHandler, quit 
 	http.Handle(dashboardUrl, &dashboard{children, templates, adminAuth})
 	http.Handle(logsUrl, &logStream{children})
 
+	// Do this at the end because we will already close it if we exit early
+	go func() {
+		select {
+		case <-quit:
+			close(dashboardQuit)
+		case <-dashboardQuit: // If it gets closed, don't close it again
+		}
+	}()
 	go tools.RunHTTPServerTLS(lease.Port, tlsConf, dashboardQuit)
 	return dashboardQuit, nil
 }
