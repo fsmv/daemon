@@ -45,6 +45,8 @@ type children struct {
 	ByName map[string]*child
 
 	libPaths []string
+
+	platform platformSpecificChildrenInfo
 }
 
 func newChildren(quit chan struct{}) *children {
@@ -54,11 +56,13 @@ func newChildren(quit chan struct{}) *children {
 		make(map[int]*child),
 		make(map[string]*child),
 		libraryPaths(),
+		platformSpecificChildrenInfo{},
 	}
 	// Capture spawn's logs
 	r, w := io.Pipe()
 	log.SetOutput(io.MultiWriter(log.Writer(), tools.NewTimestampWriter(w)))
 	go c.HandleLogs(r, kLogsTag)
+	c.platform.Init(c)
 	return c
 }
 

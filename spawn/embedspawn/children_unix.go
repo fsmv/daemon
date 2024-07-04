@@ -59,6 +59,10 @@ func startProcess(name string, argv []string, attr *os.ProcAttr) (*os.Process, e
 	}
 }
 
+type platformSpecificChildrenInfo struct{}
+
+func (p *platformSpecificChildrenInfo) Init(c *children) {}
+
 func (children *children) StartProgram(cmd *Command) error {
 	if len(cmd.Binary) == 0 {
 		return fmt.Errorf("Binary is required")

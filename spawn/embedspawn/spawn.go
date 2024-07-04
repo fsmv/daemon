@@ -101,9 +101,9 @@ func Run(flagset *flag.FlagSet, args []string) {
 		"Useful especially for portal which should go first and be given time\n"+
 		"to start up so others can connect.")
 	dontKillChildren = flagset.Bool("dont_kill_children", false, ""+
-		"When not set, send a SIGHUP to child processes when this process dies. This\n"+
-		"is on by default so that it is easy to setup restarting your daemon with an\n"+
-		"init system.")
+		"When not set, send a SIGHUP to child processes (on Linux, on Windows just\n"+
+		"kill them) when this process dies. This is on by default so that it is easy\n"+
+		"to setup restarting your daemon with an init system.")
 	dashboardUrlFlag = flagset.String("dashboard_url", "/daemon/", ""+
 		"The url to serve the dashboard for this spawn instance. If you have\n"+
 		"multiple servers running spawn, they need different URLs.\n"+

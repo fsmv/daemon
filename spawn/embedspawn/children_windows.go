@@ -9,11 +9,68 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"reflect"
 	"syscall"
 	"time"
+	"unsafe"
 
 	"ask.systems/daemon/portal/gate"
+
+	"golang.org/x/sys/windows"
 )
+
+type platformSpecificChildrenInfo struct {
+	jobObject      windows.Handle
+	successfulInit bool
+}
+
+func (p *platformSpecificChildrenInfo) Init(c *children) {
+	if *dontKillChildren {
+		return
+	}
+	var err error
+	p.jobObject, err = windows.CreateJobObject(nil, nil)
+	if err != nil {
+		log.Print("Failed to CreateJobObject for killing children: ", err)
+		windows.CloseHandle(p.jobObject)
+		return
+	}
+	info := windows.JOBOBJECT_EXTENDED_LIMIT_INFORMATION{
+		BasicLimitInformation: windows.JOBOBJECT_BASIC_LIMIT_INFORMATION{
+			LimitFlags: windows.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+		},
+	}
+	_, err = windows.SetInformationJobObject(
+		p.jobObject,
+		windows.JobObjectExtendedLimitInformation,
+		uintptr(unsafe.Pointer(&info)),
+		uint32(unsafe.Sizeof(info)))
+	if err != nil {
+		log.Print("Failed to set the JobObject to kill children: ", err)
+		windows.CloseHandle(p.jobObject)
+		return
+	}
+	go func() {
+		<-c.quit
+		windows.CloseHandle(p.jobObject)
+	}()
+	p.successfulInit = true
+}
+
+func (c *children) addProcToJobObject(proc *os.Process) error {
+	handleField := reflect.ValueOf(proc).Elem().FieldByName("handle")
+	if !handleField.IsValid() {
+		return errors.New("Go has changed and we cannot get the windows child process handle anymore.")
+	}
+	childHandle := windows.Handle(handleField.Uint())
+	err := windows.AssignProcessToJobObject(
+		c.platform.jobObject,
+		childHandle)
+	if err != nil {
+		return fmt.Errorf("Failed to AssignProcessToJobObject: %w", err)
+	}
+	return nil
+}
 
 func (children *children) StartProgram(cmd *Command) error {
 	if len(cmd.Binary) == 0 {
@@ -108,6 +165,14 @@ func (children *children) StartProgram(cmd *Command) error {
 	log.Printf("Started process: %v; pid: %v", name, proc.Pid)
 	log.Printf("Args: %v", argv)
 
+	if !*dontKillChildren && children.platform.successfulInit {
+		err := children.addProcToJobObject(proc)
+		if err != nil {
+			log.Printf("Failed to setup killing child %v (pid: %v). %v",
+				name, proc.Pid, err)
+		}
+	}
+
 	if filepath.Base(cmd.Binary) == "portal" {
 		log.Print("Waiting for portal API token...")
 		token, err := children.waitForPortalToken()
@@ -172,9 +237,8 @@ func makeOwnedDir(dir string, uid, gid uint32) error {
 }
 
 // Returns the new filepath of the binary (empty string if the file was not created)
+// This is different on Windows because chown doesn't exist.
 func copyFile(oldName string, newName string, uid, gid uint32, exclusive bool) (string, error) {
-	// TODO: we could call os.Link to hardlink the files but it breaks if the
-	// source file is a symbolic link
 	oldf, err := os.Open(oldName)
 	if err != nil {
 		return "", err
@@ -198,6 +262,8 @@ func copyFile(oldName string, newName string, uid, gid uint32, exclusive bool) (
 }
 
 // Windows doesn't support watching files on spawn
+// TODO: try windows.FindFirstChangeNotification or windows.ReadDirectoryChanges
+// thanks https://stackoverflow.com/a/17376701/428740
 func openOrRefreshFiles(cmd *Command, quitFileRefresh <-chan struct{}) ([]*os.File, error) {
 	if len(cmd.Files) == 0 {
 		return nil, nil
