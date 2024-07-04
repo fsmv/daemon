@@ -72,7 +72,7 @@ func Run(flags *flag.FlagSet, args []string) {
 	http.Handle(servePath, http.StripPrefix(prefix, http.HandlerFunc(
 		func(w http.ResponseWriter, req *http.Request) {
 			fullPath := prefix + req.URL.String()
-			clientName := fmt.Sprintf("%v:%v (useragent: %v)",
+			clientName := fmt.Sprintf("%v:%v (useragent: %q)",
 				req.Header.Get("X-Forwarded-For"), req.Header.Get("X-Forwarded-For-Port"),
 				req.UserAgent())
 			if err := dir.CheckPasswordsFiles(w, req); err != nil {
