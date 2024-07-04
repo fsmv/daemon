@@ -117,12 +117,21 @@ func (children *children) StartProgram(cmd *Command) error {
 	if err != nil {
 		return fmt.Errorf("Failed to setup the binary to run: %w", err)
 	}
-	// This only works on windows if the process was not started
-	defer func() {
-		if binary != "" {
-			_ = os.Remove(binary)
+	// Setup deleting the binary on next reboot so if we get force killed we will
+	// eventually clean up the binary we wrote.
+	if wBinary, err := windows.UTF16PtrFromString(binary); err != nil {
+		log.Printf("Failed to convert binary name to a windows string %q: %v",
+			binary, err)
+	} else {
+		if err := windows.MoveFileEx(wBinary, nil, windows.MOVEFILE_DELAY_UNTIL_REBOOT); err != nil {
+			if err.Error() == "Access is denied." {
+				log.Print("If you run as administrator, we will set windows to delete the copied binaries on reboot to clean them in case of crashing.")
+			} else {
+				log.Printf("Failed to set up deleting the copied binary for %v on next reboot: %v",
+					name, err)
+			}
 		}
-	}()
+	}
 
 	quitChild := make(chan struct{})
 	attr.Files, err = children.setupChildFiles(cmd, quitChild)
@@ -157,6 +166,9 @@ func (children *children) StartProgram(cmd *Command) error {
 			c.Message = msg
 			close(quitChild)
 			children.Store(c)
+		}
+		if binary != "" {
+			_ = os.Remove(binary)
 		}
 		return msg
 	}
