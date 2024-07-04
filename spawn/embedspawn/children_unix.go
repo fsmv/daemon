@@ -12,12 +12,50 @@ import (
 	"os/signal"
 	"os/user"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"syscall"
 	"time"
 
 	"ask.systems/daemon/portal/gate"
 )
+
+// Wrap os.StartProcess for linux only to make child killing work right
+//
+// If the dont_kill_children flag isn't set, on Linux we use pdeathsig to
+// kill child processes when spawn exits. The way pdeathsig works is that if
+// the thread, not the process, that started the child exits then the child
+// is sent the signal. So we have to keep the thread alive.
+// See https://github.com/golang/go/issues/27505
+//
+// I have tested it and FreeBSD does not share this behavior.
+func startProcess(name string, argv []string, attr *os.ProcAttr) (*os.Process, error) {
+	if runtime.GOOS != "linux" {
+		return os.StartProcess(name, argv, attr)
+	}
+
+	procChan := make(chan *os.Process, 0)
+	errChan := make(chan error, 0)
+	defer close(procChan)
+	defer close(errChan)
+	go func() {
+		runtime.LockOSThread()
+		defer runtime.UnlockOSThread()
+		proc, err := os.StartProcess(name, argv, attr)
+		if err != nil {
+			errChan <- err
+			return
+		}
+		procChan <- proc
+		proc.Wait()
+	}()
+	select {
+	case proc := <-procChan:
+		return proc, nil
+	case err := <-errChan:
+		return nil, err
+	}
+}
 
 func (children *children) StartProgram(cmd *Command) error {
 	if len(cmd.Binary) == 0 {
@@ -156,7 +194,7 @@ func (children *children) StartProgram(cmd *Command) error {
 	}
 
 	// Start the process
-	proc, err := os.StartProcess(binpath, argv, attr)
+	proc, err := startProcess(binpath, argv, attr)
 	c := &child{
 		Cmd:         cmd,
 		Proc:        proc,
@@ -330,9 +368,6 @@ func (c *children) MonitorDeaths(quit chan struct{}) {
 				}
 				if err != nil {
 					log.Printf("Error checking child status: pid = %v; error = %v", pid, err)
-					continue
-				}
-				if !status.Exited() {
 					continue
 				}
 				c.ReportDown(pid, makeDeadChildMessage(status, resUsage))
