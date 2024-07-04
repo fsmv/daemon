@@ -2,6 +2,8 @@
 
 package embedspawn
 
+// This file applies to linux, bsd, and macos.
+
 import (
 	"errors"
 	"fmt"
@@ -30,7 +32,7 @@ import (
 //
 // I have tested it and FreeBSD does not share this behavior.
 func startProcess(name string, argv []string, attr *os.ProcAttr) (*os.Process, error) {
-	if runtime.GOOS != "linux" {
+	if runtime.GOOS != "linux" || *dontKillChildren {
 		return os.StartProcess(name, argv, attr)
 	}
 
