@@ -89,9 +89,12 @@ func Run(flags *flag.FlagSet, args []string) {
 	}
 
 	// Load the previous save data from the file before we overwrite it
-	saveData, err := os.ReadFile(*saveFilepath)
-	if err != nil {
-		log.Print("No save data: ", err)
+	var saveData []byte
+	if *saveFilepath != "" {
+		saveData, err = os.ReadFile(*saveFilepath)
+		if err != nil {
+			log.Print("No save data: ", err)
+		}
 	}
 
 	state := newStateManager(*saveFilepath)
@@ -123,7 +126,7 @@ func Run(flags *flag.FlagSet, args []string) {
 	_, err = startRPCServer(l,
 		tcpProxy, httpProxy, uint16(*rpcPort),
 		rootCert, saveData, state, quit)
-	log.Print("Started rpc server on port ", rpcPort)
+	log.Print("Started rpc server on port ", *rpcPort)
 	if err != nil {
 		log.Fatal("Failed to start RPC server:", err)
 	}

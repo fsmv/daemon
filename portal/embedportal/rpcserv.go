@@ -54,7 +54,9 @@ func (s *rcpServ) loadState(saveData []byte) {
 		}
 		loaded += 1
 	}
-	log.Printf("Successfully loaded %v/%v saved root CAs", loaded, len(state.RootCAs))
+	if len(state.RootCAs) > 0 {
+		log.Printf("Successfully loaded %v/%v saved root CAs", loaded, len(state.RootCAs))
+	}
 
 	// Register the saved registrations
 	loaded = 0
@@ -74,7 +76,9 @@ func (s *rcpServ) loadState(saveData []byte) {
 		}
 		loaded += 1
 	}
-	log.Printf("Successfully loaded %v/%v saved registrations", loaded, len(state.Registrations))
+	if len(state.Registrations) > 0 {
+		log.Printf("Successfully loaded %v/%v saved registrations", loaded, len(state.Registrations))
+	}
 }
 
 func (s *rcpServ) MyHostname(ctx context.Context, empty *emptypb.Empty) (*gate.Hostname, error) {
