@@ -100,7 +100,6 @@ func (p *httpProxy) Register(
 func (p *httpProxy) saveForwarder(clientAddr string, lease *gate.Lease,
 	request *gate.RegisterRequest) error {
 
-	var protocol string
 	addrPort := fmt.Sprintf("%v:%v", clientAddr, lease.Port)
 
 	// TODO: when assimilate supports writing cert files, maybe make it so
@@ -131,21 +130,31 @@ func (p *httpProxy) saveForwarder(clientAddr string, lease *gate.Lease,
 		}
 	}
 
-	// Detect TLS support
-	conn, err := tls.Dial("tcp", addrPort, conf)
-	if err == nil {
-		conn.Close()
-		protocol = "https://"
-	} else {
-		if len(request.CertificateRequest) != 0 {
-			log.Printf("Error: failed to connect using TLS for the %v backend. When certificate_request is used, you must serve with that certificate. Message: %v",
-				lease.Pattern, err)
+	// Detect TLS support for FixedPort backends, if we don't have a FixedPort set
+	// then the server cannot be already running and won't run until we return
+	// this RPC.
+	protocol := "http://"
+	if request.FixedPort != 0 {
+		conn, err := tls.Dial("tcp", addrPort, conf)
+		if err == nil {
+			conn.Close()
 			protocol = "https://"
 		} else {
 			log.Printf("Warning: TLS is not supported for the %v backend. This internal traffic will not be encrypted. Message: %v",
 				lease.Pattern, err)
-			protocol = "http://"
 		}
+	}
+	// If there was a cert request then we require HTTPS. Most go clients will use
+	// the gate API and will be using cert requests.
+	//
+	// So this covers detecting TLS for go usecases and above we checked for most
+	// third-party usecases which will not be able to register with the portal
+	// API.
+	// TODO: maybe do more robust TLS checking with the same state machine idea as
+	// in tcp_proxyserv.go, but it's niche, it would only help non-FixedPort
+	// non-CertificateRequest backends that do use their own cert.
+	if len(request.CertificateRequest) != 0 {
+		protocol = "https://"
 	}
 
 	backend, err := url.Parse(protocol + addrPort)
