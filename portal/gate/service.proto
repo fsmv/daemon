@@ -80,7 +80,7 @@ message Lease {
 
 	// If generate_certificate was set in the request, this is the signed x509
 	// certificate to use for your server. It will be renewed with the lease.
-	bytes Certificate = 4;
+	bytes certificate = 4;
 }
 
 // vim: set noexpandtab:
