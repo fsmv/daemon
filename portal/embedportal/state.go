@@ -51,6 +51,21 @@ func newStateManager(saveFilepath string) *stateManager {
 	return s
 }
 
+func writeFileSync(name string, data []byte, perm os.FileMode) error {
+	f, err := os.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
+	if err != nil {
+		return err
+	}
+	_, err = f.Write(data)
+	if err == nil {
+		err = f.Sync()
+	}
+	if errClose := f.Close(); errClose != nil && err == nil {
+		return errClose
+	}
+	return err
+}
+
 func (s *stateManager) saveUnsafe() {
 	if s.saveFilepath == "" {
 		return
@@ -79,11 +94,11 @@ func (s *stateManager) saveUnsafe() {
 		return
 	}
 	tmpFilepath := s.saveFilepath + ".tmp"
-	if err := os.WriteFile(tmpFilepath, saveData, 0660); err != nil {
+	if err := writeFileSync(tmpFilepath, saveData, 0660); err != nil {
 		log.Print("Failed to write temp save state file to store leases: ", err)
 		return
 	}
-	if err := os.Rename(tmpFilepath, s.saveFilepath); err != nil {
+	if err := atomicReplaceFile(tmpFilepath, s.saveFilepath); err != nil {
 		log.Print("Failed to overwrite save state file to store leases: ", err)
 	}
 	log.Print("Saved leases state file")
