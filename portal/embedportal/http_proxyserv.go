@@ -314,14 +314,14 @@ func (p *httpProxy) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		// server seems to return errors for empty URIs so there has to be something
 		// in there. The parsing code is too complex to guess what it could be.
 		http.Error(w, "Empty path requested.", http.StatusBadRequest)
-		log.Printf("%v (useragent: %q) requested an empty req.URL.Path. Raw URI: %v",
-			req.RemoteAddr, req.UserAgent(), req.RequestURI)
+		log.Printf("%v requested an empty req.URL.Path. Raw URI: %q (useragent: %q)",
+			req.RemoteAddr, req.RequestURI, req.UserAgent())
 		return
 	}
 	fwd := p.selectForwarder(req.Host, req.URL.Path)
 	if fwd == nil {
-		log.Printf("%v (useragent: %q) requested unregistered path: %v%v",
-			req.RemoteAddr, req.UserAgent(), req.Host, req.URL.Path)
+		log.Printf("%v requested unregistered path: %v%v (useragent: %q) ",
+			req.RemoteAddr, req.Host, req.URL.EscapedPath(), req.UserAgent())
 		http.NotFound(w, req)
 		return
 	}
@@ -370,7 +370,8 @@ func makeChallengeHandler(webRoot string) (http.Handler, error) {
 	}
 	fileServer := http.FileServer(dir)
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		log.Printf("%v (useragent: %q) requested %v", req.RemoteAddr, req.UserAgent(), req.URL)
+		log.Printf("%v requested %v%v (useragent: %q)",
+			req.RemoteAddr, req.Host, req.URL.EscapedPath(), req.UserAgent())
 		fileServer.ServeHTTP(w, req)
 	}), nil
 }

@@ -72,12 +72,11 @@ func Run(flags *flag.FlagSet, args []string) {
 	http.Handle(servePath, http.StripPrefix(prefix, http.HandlerFunc(
 		func(w http.ResponseWriter, req *http.Request) {
 			fullPath := prefix + req.URL.String()
-			clientName := fmt.Sprintf("%v:%v (useragent: %q)",
-				req.Header.Get("X-Forwarded-For"), req.Header.Get("X-Forwarded-For-Port"),
-				req.UserAgent())
+			clientName := fmt.Sprintf("%v:%v",
+				req.Header.Get("X-Forwarded-For"), req.Header.Get("X-Forwarded-For-Port"))
 			if err := dir.CheckPasswordsFiles(w, req); err != nil {
 				if *logRequests {
-					log.Printf("%v %v at %v", clientName, err, fullPath)
+					log.Printf("%v %v at %v (useragent: %q)", clientName, err, fullPath, req.UserAgent())
 				}
 				return // Auth failed!
 			}
@@ -87,8 +86,8 @@ func Run(flags *flag.FlagSet, args []string) {
 			fileServer.ServeHTTP(w, req)
 			if *logRequests {
 				size := w.(tools.SizeTrackerHTTPResponseWriter).BytesRead()
-				log.Printf("%v requested and was served %v (%v bytes)",
-					clientName, fullPath, size)
+				log.Printf("%v requested and was served %v (%v bytes) useragent: %q",
+					clientName, fullPath, size, req.UserAgent())
 			}
 		},
 	)))
