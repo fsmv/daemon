@@ -14,7 +14,10 @@ import (
 )
 
 // How often to look through the Leases and unregister those past TTL
-const ttlCheckFreq = 15 * time.Minute
+const (
+	ttlCheckFreq     = leaseTTL / 100
+	ttlRandomStagger = 0.05
+)
 
 var (
 	FixedPortTakenErr = errors.New("Requested fixed port is already taken!")
@@ -139,6 +142,10 @@ func (l *portLeasor) OnCancel(cancelFunc func(*gate.Lease)) {
 	l.onCancel = append(l.onCancel, cancelFunc)
 }
 
+func (l *portLeasor) randomTTL() time.Duration {
+	return time.Duration(float64(l.ttl) * (1 + rand.Float64()*ttlRandomStagger))
+}
+
 // Register a port exclusively for limited time. If the FixedPort is 0, you will
 // get a random port in the pre-configured range. Otherwise you will get a lease
 // for the requested port if it is not already taken.
@@ -177,7 +184,7 @@ func (l *portLeasor) Register(request *gate.RegisterRequest) (*gate.Lease, error
 		}
 		newLease.Port = port
 	}
-	newLease.Timeout = timestamppb.New(time.Now().Add(l.ttl))
+	newLease.Timeout = timestamppb.New(time.Now().Add(l.randomTTL()))
 
 	l.leases[newLease.Port] = newLease
 	log.Print("New lease registered: ", leaseString(newLease))
@@ -198,7 +205,7 @@ func (l *portLeasor) Renew(lease *gate.Lease) (*gate.Lease, error) {
 			InvalidLeaseErr, leaseString(lease), leaseString(foundLease))
 	}
 
-	foundLease.Timeout = timestamppb.New(time.Now().Add(l.ttl))
+	foundLease.Timeout = timestamppb.New(time.Now().Add(l.randomTTL()))
 	log.Print("Lease renewed: ", leaseString(foundLease))
 	return proto.Clone(foundLease).(*gate.Lease), nil
 }
