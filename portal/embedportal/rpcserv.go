@@ -14,6 +14,7 @@ import (
 
 	"ask.systems/daemon/portal/gate"
 	"ask.systems/daemon/tools"
+
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
@@ -195,9 +196,12 @@ func (s *rcpServ) Renew(ctx context.Context, lease *gate.Lease) (*gate.Lease, er
 	}
 
 	registration := s.state.LookupRegistration(lease)
+	if registration == nil {
+		log.Print("Warning no registration found in state for lease: ", leaseString(lease))
+	}
 
 	// Renew the certificate if we had one
-	if len(registration.Request.CertificateRequest) != 0 {
+	if len(registration.GetRequest().CertificateRequest) != 0 {
 		root, err := s.rootCert.GetCertificate(nil)
 		if err != nil {
 			return nil, err

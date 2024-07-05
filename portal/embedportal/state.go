@@ -2,6 +2,7 @@ package embedportal
 
 import (
 	"crypto/x509"
+	"fmt"
 	"log"
 	"os"
 	"sync"
@@ -17,7 +18,7 @@ type stateManager struct {
 	mut          *sync.Mutex
 	saveFilepath string
 
-	registrations map[uint32]*Registration // lease port key
+	registrations map[string]*Registration // leaseKey(lease) for the key
 
 	// Store the rootCAs separately so we can write them to a file, because
 	// unfortunately CertPool has no non-depracted methods to get the certs back.
@@ -36,7 +37,7 @@ func newStateManager(saveFilepath string) *stateManager {
 		mut:          &sync.Mutex{},
 		saveFilepath: saveFilepath,
 
-		registrations: make(map[uint32]*Registration),
+		registrations: make(map[string]*Registration),
 
 		rootCAs:      make(map[*x509.Certificate]struct{}),
 		mutCertPool:  x509.NewCertPool(),
@@ -126,18 +127,22 @@ func (s *stateManager) RootCAs() *x509.CertPool {
 	return s.readCertPool.Load().(*x509.CertPool)
 }
 
+func leaseKey(lease *gate.Lease) string {
+	return fmt.Sprintf("%s:%d:%s", lease.Address, lease.Port, lease.Pattern)
+}
+
 func (s *stateManager) LookupRegistration(lease *gate.Lease) *Registration {
 	s.mut.Lock()
 	defer s.mut.Unlock()
 
-	return s.registrations[lease.Port]
+	return s.registrations[leaseKey(lease)]
 }
 
 func (s *stateManager) NewRegistration(r *Registration) {
 	s.mut.Lock()
 	defer s.mut.Unlock()
 
-	s.registrations[r.Lease.Port] = r
+	s.registrations[leaseKey(r.Lease)] = r
 
 	s.saveUnsafe()
 }
@@ -146,7 +151,7 @@ func (s *stateManager) RenewRegistration(lease *gate.Lease) {
 	s.mut.Lock()
 	defer s.mut.Unlock()
 
-	r := s.registrations[lease.Port]
+	r := s.registrations[leaseKey(lease)]
 	r.Lease = lease
 
 	s.saveUnsafe()
@@ -156,7 +161,7 @@ func (s *stateManager) Unregister(oldLease *gate.Lease) {
 	s.mut.Lock()
 	defer s.mut.Unlock()
 
-	delete(s.registrations, oldLease.Port)
+	delete(s.registrations, leaseKey(oldLease))
 
 	s.saveUnsafe()
 }
