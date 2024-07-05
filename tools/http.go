@@ -53,6 +53,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -515,4 +516,32 @@ func (r RedirectToHTTPS) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	url.Host = req.Host
 	url.Host = url.Hostname() // strip the port if one exists
 	http.Redirect(w, req, url.String(), http.StatusSeeOther)
+}
+
+type SizeTrackerHTTPResponseWriter struct {
+	http.ResponseWriter
+	bytesRead *atomic.Uint64
+}
+
+func NewSizeTrackerHTTPResponseWriter(w http.ResponseWriter) SizeTrackerHTTPResponseWriter {
+	return SizeTrackerHTTPResponseWriter{
+		ResponseWriter: w,
+		bytesRead:      &atomic.Uint64{},
+	}
+}
+
+func (w SizeTrackerHTTPResponseWriter) Write(input []byte) (n int, err error) {
+	n, err = w.ResponseWriter.Write(input)
+	w.bytesRead.Add(uint64(n))
+	return
+}
+
+func (w SizeTrackerHTTPResponseWriter) Flush() {
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+func (w SizeTrackerHTTPResponseWriter) BytesRead() uint64 {
+	return w.bytesRead.Load()
 }

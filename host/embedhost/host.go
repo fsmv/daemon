@@ -82,11 +82,14 @@ func Run(flags *flag.FlagSet, args []string) {
 				return // Auth failed!
 			}
 			if *logRequests {
-				size, _ := dir.FileSize(req.URL.Path)
+				w = tools.NewSizeTrackerHTTPResponseWriter(w)
+			}
+			fileServer.ServeHTTP(w, req)
+			if *logRequests {
+				size := w.(tools.SizeTrackerHTTPResponseWriter).BytesRead()
 				log.Printf("%v requested and was served %v (%v bytes)",
 					clientName, fullPath, size)
 			}
-			fileServer.ServeHTTP(w, req)
 		},
 	)))
 
