@@ -100,7 +100,13 @@ func (p *httpProxy) Register(
 func (p *httpProxy) saveForwarder(clientAddr string, lease *gate.Lease,
 	request *gate.RegisterRequest) error {
 
-	addrPort := fmt.Sprintf("%v:%v", clientAddr, lease.Port)
+	var host string
+	if request.Hostname != "" {
+		host = request.Hostname
+	} else {
+		host = clientAddr
+	}
+	hostPort := fmt.Sprintf("%v:%v", host, lease.Port)
 
 	// TODO: when assimilate supports writing cert files, maybe make it so
 	// normally we only accept the portal root CA (and maybe add the system root
@@ -135,7 +141,7 @@ func (p *httpProxy) saveForwarder(clientAddr string, lease *gate.Lease,
 	// this RPC.
 	protocol := "http://"
 	if request.FixedPort != 0 {
-		conn, err := tls.Dial("tcp", addrPort, conf)
+		conn, err := tls.Dial("tcp", hostPort, conf)
 		if err == nil {
 			conn.Close()
 			protocol = "https://"
@@ -157,7 +163,7 @@ func (p *httpProxy) saveForwarder(clientAddr string, lease *gate.Lease,
 		protocol = "https://"
 	}
 
-	backend, err := url.Parse(protocol + addrPort)
+	backend, err := url.Parse(protocol + hostPort)
 	if err != nil {
 		return err
 	}

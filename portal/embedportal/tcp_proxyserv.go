@@ -67,9 +67,15 @@ func (p *tcpProxy) Register(clientAddr string, request *gate.RegisterRequest) (*
 		leasor.Unregister(lease)
 		return nil, fmt.Errorf("Failed to listen on the requested port for TCP Proxy (%v): %v", lease.Port, err)
 	}
-	serverAddress := fmt.Sprintf("%v:%v", clientAddr, lease.Port)
-	startTCPForward(listener, serverAddress, cancelLease)
-	log.Printf("Registered a TCP proxy forwarding %v to %v.", port, serverAddress)
+	var host string
+	if request.Hostname != "" {
+		host = request.Hostname
+	} else {
+		host = clientAddr
+	}
+	hostPort := fmt.Sprintf("%v:%v", host, lease.Port)
+	startTCPForward(listener, hostPort, cancelLease)
+	log.Printf("Registered a TCP proxy forwarding %v to %v.", port, hostPort)
 	p.cancelers.Store(request.Pattern, cancelLease)
 	return lease, nil
 }
