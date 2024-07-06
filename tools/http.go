@@ -73,7 +73,7 @@ func strSliceContains(slice []string, key string) bool {
 // Starts an HTTPS server on the specified port using the TLS config and block
 // until the quit channel is closed and graceful shutdown has finished.
 func RunHTTPServerTLS(port uint32, config *tls.Config, quit chan struct{}) {
-	log.Print("Starting server...")
+	log.Printf("Starting HTTPS server on port %d...", port)
 	var srv http.Server
 
 	// Support HTTP/2. See https://pkg.go.dev/net/http#Serve
@@ -97,17 +97,17 @@ func RunHTTPServerTLS(port uint32, config *tls.Config, quit chan struct{}) {
 	}()
 
 	<-quit
-	log.Print("Shutting down HTTPS Server...")
-	log.Print("Waiting up to 10 seconds for HTTPS connections to close.")
+	log.Printf("Shutting down HTTPS Server on port %d...", port)
+	log.Printf("Waiting up to 10 seconds for HTTPS connections to close on port %d.", port)
 	ttl, _ := context.WithTimeout(context.Background(), 10*time.Second)
 	code := srv.Shutdown(ttl)
-	log.Print("HTTPS server exit status:", code)
+	log.Printf("HTTPS server (port %d) exit status: %v", port, code)
 }
 
 // Starts an HTTP server on the specified port and block until the quit channel
 // is closed and graceful shutdown has finished.
 func RunHTTPServer(port uint32, quit chan struct{}) {
-	log.Print("Starting server...")
+	log.Printf("Starting HTTP server on port %d...", port)
 	var srv http.Server
 	srv.Addr = ":" + strconv.Itoa(int(port))
 	go func() {

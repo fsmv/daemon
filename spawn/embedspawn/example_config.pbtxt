@@ -41,6 +41,9 @@ command {
     "-https_port=8080",
     # Set commandline arguments to avoid creating any files because by default
     # we're running in local testing mode
+    #
+    # You can delete these lines to enable these features with the default
+    # vaules.
     "-save_file=",
     "-cert_challenge_webroot="
   ]
