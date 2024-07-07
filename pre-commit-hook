@@ -5,6 +5,23 @@
 #
 # This way it will always run the latest version from the repository
 
+# Check if what we're about to commit builds at the repo root
+#
+# Do stashes so we only compile what we're about to commit and ignore the rest
+# Don't panic if you get stash problems, it saves your work!
+NEED_POP=-1
+if [ -n "$(git diff --name-only)" ]; then
+  git stash -q --keep-index --include-untracked
+  NEED_POP=$?
+fi
+
+go mod tidy -go=1.18
+TIDY_DIFFS=$(git diff --name-only | grep "go\.")
+if [ -n "$TIDY_DIFFS" ]; then
+  echo "go mod tidy produced diffs, add the changes to your commit or before it."
+  exit 1
+fi
+
 # Make sure we have generated the go code from any the proto changes
 PROTO_DIFFS=$(git diff --cached --name-only | grep '\.proto')
 if [ -n "$PROTO_DIFFS" ]; then
@@ -14,16 +31,6 @@ if [ -n "$PROTO_DIFFS" ]; then
     echo "go generate produced diffs, add the .pb.go files to your commit."
     exit 1
   fi
-fi
-
-# Check if what we're about to commit builds at the repo root
-#
-# Do stashes so we only compile what we're about to commit and ignore the rest
-# Don't panic if you get stash problems, it saves your work!
-NEED_POP=-1
-if [ -n "$(git diff --name-only)" ]; then
-  git stash -q --keep-index --include-untracked
-  NEED_POP=$?
 fi
 
 MAC_DIFFS=$(git diff --cached --name-only | grep '_darwin\.go')
