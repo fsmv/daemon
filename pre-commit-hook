@@ -30,10 +30,10 @@ MAC_DIFFS=$(git diff --cached --name-only | grep '_darwin\.go')
 if [ -n "$MAC_DIFFS" ]; then
   GOOS=darwin go build -o test-build && rm test-build && GOOS=darwin go vet
   STATUS=$? # other commands will overwrite $? so save it
-  if [ $NEED_POP -eq 0 ]; then
-    git stash pop -q
-  fi
   if [ $STATUS -ne 0 ]; then
+    if [ $NEED_POP -eq 0 ]; then
+      git stash pop -q
+    fi
     exit $STATUS
   fi
 fi
@@ -42,10 +42,10 @@ WINDOWS_DIFFS=$(git diff --cached --name-only | grep '_windows\.go')
 if [ -n "$WINDOWS_DIFFS" ]; then
   GOOS=windows go build -o test-build && rm test-build && GOOS=windows go vet
   STATUS=$? # other commands will overwrite $? so save it
-  if [ $NEED_POP -eq 0 ]; then
-    git stash pop -q
-  fi
   if [ $STATUS -ne 0 ]; then
+    if [ $NEED_POP -eq 0 ]; then
+      git stash pop -q
+    fi
     exit $STATUS
   fi
 fi
@@ -55,6 +55,4 @@ STATUS=$? # other commands will overwrite $? so save it
 if [ $NEED_POP -eq 0 ]; then
   git stash pop -q
 fi
-if [ $STATUS -ne 0 ]; then
-  exit $STATUS
-fi
+exit $STATUS
