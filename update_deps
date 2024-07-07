@@ -1,0 +1,33 @@
+#!/bin/sh
+
+UPDATES=$(awk '$1 !~ /^$|^(module|go|require|\))$/ {print $1}' go.mod \
+  | xargs go list -u -m)
+
+COMMANDS=$(echo "$UPDATES" | awk '$3 != "" {
+    newver = substr($3, 2, length($3)-2);
+    printf "go get %s@%s\n", $1, newver;
+  }' -)
+
+echo "$UPDATES"
+
+printf "\nSkipping grpc because v1.65.0 forces a go upgrade...\n"
+
+IFS='
+'
+for cmd in $COMMANDS; do
+  FILTER=$(echo "$cmd" | grep "google.golang.org/grpc")
+  if [ -n "$FILTER" ]; then continue; fi
+
+  echo ""
+  echo "Running: $cmd"
+  OUT=$(eval "$cmd" 2>&1)
+  if [ -n "$OUT" ]; then echo "$OUT"; fi
+  CHECK=$(echo "$OUT" | grep "upgraded go 1.18") 
+  if [ -n "$OUT" -a -n "$CHECK" ]; then
+    echo "This forced an upgrade of the min go version stopping."
+    echo "To reset run: git restore go.mod go.sum."
+    exit 1
+  fi
+done
+
+go mod tidy -go=1.18
