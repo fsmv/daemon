@@ -65,6 +65,6 @@ import (
 func main() {
 	flags.CopyrightNotice = "" +
 		"Provided under the MIT License https://mit-license.org\n" +
-		"Copyright 2017-2023 Andrew Kallmeyer"
+		"Copyright 2017-2024 Andy Kallmeyer"
 	embedspawn.Run(flag.CommandLine, os.Args)
 }

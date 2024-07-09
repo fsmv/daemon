@@ -123,7 +123,7 @@ var namePadding string
 func init() {
 	flags.CopyrightNotice = "" +
 		"Provided under the MIT License https://mit-license.org\n" +
-		"Copyright 2017-2023 Andrew Kallmeyer"
+		"Copyright 2017-2024 Andy Kallmeyer <ask@ask.systems>"
 
 	maxLen := 0
 	for _, cmd := range commands {
