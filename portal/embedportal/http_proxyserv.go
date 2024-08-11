@@ -331,9 +331,13 @@ func (p *httpProxy) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		http.NotFound(w, req)
 		return
 	}
-	if req.TLS == nil && !fwd.AllowHTTP {
-		tools.RedirectToHTTPS{}.ServeHTTP(w, req)
-		return
+
+	if !fwd.AllowHTTP {
+		w.Header().Add("Strict-Transport-Security", "max-age=31536000")
+		if req.TLS == nil {
+			tools.RedirectToHTTPS{}.ServeHTTP(w, req)
+			return
+		}
 	}
 
 	// If the pattern ends in /, redirect so the url ends in / so relative paths
