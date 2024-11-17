@@ -12,6 +12,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"ask.systems/daemon/portal/gate"
 	"ask.systems/daemon/tools"
@@ -55,7 +56,7 @@ func (p *httpProxy) Unregister(lease *gate.Lease) {
 // Register leases a new forwarder for the given pattern.
 // Returns an error if the server has no more ports to lease.
 func (p *httpProxy) Register(
-	clientAddr string, request *gate.RegisterRequest) (*gate.Lease, error) {
+	clientAddr string, request *gate.RegisterRequest, fixedTimeout time.Time) (*gate.Lease, error) {
 
 	if request.Pattern == "" {
 		err := fmt.Errorf("Registration pattern must not be empty.")
@@ -75,7 +76,7 @@ func (p *httpProxy) Register(
 			leasor.Unregister(oldFwd.Lease) // this calls also httpProxy.Unregister via callback
 		}
 	}
-	lease, err := leasor.Register(request)
+	lease, err := leasor.Register(request, fixedTimeout)
 	if err != nil {
 		log.Print("Error registering: ", err)
 		return nil, err
@@ -87,7 +88,7 @@ func (p *httpProxy) Register(
 		return nil, err
 	}
 	log.Printf("Registered forwarder to %v:%v, Pattern: %#v, Timeout: %v",
-		clientAddr, lease.Port, lease.Pattern, lease.Timeout.AsTime())
+		clientAddr, lease.Port, lease.Pattern, lease.Timeout.AsTime().In(time.Local))
 	return lease, nil
 }
 

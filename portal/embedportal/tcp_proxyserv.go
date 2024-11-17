@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"ask.systems/daemon/portal/gate"
 )
@@ -45,7 +46,7 @@ func (p *tcpProxy) unregisterPattern(pattern string) {
 	}
 }
 
-func (p *tcpProxy) Register(clientAddr string, request *gate.RegisterRequest) (*gate.Lease, error) {
+func (p *tcpProxy) Register(clientAddr string, request *gate.RegisterRequest, fixedTimeout time.Time) (*gate.Lease, error) {
 	cancelLease := make(chan struct{})
 	go func() {
 		select {
@@ -57,7 +58,7 @@ func (p *tcpProxy) Register(clientAddr string, request *gate.RegisterRequest) (*
 	}()
 	p.unregisterPattern(request.Pattern) // replace existing patterns
 	leasor := p.clientLeasor.PortLeasorForClient(clientAddr)
-	lease, err := leasor.Register(request)
+	lease, err := leasor.Register(request, fixedTimeout)
 	if err != nil {
 		return nil, err
 	}

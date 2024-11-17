@@ -67,10 +67,17 @@ func (s *rcpServ) loadState(saveData []byte) {
 			// was for a random port
 			registration.Request.FixedPort = registration.Lease.Port
 		}
-		// Note: Don't check for expired leases, if we restart everyone gets an
-		// extension on their leases. We will remove leases from the file as the
-		// expire while we're online.
-		_, err := s.internalRegister(registration.Lease.Address, registration.Request)
+		// If the lease is expired, give an extension. Otherwise just register for
+		// the same lease timeout.
+		//
+		// This way clients won't get a randomly shorter timeout than they thought
+		// they had, and if we missed the renew while portal was down they get an
+		// extension.
+		timeoutTime := registration.Lease.Timeout.AsTime()
+		if now := time.Now(); now.After(timeoutTime) {
+			timeoutTime = now.Add(randomTTL(leaseTTL))
+		}
+		_, err := s.internalRegister(registration.Lease.Address, registration.Request, timeoutTime)
 		if err != nil {
 			log.Printf("Failed to recreate registration: %v\n%v", err, registration)
 			continue
@@ -122,7 +129,7 @@ func (s *rcpServ) Register(ctx context.Context, request *gate.RegisterRequest) (
 		clientAddr = ipAddrs[0].String()
 	}
 
-	lease, err := s.internalRegister(clientAddr, request)
+	lease, err := s.internalRegister(clientAddr, request, time.Time{})
 	if err != nil {
 		return nil, err
 	}
@@ -147,11 +154,11 @@ func (s *rcpServ) Register(ctx context.Context, request *gate.RegisterRequest) (
 	return lease, nil
 }
 
-func (s *rcpServ) internalRegister(clientAddr string, request *gate.RegisterRequest) (lease *gate.Lease, err error) {
+func (s *rcpServ) internalRegister(clientAddr string, request *gate.RegisterRequest, fixedTimeout time.Time) (lease *gate.Lease, err error) {
 	if strings.HasPrefix(request.Pattern, tcpProxyPrefix) {
-		lease, err = s.tcpProxy.Register(clientAddr, request)
+		lease, err = s.tcpProxy.Register(clientAddr, request, fixedTimeout)
 	} else {
-		lease, err = s.httpProxy.Register(clientAddr, request)
+		lease, err = s.httpProxy.Register(clientAddr, request, fixedTimeout)
 	}
 	if err == nil {
 		s.state.NewRegistration(&Registration{

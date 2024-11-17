@@ -142,8 +142,12 @@ func (l *portLeasor) OnCancel(cancelFunc func(*gate.Lease)) {
 	l.onCancel = append(l.onCancel, cancelFunc)
 }
 
+func randomTTL(ttl time.Duration) time.Duration {
+	return time.Duration(float64(ttl) * (1 + rand.Float64()*ttlRandomStagger))
+}
+
 func (l *portLeasor) randomTTL() time.Duration {
-	return time.Duration(float64(l.ttl) * (1 + rand.Float64()*ttlRandomStagger))
+	return randomTTL(l.ttl)
 }
 
 // Register a port exclusively for limited time. If the FixedPort is 0, you will
@@ -152,7 +156,7 @@ func (l *portLeasor) randomTTL() time.Duration {
 //
 // The client string is simply stored in the state save file so that proxy
 // backends can reconnect to the address on restart.
-func (l *portLeasor) Register(request *gate.RegisterRequest) (*gate.Lease, error) {
+func (l *portLeasor) Register(request *gate.RegisterRequest, fixedTimeout time.Time) (*gate.Lease, error) {
 	l.mut.Lock()
 	defer l.mut.Unlock()
 
@@ -184,7 +188,11 @@ func (l *portLeasor) Register(request *gate.RegisterRequest) (*gate.Lease, error
 		}
 		newLease.Port = port
 	}
-	newLease.Timeout = timestamppb.New(time.Now().Add(l.randomTTL()))
+	if fixedTimeout.IsZero() {
+		newLease.Timeout = timestamppb.New(time.Now().Add(l.randomTTL()))
+	} else {
+		newLease.Timeout = timestamppb.New(fixedTimeout)
+	}
 
 	l.leases[newLease.Port] = newLease
 	log.Print("New lease registered: ", leaseString(newLease))
@@ -275,7 +283,7 @@ func (l *portLeasor) monitorTTLs(quit chan struct{}) {
 			now := time.Now()
 			for _, lease := range l.leases {
 				if now.After(lease.Timeout.AsTime()) {
-					log.Print("Lease expired: ", lease)
+					log.Print("Lease expired: ", leaseString(lease))
 					l.deleteLeaseUnsafe(lease)
 				}
 			}
