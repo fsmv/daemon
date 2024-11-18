@@ -24,7 +24,8 @@ import (
 //go:generate protoc -I ../ ../gate/service.proto --go_out ../ --go-grpc_out ../ --go_opt=paths=source_relative --go-grpc_opt=paths=source_relative
 
 const (
-	leaseTTL = 24 * time.Hour
+	leaseTTL         = 24 * time.Hour
+	ttlRandomStagger = 0.05
 )
 
 func Run(flags *flag.FlagSet, args []string) {
@@ -112,7 +113,7 @@ func Run(flags *flag.FlagSet, args []string) {
 		log.Fatalf("Failed to create a self signed certificate for the RPC server: %v", err)
 	}
 
-	l := makeClientLeasor(uint16(*portRangeStart), uint16(*portRangeEnd), leaseTTL, quit)
+	l := makeClientLeasor(uint16(*portRangeStart), uint16(*portRangeEnd), quit)
 	tcpProxy := startTCPProxy(l, serveCert, quit)
 	httpProxy, err := startHTTPProxy(l, serveCert, rootCert,
 		httpListener, httpsListener,

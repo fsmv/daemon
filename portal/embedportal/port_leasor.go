@@ -15,8 +15,7 @@ import (
 
 // How often to look through the Leases and unregister those past TTL
 const (
-	ttlCheckFreq     = leaseTTL / 100
-	ttlRandomStagger = 0.05
+	ttlCheckFreq = leaseTTL / 100
 )
 
 var (
@@ -31,7 +30,6 @@ type clientLeasor struct {
 	leasors    *sync.Map
 	nextLeasor *portLeasor
 
-	ttl       time.Duration
 	startPort uint16
 	endPort   uint16
 	quit      chan struct{}
@@ -40,13 +38,12 @@ type clientLeasor struct {
 	onCancelMut *sync.Mutex
 }
 
-func makeClientLeasor(startPort, endPort uint16, ttl time.Duration, quit chan struct{}) *clientLeasor {
+func makeClientLeasor(startPort, endPort uint16, quit chan struct{}) *clientLeasor {
 	return &clientLeasor{
 		nextLeasor:  &portLeasor{},
 		leasors:     &sync.Map{},
 		onCancelMut: &sync.Mutex{},
 
-		ttl:       ttl,
 		startPort: startPort,
 		endPort:   endPort,
 		quit:      quit,
@@ -68,7 +65,7 @@ func (c *clientLeasor) PortLeasorForClient(clientAddr string) *portLeasor {
 		//
 		// So, save and re-use the heap space here when we find a client we already
 		// have a leasor for.
-		c.nextLeasor.Start(clientAddr, c.startPort, c.endPort, c.ttl, c.quit, c.copyOnCancel())
+		c.nextLeasor.Start(clientAddr, c.startPort, c.endPort, c.quit, c.copyOnCancel())
 		c.nextLeasor = &portLeasor{}
 	}
 	return leasor.(*portLeasor)
@@ -111,13 +108,12 @@ type portLeasor struct {
 	unusedPorts []int // int so we can use rand.Perm()
 	// Add this to the values in unusedPorts to get the stored port number
 	unusedPortOffset uint16
-	ttl              time.Duration
 	startPort        uint16
 	endPort          uint16
 	clientAddr       string
 }
 
-func (l *portLeasor) Start(clientAddr string, startPort, endPort uint16, ttl time.Duration, quit chan struct{}, onCancel []onCancelFunc) {
+func (l *portLeasor) Start(clientAddr string, startPort, endPort uint16, quit chan struct{}, onCancel []onCancelFunc) {
 	if endPort < startPort {
 		startPort, endPort = endPort, startPort
 	}
@@ -127,7 +123,6 @@ func (l *portLeasor) Start(clientAddr string, startPort, endPort uint16, ttl tim
 		clientAddr:       clientAddr,
 		startPort:        startPort,
 		endPort:          endPort,
-		ttl:              ttl,
 		onCancel:         onCancel,
 		leases:           make(map[uint32]*gate.Lease),
 		unusedPortOffset: startPort,
@@ -144,10 +139,6 @@ func (l *portLeasor) OnCancel(cancelFunc func(*gate.Lease)) {
 
 func randomTTL(ttl time.Duration) time.Duration {
 	return time.Duration(float64(ttl) * (1 + rand.Float64()*ttlRandomStagger))
-}
-
-func (l *portLeasor) randomTTL() time.Duration {
-	return randomTTL(l.ttl)
 }
 
 // Register a port exclusively for limited time. If the FixedPort is 0, you will
@@ -189,7 +180,7 @@ func (l *portLeasor) Register(request *gate.RegisterRequest, fixedTimeout time.T
 		newLease.Port = port
 	}
 	if fixedTimeout.IsZero() {
-		newLease.Timeout = timestamppb.New(time.Now().Add(l.randomTTL()))
+		newLease.Timeout = timestamppb.New(time.Now().Add(randomTTL(leaseTTL)))
 	} else {
 		newLease.Timeout = timestamppb.New(fixedTimeout)
 	}
@@ -213,7 +204,7 @@ func (l *portLeasor) Renew(lease *gate.Lease) (*gate.Lease, error) {
 			InvalidLeaseErr, leaseString(lease), leaseString(foundLease))
 	}
 
-	foundLease.Timeout = timestamppb.New(time.Now().Add(l.randomTTL()))
+	foundLease.Timeout = timestamppb.New(time.Now().Add(randomTTL(leaseTTL)))
 	log.Print("Lease renewed: ", leaseString(foundLease))
 	return proto.Clone(foundLease).(*gate.Lease), nil
 }
