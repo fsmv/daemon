@@ -12,6 +12,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"ask.systems/daemon/portal/gate"
@@ -36,9 +37,13 @@ type httpProxy struct {
 	clientLeasor *clientLeasor
 	// Map from pattern to *forwarder, which must not be modified
 	forwarders  sync.Map
+	allowsHTTP  atomic.Bool
 	rootCert    *tls.Config
 	state       *stateManager
 	defaultHost string
+
+	httpList  net.Listener
+	httpsList net.Listener
 }
 
 // forwarder holds the data for a forwarding rule registered with httpProxy
@@ -230,6 +235,11 @@ func (p *httpProxy) saveForwarder(clientAddr string, lease *gate.Lease,
 			}
 		},
 	}
+
+	if request.AllowHttp {
+		p.allowsHTTP.Store(true)
+	}
+
 	fwd := &forwarder{
 		Handler:   proxy,
 		Lease:     lease,
@@ -333,8 +343,18 @@ func (p *httpProxy) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	// TODO: HSTS UX needs more improvement
+	//   - Need to track allowsHTTP per-host
+	//   - Have a flag that enables 1 (or maybe 2) year HSTS for single subdomains
+	//   - Have a flag that enables includeSubdomains, preload, immutable
+	//   - Print some instructions on how to set this up in the logs
+	//   - Should I just have a flag to set the raw string because there's lots of
+	//     options?
+	if !p.allowsHTTP.Load() {
+		w.Header().Add("Strict-Transport-Security", "max-age=300")
+	}
+
 	if !fwd.AllowHTTP {
-		w.Header().Add("Strict-Transport-Security", "max-age=31536000")
 		if req.TLS == nil {
 			tools.RedirectToHTTPS{}.ServeHTTP(w, req)
 			return
@@ -387,14 +407,15 @@ func makeChallengeHandler(webRoot string) (http.Handler, error) {
 	}), nil
 }
 
-func startHTTPProxy(l *clientLeasor, serveCert, rootCert *tls.Config,
+func makeHTTPProxy(l *clientLeasor, serveCert, rootCert *tls.Config,
 	httpList, httpsList net.Listener, defaultHost, certChallengeWebRoot string,
-	state *stateManager, quit chan struct{}) (*httpProxy, error) {
+	state *stateManager) (*httpProxy, error) {
 	ret := &httpProxy{
 		clientLeasor: l,
 		rootCert:     rootCert,
 		state:        state,
 		defaultHost:  defaultHost,
+		httpList:     httpList,
 	}
 	l.OnCancel(ret.Unregister)
 
@@ -415,25 +436,30 @@ func startHTTPProxy(l *clientLeasor, serveCert, rootCert *tls.Config,
 		}
 	}
 
-	// Start the TLS server
-	tlsServer := &http.Server{
-		Handler: ret,
-	}
 	// Support HTTP/2. See https://pkg.go.dev/net/http#Serve
 	// > HTTP/2 support is only enabled if ... configured with "h2" in the TLS Config.NextProtos.
 	serveCert.NextProtos = append(serveCert.NextProtos, "h2")
-	go runServer(quit, "TLS", tlsServer, tls.NewListener(httpsList, serveCert))
+	ret.httpsList = tls.NewListener(httpsList, serveCert)
+	// Close the servers on quit signal
+	return ret, nil
+}
+
+func (p *httpProxy) Start(quit chan struct{}) {
+	// Start the TLS server
+	tlsServer := &http.Server{
+		Handler: p,
+	}
+	go runServer(quit, "TLS", tlsServer, p.httpsList)
 	// Start the HTTP server to redirect to HTTPS
 	httpServer := &http.Server{
-		Handler: ret,
+		Handler: p,
 	}
-	go runServer(quit, "HTTP redirect", httpServer, httpList)
-	// Close the servers on quit signal
+	go runServer(quit, "HTTP redirect", httpServer, p.httpList)
 	go func() {
 		<-quit
 		httpServer.Close()
 		tlsServer.Close()
 		fmt.Print("Got quit signal, killed servers")
 	}()
-	return ret, nil
+
 }

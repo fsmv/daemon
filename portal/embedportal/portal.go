@@ -115,21 +115,25 @@ func Run(flags *flag.FlagSet, args []string) {
 
 	l := makeClientLeasor(uint16(*portRangeStart), uint16(*portRangeEnd), quit)
 	tcpProxy := startTCPProxy(l, serveCert, quit)
-	httpProxy, err := startHTTPProxy(l, serveCert, rootCert,
+	httpProxy, err := makeHTTPProxy(l, serveCert, rootCert,
 		httpListener, httpsListener,
 		*defaultHost, *certChallengeWebRoot,
-		state, quit)
-	log.Print("Started HTTP proxy server")
-	if err != nil {
-		log.Fatalf("Failed to start HTTP proxy server: %v", err)
-	}
+		state)
 
+	// Note: State file gets loaded here (because only the RPC server knows how to
+	// register both the TCP and HTTP proxies, and the state stores RPC requests)
 	_, err = startRPCServer(l,
 		tcpProxy, httpProxy, uint16(*rpcPort),
 		rootCert, saveData, state, quit)
 	log.Print("Started rpc server on port ", *rpcPort)
 	if err != nil {
 		log.Fatal("Failed to start RPC server:", err)
+	}
+
+	httpProxy.Start(quit)
+	log.Print("Started HTTP proxy server")
+	if err != nil {
+		log.Fatalf("Failed to start HTTP proxy server: %v", err)
 	}
 
 	<-quit // Wait for quit
