@@ -208,7 +208,7 @@ func (s *rcpServ) Renew(ctx context.Context, lease *gate.Lease) (*gate.Lease, er
 	}
 
 	// Renew the certificate if we had one
-	if len(registration.GetRequest().CertificateRequest) != 0 {
+	if len(registration.GetRequest().GetCertificateRequest()) != 0 {
 		root, err := s.rootCert.GetCertificate(nil)
 		if err != nil {
 			return nil, err
