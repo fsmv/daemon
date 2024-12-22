@@ -10,12 +10,12 @@ COMMANDS=$(echo "$UPDATES" | awk '$3 != "" {
 
 echo "$UPDATES"
 
-printf "\nSkipping grpc because v1.65.0 forces a go upgrade...\n"
+printf "\nSkipping grpc v1.65.0 and protobuf v1.35.1 because they force a go upgrade...\n"
 
 IFS='
 '
 for cmd in $COMMANDS; do
-  FILTER=$(echo "$cmd" | grep "google.golang.org/grpc")
+  FILTER=$(echo "$cmd" | grep -e "google.golang.org/grpc" -e "google.golang.org/protobuf" -e "google.golang.org/genproto")
   if [ -n "$FILTER" ]; then continue; fi
 
   echo ""
