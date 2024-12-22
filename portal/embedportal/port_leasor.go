@@ -99,9 +99,9 @@ func (c *clientLeasor) OnCancel(cancelFunc func(*gate.Lease)) {
 // The main purpose is for not having port conflicts when you're running several
 // server binaries on the same machine.
 type portLeasor struct {
-	mut      *sync.Mutex            // Everything in this struct needs the lock
-	leases   map[uint32]*gate.Lease // maps the port to the lease
-	onCancel []onCancelFunc         // All are called when a lease times out
+	mut      *sync.Mutex              // Everything in this struct needs the lock
+	leases   map[uint32][]*gate.Lease // maps the port to the lease
+	onCancel []onCancelFunc           // All are called when a lease times out
 
 	// List of automatic ports to be leased out, in a random order.
 	// Always has values between 0 and n, see unusedPortOffset.
@@ -124,7 +124,7 @@ func (l *portLeasor) Start(clientAddr string, startPort, endPort uint16, quit ch
 		startPort:        startPort,
 		endPort:          endPort,
 		onCancel:         onCancel,
-		leases:           make(map[uint32]*gate.Lease),
+		leases:           make(map[uint32][]*gate.Lease),
 		unusedPortOffset: startPort,
 		unusedPorts:      r.Perm(int(endPort - startPort)),
 	}
@@ -165,12 +165,6 @@ func (l *portLeasor) Register(request *gate.RegisterRequest, fixedTimeout time.T
 				"Error port out of range. Ports only go up to 65535. Requested Port: %v",
 				request.FixedPort)
 		}
-		if oldLease, ok := l.leases[request.FixedPort]; ok {
-			// TODO: can we notify the old lease holder that we kicked them?
-			log.Printf("Replacing an existing lease (%v) for the same port",
-				leaseString(oldLease))
-			l.deleteLeaseUnsafe(oldLease)
-		}
 		newLease.Port = request.FixedPort
 	} else {
 		port, err := l.reservePortUnsafe()
@@ -185,7 +179,9 @@ func (l *portLeasor) Register(request *gate.RegisterRequest, fixedTimeout time.T
 		newLease.Timeout = timestamppb.New(fixedTimeout)
 	}
 
-	l.leases[newLease.Port] = newLease
+	portLeases := l.leases[newLease.Port]
+	portLeases = append(portLeases, newLease)
+	l.leases[newLease.Port] = portLeases
 	log.Print("New lease registered: ", leaseString(newLease))
 	return proto.Clone(newLease).(*gate.Lease), nil
 }
@@ -194,37 +190,40 @@ func (l *portLeasor) Renew(lease *gate.Lease) (*gate.Lease, error) {
 	l.mut.Lock()
 	defer l.mut.Unlock()
 
-	foundLease, ok := l.leases[lease.Port]
-	if !ok || foundLease == nil {
+	portLeases, ok := l.leases[lease.Port]
+	if !ok || portLeases == nil {
 		return nil, fmt.Errorf("%w; Requested lease: %v",
 			UnregisteredErr, leaseString(lease))
 	}
-	if foundLease.Pattern != lease.GetPattern() {
-		return nil, fmt.Errorf("%w; Requested lease: %v Stored lease: %v",
-			InvalidLeaseErr, leaseString(lease), leaseString(foundLease))
+	for _, foundLease := range portLeases {
+		if foundLease.Pattern != lease.GetPattern() {
+			continue
+		}
+		foundLease.Timeout = timestamppb.New(time.Now().Add(randomTTL(leaseTTL)))
+		log.Print("Lease renewed: ", leaseString(foundLease))
+		return proto.Clone(foundLease).(*gate.Lease), nil
 	}
-
-	foundLease.Timeout = timestamppb.New(time.Now().Add(randomTTL(leaseTTL)))
-	log.Print("Lease renewed: ", leaseString(foundLease))
-	return proto.Clone(foundLease).(*gate.Lease), nil
+	return nil, fmt.Errorf("%w; Requested lease: %v",
+		UnregisteredErr, leaseString(lease))
 }
 
 func (l *portLeasor) Unregister(lease *gate.Lease) error {
 	l.mut.Lock()
 	defer l.mut.Unlock()
 
-	foundLease := l.leases[lease.Port]
-	if foundLease == nil {
+	portLeases, ok := l.leases[lease.Port]
+	if !ok || portLeases == nil {
 		return fmt.Errorf("%w; Requested lease: %v", UnregisteredErr, leaseString(lease))
 	}
-	if foundLease.Pattern != lease.GetPattern() {
-		return fmt.Errorf("%w; Requested lease: %v Stored lease: %v",
-			InvalidLeaseErr, leaseString(lease), leaseString(foundLease))
+	for _, foundLease := range portLeases {
+		if foundLease.Pattern != lease.GetPattern() {
+			continue
+		}
+		log.Print("Lease unregistered: ", leaseString(foundLease))
+		l.deleteLeaseUnsafe(foundLease)
+		return nil
 	}
-
-	log.Print("Lease unregistered: ", leaseString(foundLease))
-	l.deleteLeaseUnsafe(foundLease)
-	return nil
+	return fmt.Errorf("%w; Requested lease: %v", UnregisteredErr, leaseString(lease))
 }
 
 // reservePort retuns a random unused port and marks it as used.
@@ -248,12 +247,25 @@ func (l *portLeasor) reservePortUnsafe() (uint32, error) {
 
 // You must have a (write) lock on mut before calling.
 func (l *portLeasor) deleteLeaseUnsafe(lease *gate.Lease) {
-	port := uint16(lease.Port)
-	if port >= l.startPort && port <= l.endPort {
-		// Add the port back into the pool if it wasn't a fixed port
-		l.unusedPorts = append(l.unusedPorts, int(port-l.unusedPortOffset))
+	portLeases := l.leases[lease.Port]
+	for i, foundLease := range portLeases {
+		if foundLease.Pattern != lease.Pattern {
+			continue
+		}
+		copy(portLeases[:i], portLeases[i+1:])
+		portLeases = portLeases[:len(portLeases)-1]
+		break
 	}
-	delete(l.leases, lease.Port)
+	if len(portLeases) == 0 {
+		delete(l.leases, lease.Port)
+		port := uint16(lease.Port)
+		if port >= l.startPort && port <= l.endPort {
+			// Add the port back into the pool if it wasn't a fixed port
+			l.unusedPorts = append(l.unusedPorts, int(port-l.unusedPortOffset))
+		}
+	} else {
+		l.leases[lease.Port] = portLeases
+	}
 
 	for _, onCancel := range l.onCancel {
 		onCancel(lease)
@@ -272,8 +284,11 @@ func (l *portLeasor) monitorTTLs(quit chan struct{}) {
 		case <-ticker.C: // on next tick
 			l.mut.Lock()
 			now := time.Now()
-			for _, lease := range l.leases {
-				if now.After(lease.Timeout.AsTime()) {
+			for _, portLeases := range l.leases {
+				for _, lease := range portLeases {
+					if !now.After(lease.Timeout.AsTime()) {
+						continue
+					}
 					log.Print("Lease expired: ", leaseString(lease))
 					l.deleteLeaseUnsafe(lease)
 				}
