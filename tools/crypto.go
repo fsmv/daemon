@@ -44,6 +44,10 @@ func CheckPassword(authHash, userPassword string) bool {
 	if authHash == "" {
 		return false
 	}
+	// The first good version, bcrypt
+	if strings.HasPrefix(authHash, "$2") {
+		return (bcrypt.CompareHashAndPassword([]byte(authHash), []byte(userPassword)) == nil)
+	}
 	// Check the format from the first version of HashPassword which used only
 	// the standard library. I didn't think much before I picked sha256 but it's
 	// not a good idea given all the bitcoin mining rigs out there.
@@ -52,10 +56,6 @@ func CheckPassword(authHash, userPassword string) bool {
 	if wantHash, err := base64.URLEncoding.DecodeString(authHash); err == nil {
 		hash := sha256.Sum256([]byte(userPassword))
 		return (1 == subtle.ConstantTimeCompare(hash[:], wantHash))
-	}
-	// The first good version, bcrypt
-	if strings.HasPrefix(authHash, "$2") {
-		return (bcrypt.CompareHashAndPassword([]byte(authHash), []byte(userPassword)) == nil)
 	}
 	return false
 }
