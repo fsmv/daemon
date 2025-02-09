@@ -180,6 +180,15 @@ func (l *portLeasor) Register(request *gate.RegisterRequest, fixedTimeout time.T
 	}
 
 	portLeases := l.leases[newLease.Port]
+	for _, oldLease := range portLeases {
+		if oldLease.Pattern != newLease.Pattern {
+			continue
+		}
+		// TODO: can we notify the old lease holder that we kicked them?
+		log.Printf("Replacing an existing lease (%v) for the same port and pattern",
+			leaseString(oldLease))
+		l.deleteLeaseUnsafe(oldLease)
+	}
 	portLeases = append(portLeases, newLease)
 	l.leases[newLease.Port] = portLeases
 	log.Print("New lease registered: ", leaseString(newLease))
