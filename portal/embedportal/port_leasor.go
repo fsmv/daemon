@@ -30,23 +30,28 @@ type clientLeasor struct {
 	leasors    *sync.Map
 	nextLeasor *portLeasor
 
-	startPort uint16
-	endPort   uint16
-	quit      chan struct{}
+	startPort     uint16
+	endPort       uint16
+	reservedPorts map[uint16]bool
+	quit          chan struct{}
 
 	onCancel    []onCancelFunc
 	onCancelMut *sync.Mutex
 }
 
-func makeClientLeasor(startPort, endPort uint16, quit chan struct{}) *clientLeasor {
+func makeClientLeasor(startPort, endPort uint16, reservedPorts map[uint16]bool, quit chan struct{}) *clientLeasor {
+	if endPort < startPort {
+		startPort, endPort = endPort, startPort
+	}
 	return &clientLeasor{
 		nextLeasor:  &portLeasor{},
 		leasors:     &sync.Map{},
 		onCancelMut: &sync.Mutex{},
 
-		startPort: startPort,
-		endPort:   endPort,
-		quit:      quit,
+		startPort:     startPort,
+		endPort:       endPort,
+		reservedPorts: reservedPorts,
+		quit:          quit,
 	}
 }
 
@@ -65,7 +70,9 @@ func (c *clientLeasor) PortLeasorForClient(clientAddr string) *portLeasor {
 		//
 		// So, save and re-use the heap space here when we find a client we already
 		// have a leasor for.
-		c.nextLeasor.Start(clientAddr, c.startPort, c.endPort, c.quit, c.copyOnCancel())
+		c.nextLeasor.Start(clientAddr, c.startPort, c.endPort,
+			makeUnusedPorts(c.startPort, c.endPort, c.reservedPorts),
+			c.quit, c.copyOnCancel())
 		c.nextLeasor = &portLeasor{}
 	}
 	return leasor.(*portLeasor)
@@ -104,29 +111,21 @@ type portLeasor struct {
 	onCancel []onCancelFunc           // All are called when a lease times out
 
 	// List of automatic ports to be leased out, in a random order.
-	// Always has values between 0 and n, see unusedPortOffset.
-	unusedPorts []int // int so we can use rand.Perm()
-	// Add this to the values in unusedPorts to get the stored port number
-	unusedPortOffset uint16
-	startPort        uint16
-	endPort          uint16
-	clientAddr       string
+	unusedPorts []uint16
+	startPort   uint16
+	endPort     uint16
+	clientAddr  string
 }
 
-func (l *portLeasor) Start(clientAddr string, startPort, endPort uint16, quit chan struct{}, onCancel []onCancelFunc) {
-	if endPort < startPort {
-		startPort, endPort = endPort, startPort
-	}
-	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+func (l *portLeasor) Start(clientAddr string, startPort, endPort uint16, unusedPorts []uint16, quit chan struct{}, onCancel []onCancelFunc) {
 	*l = portLeasor{
-		mut:              &sync.Mutex{},
-		clientAddr:       clientAddr,
-		startPort:        startPort,
-		endPort:          endPort,
-		onCancel:         onCancel,
-		leases:           make(map[uint32][]*gate.Lease),
-		unusedPortOffset: startPort,
-		unusedPorts:      r.Perm(int(endPort - startPort)),
+		mut:         &sync.Mutex{},
+		clientAddr:  clientAddr,
+		startPort:   startPort,
+		endPort:     endPort,
+		onCancel:    onCancel,
+		leases:      make(map[uint32][]*gate.Lease),
+		unusedPorts: unusedPorts,
 	}
 	go l.monitorTTLs(quit)
 }
@@ -235,23 +234,40 @@ func (l *portLeasor) Unregister(lease *gate.Lease) error {
 	return fmt.Errorf("%w; Requested lease: %v", UnregisteredErr, leaseString(lease))
 }
 
+func makeUnusedPorts(start, end uint16, reserved map[uint16]bool) []uint16 {
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+	n := int(end - start + 1)
+	ret := make([]uint16, n)
+	idx := 0
+	for port := start; port <= end; port++ {
+		if reserved[port] {
+			continue
+		}
+		ret[idx] = port
+		idx++
+	}
+	ret = ret[:idx]
+	r.Shuffle(len(ret), func(i, j int) {
+		ret[i], ret[j] = ret[j], ret[i]
+	})
+	return ret
+}
+
 // reservePort retuns a random unused port and marks it as used.
 // Returns an error if the server has no more ports to lease.
 //
 // You must have a (write) lock on mut before calling.
 func (l *portLeasor) reservePortUnsafe() (uint32, error) {
-	for {
-		if len(l.unusedPorts) == 0 {
-			return 0, fmt.Errorf("No remaining ports to lease. Active leases: %v", len(l.leases))
-		}
-		port := uint32(uint16(l.unusedPorts[0]) + l.unusedPortOffset)
+	for len(l.unusedPorts) > 0 {
+		port := uint32(l.unusedPorts[0])
 		l.unusedPorts = l.unusedPorts[1:]
 		if _, ok := l.leases[port]; !ok {
 			// Only return the port if it wasn't already registered. If it was
 			// registered just pop another random port off the list.
-			return uint32(port), nil
+			return port, nil
 		}
 	}
+	return 0, fmt.Errorf("No remaining ports to lease. Active leases: %v", len(l.leases))
 }
 
 // You must have a (write) lock on mut before calling.
@@ -270,7 +286,7 @@ func (l *portLeasor) deleteLeaseUnsafe(lease *gate.Lease) {
 		port := uint16(lease.Port)
 		if port >= l.startPort && port <= l.endPort {
 			// Add the port back into the pool if it wasn't a fixed port
-			l.unusedPorts = append(l.unusedPorts, int(port-l.unusedPortOffset))
+			l.unusedPorts = append(l.unusedPorts, port)
 		}
 	} else {
 		l.leases[lease.Port] = portLeases

@@ -6,6 +6,7 @@ package embedportal
 
 import (
 	"crypto/tls"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -33,12 +34,17 @@ func Run(flags *flag.FlagSet, args []string) {
 		"The port to bind for the portal RPC server that clients use to register\n"+
 		"with. You shouldn't need to change this unless there's a conflict or you\n"+
 		"run multiple instances of portal.")
-	portRangeStart := flags.Uint("port_range_start", 2049, ""+
+	portRangeStart := flags.Uint("port_range_start", 2050, ""+
 		"The (inclusive) start of the port range to lease-out to clients when they\n"+
 		"register.")
 	portRangeEnd := flags.Uint("port_range_end", 4096, ""+
 		"The (inclusive) end of the port range to lease-out to clients when they\n"+
 		"register. A separate list of of used ports is kept per-backend-IP.\n")
+	reservedPorts := portList(make(map[uint16]bool))
+	flags.Var(&reservedPorts, "reserved_ports", ""+
+		"A comma separated list of ports (in the port_range) that should not be\n"+
+		"issued to clients. Use this if you have non-portal-client services\n"+
+		"running on ports in the range.")
 	defaultHost := flags.String("default_hostname", "", ""+
 		"Set this to the domain name that patterns registered without a hostname\n"+
 		"should be served under. If unset, patterns without a hostname will match\n"+
@@ -113,7 +119,7 @@ func Run(flags *flag.FlagSet, args []string) {
 		log.Fatalf("Failed to create a self signed certificate for the RPC server: %v", err)
 	}
 
-	l := makeClientLeasor(uint16(*portRangeStart), uint16(*portRangeEnd), quit)
+	l := makeClientLeasor(uint16(*portRangeStart), uint16(*portRangeEnd), reservedPorts, quit)
 	tcpProxy := startTCPProxy(l, serveCert, quit)
 	httpProxy, err := makeHTTPProxy(l, serveCert, rootCert,
 		httpListener, httpsListener,
@@ -139,6 +145,38 @@ func Run(flags *flag.FlagSet, args []string) {
 	}
 
 	<-quit // Wait for quit
+}
+
+type portList map[uint16]bool
+
+func (l portList) String() string {
+	var ret strings.Builder
+	first := true
+	for port, _ := range l {
+		if !first {
+			ret.WriteString(", ")
+		} else {
+			first = false
+		}
+		ret.WriteString(strconv.Itoa(int(port)))
+	}
+	return ret.String()
+}
+
+func (l portList) Set(in string) error {
+	if l == nil {
+		return errors.New("nil map in portList flag")
+	}
+	for in != "" {
+		var portStr string
+		portStr, in, _ = strings.Cut(in, ",")
+		port, err := strconv.ParseUint(strings.TrimSpace(portStr), 10, 16)
+		if err != nil {
+			return err
+		}
+		l[uint16(port)] = true
+	}
+	return nil
 }
 
 func openWebListeners(httpPort, httpsPort int) (httpListener net.Listener, httpsListener net.Listener, err error) {
