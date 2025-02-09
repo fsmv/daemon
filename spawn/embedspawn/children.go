@@ -93,7 +93,7 @@ func (c *children) StartPrograms(programs []*Command) (errCnt int) {
 func (c *children) waitForPortalToken() (string, error) {
 	logs, cancel := c.StreamLogs(true /*includeHistory*/)
 	defer cancel()
-	ttl := time.After(10 * time.Second)
+	ttl := time.After(120 * time.Second)
 	for {
 		select {
 		case <-ttl:

@@ -146,8 +146,12 @@ func (p *httpProxy) saveForwarder(clientAddr string, lease *gate.Lease,
 	// then the server cannot be already running and won't run until we return
 	// this RPC.
 	protocol := "http://"
-	if request.FixedPort != 0 {
-		conn, err := tls.Dial("tcp", hostPort, conf)
+	if len(request.CertificateRequest) == 0 && request.FixedPort != 0 {
+		d := tls.Dialer{
+			NetDialer: &net.Dialer{Timeout: 6 * time.Second},
+			Config:    conf,
+		}
+		conn, err := d.Dial("tcp", hostPort)
 		if err == nil {
 			conn.Close()
 			protocol = "https://"
