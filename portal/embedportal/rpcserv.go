@@ -272,6 +272,11 @@ func startRPCServer(clientLeasor *clientLeasor,
 	if err != nil {
 		return nil, fmt.Errorf("Failed to start listener: %v", err)
 	}
+	// Spawn looks for this string to know when portal has started. So we need to
+	// have the API port listening before we print this.
+	//
+	// If this changes you have to update the string in spawn so it can find it
+	log.Printf("**** Portal API token: %v ****", s.state.Token())
 	go func() {
 		server.Serve(l) // logs any errors itself instead of returning
 		log.Print("RPC server died, quitting")

@@ -122,6 +122,8 @@ func Run(flags *flag.FlagSet, args []string) {
 
 	// Note: State file gets loaded here (because only the RPC server knows how to
 	// register both the TCP and HTTP proxies, and the state stores RPC requests)
+	//
+	// This needs to go last because it prints the token string spawn looks for
 	_, err = startRPCServer(l,
 		tcpProxy, httpProxy, uint16(*rpcPort),
 		rootCert, saveData, state, quit)
