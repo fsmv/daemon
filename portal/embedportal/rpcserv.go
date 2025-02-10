@@ -129,15 +129,16 @@ func (s *rcpServ) Register(ctx context.Context, request *gate.RegisterRequest) (
 		clientAddr = ipAddrs[0].String()
 	}
 
-	lease, err := s.internalRegister(clientAddr, request, time.Time{})
-	if err != nil {
-		return nil, err
-	}
-
+	// TODO: should the cert code just go in port_leasor?
+	//
+	// Currently the cert doesn't get saved in the state which is kind of weird.
+	// But if we put it in port_leasor then when you load the state we would sign
+	// a new cert and store that which the client would never see.
 	var clientCert []byte
 	if len(request.CertificateRequest) != 0 {
 		root, err := s.rootCert.GetCertificate(nil)
 		if err != nil {
+			log.Printf("Registration failed (%v), no rootCert found: %v", request.Pattern, err)
 			return nil, err
 		}
 		// We want the expiration to be at least 2x the lease because if the server
@@ -146,8 +147,15 @@ func (s *rcpServ) Register(ctx context.Context, request *gate.RegisterRequest) (
 		clientCert, err = tools.SignCertificate(root,
 			request.CertificateRequest, time.Now().Add(2*leaseTTL), false)
 		if err != nil {
+			log.Printf("Registration failed (%v), failed to sign cert req: %v", request.Pattern, err)
 			return nil, err
 		}
+	}
+
+	lease, err := s.internalRegister(clientAddr, request, time.Time{})
+	if err != nil {
+		log.Printf("Registration failed (%v), failed to setup proxy: %v", request.Pattern, err)
+		return nil, err
 	}
 	lease.Certificate = clientCert
 
@@ -160,11 +168,14 @@ func (s *rcpServ) internalRegister(clientAddr string, request *gate.RegisterRequ
 	} else {
 		lease, err = s.httpProxy.Register(clientAddr, request, fixedTimeout)
 	}
-	if err == nil {
-		s.state.NewRegistration(&Registration{
-			Request: request,
-			Lease:   lease,
-		})
+	if err != nil {
+		return
+	}
+	if err = s.state.NewRegistration(&Registration{
+		Request: request,
+		Lease:   lease,
+	}); err != nil {
+		return nil, err
 	}
 	return
 }
@@ -221,7 +232,9 @@ func (s *rcpServ) Renew(ctx context.Context, lease *gate.Lease) (*gate.Lease, er
 		newLease.Certificate = newCert
 	}
 
-	s.state.RenewRegistration(newLease)
+	if err := s.state.RenewRegistration(newLease); err != nil {
+		log.Printf("Error renewing lease state: %v", err)
+	}
 	return newLease, nil
 }
 

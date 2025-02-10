@@ -166,6 +166,7 @@ func (l *portLeasor) Register(request *gate.RegisterRequest, fixedTimeout time.T
 		}
 		newLease.Port = request.FixedPort
 	} else {
+		// Always returns an unused port if err == nil
 		port, err := l.reservePortUnsafe()
 		if err != nil {
 			return nil, err

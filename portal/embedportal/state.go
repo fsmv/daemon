@@ -151,23 +151,34 @@ func (s *stateManager) LookupRegistration(lease *gate.Lease) *Registration {
 	return s.registrations[leaseKey(lease)]
 }
 
-func (s *stateManager) NewRegistration(r *Registration) {
+func (s *stateManager) NewRegistration(r *Registration) error {
 	s.mut.Lock()
 	defer s.mut.Unlock()
 
-	s.registrations[leaseKey(r.Lease)] = r
+	key := leaseKey(r.Lease)
 
+	if _, ok := s.registrations[key]; ok {
+		return fmt.Errorf("Programming error: a matching lease is already registered: %v", key)
+	}
+
+	s.registrations[key] = r
 	s.saveUnsafe()
+	return nil
 }
 
-func (s *stateManager) RenewRegistration(lease *gate.Lease) {
+func (s *stateManager) RenewRegistration(lease *gate.Lease) error {
 	s.mut.Lock()
 	defer s.mut.Unlock()
 
-	r := s.registrations[leaseKey(lease)]
-	r.Lease = lease
+	key := leaseKey(lease)
+	r, ok := s.registrations[key]
+	if !ok {
+		return fmt.Errorf("Programming Error: no registration found to renew: %v", key)
+	}
 
+	r.Lease = lease
 	s.saveUnsafe()
+	return nil
 }
 
 func (s *stateManager) Unregister(oldLease *gate.Lease) {
