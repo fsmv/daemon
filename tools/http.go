@@ -99,8 +99,9 @@ func RunHTTPServerTLS(port uint32, config *tls.Config, quit chan struct{}) {
 	<-quit
 	log.Printf("Shutting down HTTPS Server on port %d...", port)
 	log.Printf("Waiting up to 10 seconds for HTTPS connections to close on port %d.", port)
-	ttl, _ := context.WithTimeout(context.Background(), 10*time.Second)
+	ttl, ttl_cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	code := srv.Shutdown(ttl)
+	ttl_cancel()
 	log.Printf("HTTPS server (port %d) exit status: %v", port, code)
 }
 
@@ -121,8 +122,9 @@ func RunHTTPServer(port uint32, quit chan struct{}) {
 	<-quit
 	log.Print("Shutting down HTTP Server...")
 	log.Print("Waiting up to 10 seconds for HTTP connections to close.")
-	ttl, _ := context.WithTimeout(context.Background(), 10*time.Second)
+	ttl, ttl_cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	code := srv.Shutdown(ttl)
+	ttl_cancel()
 	log.Print("HTTP server exit status:", code)
 }
 

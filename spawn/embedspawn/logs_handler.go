@@ -163,7 +163,6 @@ func (h *logHandler) panicHandleLogs(logs io.ReadCloser, tag string) string {
 		default:
 		}
 	}
-	return panicLog.String()
 }
 
 func (h *logHandler) StreamLogs(includeHistory bool) (stream <-chan logMessage, cancel func()) {
