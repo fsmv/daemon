@@ -218,6 +218,11 @@ func (s *rpcServ) Renew(ctx context.Context, lease *gate.Lease) (*gate.Lease, er
 		return nil, err
 	}
 
+	// TODO: there's some mutex weirdness here. Between this check and the one
+	// below there might have been an Unregister of this lease. For that matter
+	// it's weird everywhere that portLeasor has a separate mutex from the state.
+	//
+	// Not sure if this causes any real problems
 	registration := s.state.LookupRegistration(lease)
 	if registration == nil {
 		log.Print("Programming Error: no registration found in state in renew for lease: ", leaseString(lease))
