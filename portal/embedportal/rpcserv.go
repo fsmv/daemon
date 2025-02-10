@@ -27,7 +27,7 @@ import (
 )
 
 // Methods on this type are exported as rpc calls
-type rcpServ struct {
+type rpcServ struct {
 	gate.PortalServer
 
 	clientLeasor *clientLeasor
@@ -38,7 +38,7 @@ type rcpServ struct {
 	quit         chan struct{}
 }
 
-func (s *rcpServ) loadState(saveData []byte) {
+func (s *rpcServ) loadState(saveData []byte) {
 	state := &State{}
 	if err := proto.Unmarshal(saveData, state); err != nil {
 		log.Print("Failed to unmarshal save state file: ", err)
@@ -89,7 +89,7 @@ func (s *rcpServ) loadState(saveData []byte) {
 	}
 }
 
-func (s *rcpServ) MyHostname(ctx context.Context, empty *emptypb.Empty) (*gate.Hostname, error) {
+func (s *rpcServ) MyHostname(ctx context.Context, empty *emptypb.Empty) (*gate.Hostname, error) {
 	p, _ := peer.FromContext(ctx)
 	clientAddr, _, err := net.SplitHostPort(p.Addr.String())
 	if err != nil {
@@ -100,7 +100,7 @@ func (s *rcpServ) MyHostname(ctx context.Context, empty *emptypb.Empty) (*gate.H
 
 // Register registers a new forwarding rule to the rpc client's ip address.
 // Randomly assigns port for the client to listen on
-func (s *rcpServ) Register(ctx context.Context, request *gate.RegisterRequest) (*gate.Lease, error) {
+func (s *rpcServ) Register(ctx context.Context, request *gate.RegisterRequest) (*gate.Lease, error) {
 	// Get the RPC client's address (without the port) from gRPC
 	p, _ := peer.FromContext(ctx)
 
@@ -129,40 +129,26 @@ func (s *rcpServ) Register(ctx context.Context, request *gate.RegisterRequest) (
 		clientAddr = ipAddrs[0].String()
 	}
 
-	// TODO: should the cert code just go in port_leasor?
-	//
-	// Currently the cert doesn't get saved in the state which is kind of weird.
-	// But if we put it in port_leasor then when you load the state we would sign
-	// a new cert and store that which the client would never see.
-	var clientCert []byte
-	if len(request.CertificateRequest) != 0 {
-		root, err := s.rootCert.GetCertificate(nil)
-		if err != nil {
-			log.Printf("Registration failed (%v), no rootCert found: %v", request.Pattern, err)
-			return nil, err
-		}
-		// We want the expiration to be at least 2x the lease because if the server
-		// is restarted you get a refreshed TTL and we want the cert to survive
-		// until the next renew happens
-		clientCert, err = tools.SignCertificate(root,
-			request.CertificateRequest, time.Now().Add(2*leaseTTL), false)
-		if err != nil {
-			log.Printf("Registration failed (%v), failed to sign cert req: %v", request.Pattern, err)
-			return nil, err
-		}
-	}
-
 	lease, err := s.internalRegister(clientAddr, request, time.Time{})
 	if err != nil {
 		log.Printf("Registration failed (%v), failed to setup proxy: %v", request.Pattern, err)
 		return nil, err
 	}
-	lease.Certificate = clientCert
-
+	// TODO: should the cert code just go in port_leasor?
+	//
+	// Currently the cert doesn't get saved in the state which is kind of weird.
+	// But if we put it in port_leasor then when you load the state we would sign
+	// a new cert and store that which the client would never see.
+	if err := s.signCert(request, lease); err != nil {
+		log.Printf("Registration failed (%v), failed to sign certificate reqest: %v", request.Pattern, err)
+		leasor := s.clientLeasor.PortLeasorForClient(clientAddr)
+		leasor.Unregister(lease)
+		return nil, err
+	}
 	return lease, nil
 }
 
-func (s *rcpServ) internalRegister(clientAddr string, request *gate.RegisterRequest, fixedTimeout time.Time) (lease *gate.Lease, err error) {
+func (s *rpcServ) internalRegister(clientAddr string, request *gate.RegisterRequest, fixedTimeout time.Time) (lease *gate.Lease, err error) {
 	if strings.HasPrefix(request.Pattern, tcpProxyPrefix) {
 		lease, err = s.tcpProxy.Register(clientAddr, request, fixedTimeout)
 	} else {
@@ -180,8 +166,27 @@ func (s *rcpServ) internalRegister(clientAddr string, request *gate.RegisterRequ
 	return
 }
 
+func (s *rpcServ) signCert(request *gate.RegisterRequest, lease *gate.Lease) error {
+	if len(request.GetCertificateRequest()) != 0 {
+		root, err := s.rootCert.GetCertificate(nil)
+		if err != nil {
+			return err
+		}
+		// We want the expiration to be at least 2x the lease because if the server
+		// is restarted you get a refreshed TTL and we want the cert to survive
+		// until the next renew happens
+		newCert, err := tools.SignCertificate(root,
+			request.CertificateRequest, lease.Timeout.AsTime(), false)
+		if err != nil {
+			return err
+		}
+		lease.Certificate = newCert
+	}
+	return nil
+}
+
 // Unregister unregisters the forwarding rule with the given pattern
-func (s *rcpServ) Unregister(ctx context.Context, lease *gate.Lease) (*gate.Lease, error) {
+func (s *rpcServ) Unregister(ctx context.Context, lease *gate.Lease) (*gate.Lease, error) {
 	leasor := s.clientLeasor.PortLeasorForClient(lease.Address)
 	err := leasor.Unregister(lease)
 	if err != nil {
@@ -200,7 +205,7 @@ func (s *rcpServ) Unregister(ctx context.Context, lease *gate.Lease) (*gate.Leas
 }
 
 // Renew renews the lease on a currently registered pattern
-func (s *rcpServ) Renew(ctx context.Context, lease *gate.Lease) (*gate.Lease, error) {
+func (s *rpcServ) Renew(ctx context.Context, lease *gate.Lease) (*gate.Lease, error) {
 	leasor := s.clientLeasor.PortLeasorForClient(lease.Address)
 	newLease, err := leasor.Renew(lease)
 	if err != nil {
@@ -215,21 +220,13 @@ func (s *rcpServ) Renew(ctx context.Context, lease *gate.Lease) (*gate.Lease, er
 
 	registration := s.state.LookupRegistration(lease)
 	if registration == nil {
-		log.Print("Warning no registration found in state for lease: ", leaseString(lease))
+		log.Print("Programming Error: no registration found in state in renew for lease: ", leaseString(lease))
 	}
 
 	// Renew the certificate if we had one
-	if len(registration.GetRequest().GetCertificateRequest()) != 0 {
-		root, err := s.rootCert.GetCertificate(nil)
-		if err != nil {
-			return nil, err
-		}
-		newCert, err := tools.SignCertificate(root,
-			registration.Request.CertificateRequest, newLease.Timeout.AsTime(), false)
-		if err != nil {
-			return nil, err
-		}
-		newLease.Certificate = newCert
+	if err := s.signCert(registration.GetRequest(), newLease); err != nil {
+		log.Printf("Error renewing certificate (%v): %v", leaseString(newLease), err)
+		return nil, err
 	}
 
 	if err := s.state.RenewRegistration(newLease); err != nil {
@@ -243,9 +240,9 @@ func startRPCServer(clientLeasor *clientLeasor,
 	tcpProxy *tcpProxy, httpProxy *httpProxy,
 	port uint16, rootCert *tls.Config,
 	saveData []byte, state *stateManager,
-	quit chan struct{}) (*rcpServ, error) {
+	quit chan struct{}) (*rpcServ, error) {
 
-	s := &rcpServ{
+	s := &rpcServ{
 		clientLeasor: clientLeasor,
 		state:        state,
 		tcpProxy:     tcpProxy,

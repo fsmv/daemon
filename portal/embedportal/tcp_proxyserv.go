@@ -21,7 +21,12 @@ type tcpProxy struct {
 	clientLeasor *clientLeasor
 	tlsConfig    *tls.Config
 	quit         chan struct{}
-	cancelers    sync.Map
+	leases       sync.Map // map from pattern to *tcpLease
+}
+
+type tcpLease struct {
+	Cancel chan struct{}
+	Lease  *gate.Lease
 }
 
 func startTCPProxy(l *clientLeasor, tlsConfig *tls.Config, quit chan struct{}) *tcpProxy {
@@ -35,14 +40,10 @@ func startTCPProxy(l *clientLeasor, tlsConfig *tls.Config, quit chan struct{}) *
 }
 
 func (p *tcpProxy) Unregister(lease *gate.Lease) {
-	p.unregisterPattern(lease.GetPattern())
-}
-
-func (p *tcpProxy) unregisterPattern(pattern string) {
-	canceler, _ := p.cancelers.Load(pattern)
-	if canceler != nil {
-		close(canceler.(chan struct{}))
-		p.cancelers.Delete(pattern)
+	val, _ := p.leases.Load(lease.GetPattern())
+	if l, ok := val.(*tcpLease); ok && l != nil {
+		close(l.Cancel)
+		p.leases.Delete(lease.Pattern)
 	}
 }
 
@@ -56,8 +57,14 @@ func (p *tcpProxy) Register(clientAddr string, request *gate.RegisterRequest, fi
 			return
 		}
 	}()
-	p.unregisterPattern(request.Pattern) // replace existing patterns
 	leasor := p.clientLeasor.PortLeasorForClient(clientAddr)
+
+	val, _ := p.leases.Load(request.Pattern)
+	if l, ok := val.(*tcpLease); ok && l != nil {
+		log.Printf("Replacing existing lease with the same pattern: %#v", request.Pattern)
+		leasor.Unregister(l.Lease) // calls tcpProxy.Unregister
+	}
+
 	lease, err := leasor.Register(request, fixedTimeout)
 	if err != nil {
 		return nil, err
@@ -77,7 +84,10 @@ func (p *tcpProxy) Register(clientAddr string, request *gate.RegisterRequest, fi
 	hostPort := fmt.Sprintf("%v:%v", host, lease.Port)
 	startTCPForward(listener, hostPort, cancelLease)
 	log.Printf("Registered a TCP proxy forwarding %v to %v.", port, hostPort)
-	p.cancelers.Store(request.Pattern, cancelLease)
+	p.leases.Store(request.Pattern, &tcpLease{
+		Lease:  lease,
+		Cancel: cancelLease,
+	})
 	return lease, nil
 }
 

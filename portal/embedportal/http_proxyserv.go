@@ -64,17 +64,13 @@ func (p *httpProxy) Register(
 	clientAddr string, request *gate.RegisterRequest, fixedTimeout time.Time) (*gate.Lease, error) {
 
 	if request.Pattern == "" {
-		err := fmt.Errorf("Registration pattern must not be empty.")
-		log.Print("Error registering: ", err)
-		return nil, err
+		return nil, fmt.Errorf("Registration pattern must not be empty.")
 	}
 
 	leasor := p.clientLeasor.PortLeasorForClient(clientAddr)
 	if oldFwd := p.selectForwarder(gate.ParsePattern(request.Pattern)); oldFwd != nil {
 		if oldFwd.Lease.Pattern == certChallengePattern {
-			err := fmt.Errorf("Clients cannot register the cert challenge path %#v which covers your requested pattern %#v", certChallengePattern, request.Pattern)
-			log.Print("Error registering: ", err)
-			return nil, err
+			return nil, fmt.Errorf("Clients cannot register the cert challenge path %#v which covers your requested pattern %#v", certChallengePattern, request.Pattern)
 		}
 		if oldFwd.Lease.Pattern == request.Pattern {
 			log.Printf("Replacing existing lease with the same pattern: %#v", request.Pattern)
@@ -83,7 +79,6 @@ func (p *httpProxy) Register(
 	}
 	lease, err := leasor.Register(request, fixedTimeout)
 	if err != nil {
-		log.Print("Error registering: ", err)
 		return nil, err
 	}
 
