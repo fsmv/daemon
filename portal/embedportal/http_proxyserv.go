@@ -41,6 +41,7 @@ type httpProxy struct {
 	rootCert    *tls.Config
 	state       *stateManager
 	defaultHost string
+	challenges  *acmeChallenges
 
 	httpList  net.Listener
 	httpsList net.Listener
@@ -386,7 +387,7 @@ func runServer(quit chan struct{}, name string,
 	}
 }
 
-func makeChallengeHandler(webRoot string) (http.Handler, error) {
+func makeChallengeHandler(webRoot string, challenges *acmeChallenges) (http.Handler, error) {
 	if err := os.MkdirAll(webRoot, 0775); err != nil {
 		return nil, err
 	}
@@ -402,12 +403,18 @@ func makeChallengeHandler(webRoot string) (http.Handler, error) {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		log.Printf("%v requested %v%v (useragent: %q)",
 			req.RemoteAddr, req.Host, req.URL.EscapedPath(), req.UserAgent())
-		fileServer.ServeHTTP(w, req)
+
+		resp, ok := challenges.Read(req.URL.Path)
+		if ok {
+			w.Write([]byte(resp))
+		} else {
+			fileServer.ServeHTTP(w, req)
+		}
 	}), nil
 }
 
-func makeHTTPProxy(l *clientLeasor, serveCert, rootCert *tls.Config,
-	httpList, httpsList net.Listener, defaultHost, certChallengeWebRoot string,
+func makeHTTPProxy(l *clientLeasor, rootCert *tls.Config,
+	httpList, httpsList net.Listener, defaultHost string, challenges *acmeChallenges, certChallengeWebRoot string,
 	state *stateManager) (*httpProxy, error) {
 	ret := &httpProxy{
 		clientLeasor: l,
@@ -415,12 +422,14 @@ func makeHTTPProxy(l *clientLeasor, serveCert, rootCert *tls.Config,
 		state:        state,
 		defaultHost:  defaultHost,
 		httpList:     httpList,
+		httpsList:    httpsList,
+		challenges:   challenges,
 	}
 	l.OnCancel(ret.Unregister)
 
 	// Set up serving cert challenges
 	if certChallengeWebRoot != "" {
-		handler, err := makeChallengeHandler(certChallengeWebRoot)
+		handler, err := makeChallengeHandler(certChallengeWebRoot, ret.challenges)
 		if err != nil {
 			log.Print("Failed to start cert challenge webroot: ", err)
 		} else {
@@ -435,30 +444,36 @@ func makeHTTPProxy(l *clientLeasor, serveCert, rootCert *tls.Config,
 		}
 	}
 
-	// Support HTTP/2. See https://pkg.go.dev/net/http#Serve
-	// > HTTP/2 support is only enabled if ... configured with "h2" in the TLS Config.NextProtos.
-	serveCert.NextProtos = append(serveCert.NextProtos, "h2")
-	ret.httpsList = tls.NewListener(httpsList, serveCert)
 	// Close the servers on quit signal
 	return ret, nil
 }
 
-func (p *httpProxy) Start(quit chan struct{}) {
-	// Start the TLS server
-	tlsServer := &http.Server{
-		Handler: p,
-	}
-	go runServer(quit, "TLS", tlsServer, p.httpsList)
+func (p *httpProxy) StartHTTP(quit chan struct{}) {
 	// Start the HTTP server to redirect to HTTPS
 	httpServer := &http.Server{
 		Handler: p,
 	}
-	go runServer(quit, "HTTP redirect", httpServer, p.httpList)
+	go runServer(quit, "HTTP", httpServer, p.httpList)
 	go func() {
 		<-quit
 		httpServer.Close()
-		tlsServer.Close()
-		fmt.Print("Got quit signal, killed servers")
+		fmt.Print("Got quit signal, killed HTTP servers")
 	}()
+}
 
+func (p *httpProxy) StartHTTPS(serveCert *tls.Config, quit chan struct{}) {
+	// Support HTTP/2. See https://pkg.go.dev/net/http#Serve
+	// > HTTP/2 support is only enabled if ... configured with "h2" in the TLS Config.NextProtos.
+	serveCert.NextProtos = append(serveCert.NextProtos, "h2")
+	p.httpsList = tls.NewListener(p.httpsList, serveCert)
+	// Start the TLS server
+	tlsServer := &http.Server{
+		Handler: p,
+	}
+	go runServer(quit, "HTTPS", tlsServer, p.httpsList)
+	go func() {
+		<-quit
+		tlsServer.Close()
+		fmt.Print("Got quit signal, killed HTTPS server")
+	}()
 }

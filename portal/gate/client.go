@@ -207,8 +207,16 @@ func StartTLSRegistration(request *RegisterRequest, quit <-chan struct{}) (*Leas
 	certCache.Store(lease.Certificate)
 	go c.keepRegistrationAlive(quit, request, lease, func(cert []byte) { certCache.Store(cert) })
 	config := &tls.Config{
-		GetCertificate: func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
-			cert := tools.CertificateFromSignedCert(certCache.Load().([]byte), privateKey)
+		GetCertificate: func(hi *tls.ClientHelloInfo) (*tls.Certificate, error) {
+			// TODO Probably should cache the tls.Certificate instead of the []byte
+			cert, err := tools.TLSCertificateFromBytes([][]byte{certCache.Load().([]byte)}, privateKey)
+			if cert == nil {
+				log.Print("Failed to load certificate: ", err)
+				return nil, errors.New("Internal error: cannot load certificate")
+			}
+			if err := hi.SupportsCertificate(cert); err != nil {
+				return nil, err
+			}
 			return cert, nil
 		},
 	}

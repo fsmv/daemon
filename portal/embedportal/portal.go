@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -49,6 +50,11 @@ func Run(flags *flag.FlagSet, args []string) {
 		"Set this to the domain name that patterns registered without a hostname\n"+
 		"should be served under. If unset, patterns without a hostname will match\n"+
 		"requests for any hostname that arrives at the server.")
+	var domains autocertDomains
+	flags.Var(&domains, "autocert_domains", ""+
+		"A comma separated list of domain names to automatically register for with\n"+
+		"https://letsencrypt.org. By using this feature you accept their TOS.\n\n"+
+		"If you use this you don't need to set any other tls or cert related flags.")
 	tlsCertSpec := flags.String("tls_cert", "", ""+
 		"The filepath to the tls cert file (fullchain.pem).\n"+
 		"Accepts multiple certificates with a comma separated list.\n"+
@@ -57,10 +63,13 @@ func Run(flags *flag.FlagSet, args []string) {
 		"The filepath to the tls key file (privkey.pem).\n"+
 		"Accepts multiple keys with a comma separated list.\n"+
 		"This is not needed with spawn because it uses the SPAWN_FILES env var.")
+	// TODO: maybe just delete this flag
 	autoTLSCerts := flags.Bool("auto_tls_certs", true, ""+
 		"If true update the tls files when SIGUSR1 is received. The\n"+
 		"-tls_cert and -tls_key paths must either both be file paths or both be\n"+
 		"OS pipe fd numbers produced by the auto_tls_certs spawn config option.\n")
+	// TODO: default to empty string eventually? Might break people's configs if
+	// they're not using autocert_domains yet.
 	certChallengeWebRoot := flags.String("cert_challenge_webroot", "./cert-challenge/", ""+
 		"Set to a local folder path to enable hosting the let's encrypt webroot\n"+
 		"challenge path ("+certChallengePattern+") so you can auto-renew with\n"+
@@ -82,17 +91,42 @@ func Run(flags *flag.FlagSet, args []string) {
 	quit := make(chan struct{})
 	tools.CloseOnQuitSignals(quit)
 
-	serveCert, err := loadTLSConfig(
-		strings.Split(*tlsCertSpec, ","),
-		strings.Split(*tlsKeySpec, ","),
-		*autoTLSCerts, quit)
-	if err != nil {
-		log.Fatalf("failed to load TLS config: %v", err)
-	}
-
 	httpListener, httpsListener, err := openWebListeners(*httpPort, *httpsPort)
 	if err != nil {
 		log.Fatalf("%v", err)
+	}
+
+	state := newStateManager(*saveFilepath)
+	onCertRenew := func(cert *tls.Certificate) {
+		if err := state.NewRootCA(cert.Certificate[0]); err != nil {
+			log.Print("Error saving new root CA, new backend connections may not work: ", err)
+		} else {
+			log.Print("Renewed root CA cert.")
+		}
+	}
+	challenges := &acmeChallenges{}
+	leasor := makeClientLeasor(uint16(*portRangeStart), uint16(*portRangeEnd), reservedPorts, quit)
+	rootCert, err := tools.AutorenewSelfSignedCertificate("portal",
+		10*leaseTTL, true /*isCA*/, onCertRenew, quit)
+	if err != nil {
+		log.Fatalf("Failed to create a self signed certificate for the RPC server: %v", err)
+	}
+	httpProxy, err := makeHTTPProxy(leasor, rootCert,
+		httpListener, httpsListener,
+		*defaultHost, challenges, *certChallengeWebRoot,
+		state)
+	if err != nil {
+		log.Fatalf("Failed to start HTTP proxy server: %v", err)
+	}
+	httpProxy.StartHTTP(quit)
+	log.Print("Started HTTP proxy server")
+
+	serveCert, err := loadTLSConfig(
+		strings.Split(*tlsCertSpec, ","),
+		strings.Split(*tlsKeySpec, ","),
+		domains, *autoTLSCerts, challenges, quit)
+	if err != nil {
+		log.Fatalf("failed to load TLS config: %v", err)
 	}
 
 	// Load the previous save data from the file before we overwrite it
@@ -104,33 +138,13 @@ func Run(flags *flag.FlagSet, args []string) {
 		}
 	}
 
-	state := newStateManager(*saveFilepath)
-	onCertRenew := func(cert *tls.Certificate) {
-		if err := state.NewRootCA(cert.Certificate[0]); err != nil {
-			log.Print("Error saving new root CA, new backend connections may not work: ", err)
-		} else {
-			log.Print("Renewed root CA cert.")
-		}
-	}
-
-	rootCert, err := tools.AutorenewSelfSignedCertificate("portal",
-		10*leaseTTL, true /*isCA*/, onCertRenew, quit)
-	if err != nil {
-		log.Fatalf("Failed to create a self signed certificate for the RPC server: %v", err)
-	}
-
-	l := makeClientLeasor(uint16(*portRangeStart), uint16(*portRangeEnd), reservedPorts, quit)
-	tcpProxy := startTCPProxy(l, serveCert, quit)
-	httpProxy, err := makeHTTPProxy(l, serveCert, rootCert,
-		httpListener, httpsListener,
-		*defaultHost, *certChallengeWebRoot,
-		state)
+	tcpProxy := startTCPProxy(leasor, serveCert, quit)
 
 	// Note: State file gets loaded here (because only the RPC server knows how to
 	// register both the TCP and HTTP proxies, and the state stores RPC requests)
 	//
 	// This needs to go last because it prints the token string spawn looks for
-	_, err = startRPCServer(l,
+	_, err = startRPCServer(leasor,
 		tcpProxy, httpProxy, uint16(*rpcPort),
 		rootCert, saveData, state, quit)
 	log.Print("Started rpc server on port ", *rpcPort)
@@ -138,13 +152,47 @@ func Run(flags *flag.FlagSet, args []string) {
 		log.Fatal("Failed to start RPC server:", err)
 	}
 
-	httpProxy.Start(quit)
-	log.Print("Started HTTP proxy server")
-	if err != nil {
-		log.Fatalf("Failed to start HTTP proxy server: %v", err)
-	}
+	httpProxy.StartHTTPS(serveCert, quit)
+	log.Print("Started HTTPS proxy server")
+
+	// TODO: finish auto certs
+	//  + Flag to set which domains to get certs for
+	//  + Use the certs in the https server
+	//  + Autorenew the certs
+	//  - Save and load the accountKey and the certs
+	//  - Always run the challenge handler even if there's no webroot
 
 	<-quit // Wait for quit
+}
+
+type autocertDomains []string
+
+func (l *autocertDomains) String() string {
+	var ret strings.Builder
+	first := true
+	for _, domain := range *l {
+		if !first {
+			ret.WriteString(", ")
+		} else {
+			first = false
+		}
+		ret.WriteString(domain)
+	}
+	return ret.String()
+}
+
+func (ret *autocertDomains) Set(in string) error {
+	fields := strings.Split(in, ",")
+	*ret = make([]string, len(fields))
+	for i, field := range fields {
+		trimmed := strings.TrimSpace(field)
+		_, err := url.Parse(trimmed)
+		if err != nil {
+			return fmt.Errorf("failed to parse domain #%v: %w", i+1, err)
+		}
+		(*ret)[i] = trimmed
+	}
+	return nil
 }
 
 type portList map[uint16]bool

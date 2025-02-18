@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -87,7 +88,7 @@ func GenerateSelfSignedCertificate(hostname string, expiration time.Time, isCA b
 	if err != nil {
 		return nil, err
 	}
-	return CertificateFromSignedCert(signedCert, private), nil
+	return TLSCertificateFromBytes([][]byte{signedCert}, private)
 }
 
 // Generate a random certificate key and a request to send to a Certificate
@@ -167,11 +168,72 @@ func SignCertificate(root *tls.Certificate, rawCertRequest []byte, expiration ti
 // Convert raw certificate bytes and a private key into the [tls.Certificate]
 // structure, so it can be used for go connections.
 //
-// You need this after your root CA has signed your certificate request.
-func CertificateFromSignedCert(rawCert []byte, privateKey *ecdsa.PrivateKey) *tls.Certificate {
-	return &tls.Certificate{
-		Certificate:                  [][]byte{rawCert},
-		PrivateKey:                   privateKey,
-		SupportedSignatureAlgorithms: []tls.SignatureScheme{tls.ECDSAWithP256AndSHA256},
+// Deprecated: It's better to use [TLSCertificateFromBytes] because that
+// function returns the validation errors while this one ignores them.
+func CertificateFromSignedCert(rawCert []byte, privateKey crypto.Signer) *tls.Certificate {
+	cert, _ := TLSCertificateFromBytes([][]byte{rawCert}, privateKey)
+	return cert
+}
+
+// Convert raw certificate bytes and a private key into the [tls.Certificate]
+// structure, so it can be used for go connections.
+//
+// der is x509 certificate pem blocks. It is a 2-level array for certificate
+// chains. Self signed certs and certs with one CA only need the one public key
+// in the chain.
+//
+// This is similar to [tls.X509KeyPair] but the pem blocks and privateKey are
+// pre-parsed.
+//
+// Returns an error if the certificate data is invalid or doesn't match the
+// privateKey
+func TLSCertificateFromBytes(der [][]byte, privateKey crypto.Signer) (*tls.Certificate, error) {
+	leaf, err := parseAndValidateCert(der, privateKey)
+	if err != nil {
+		// Return this for compatibility with CertificateFromSignedCert's old
+		// behavior of not checking validation
+		return &tls.Certificate{
+			Certificate: der,
+			PrivateKey:  privateKey,
+		}, err
 	}
+	return &tls.Certificate{
+		Certificate: der,
+		PrivateKey:  privateKey,
+		Leaf:        leaf,
+	}, nil
+}
+
+// All standard library crypto.PublicKey types support this interface.
+// See: https://pkg.go.dev/crypto#PublicKey
+type stdPublicKey interface {
+	Equal(x crypto.PublicKey) bool
+}
+
+func parseAndValidateCert(der [][]byte, privateKey crypto.Signer) (leaf *x509.Certificate, err error) {
+	for i, block := range der {
+		cert, err := x509.ParseCertificate(block)
+		if err != nil {
+			return nil, err
+		}
+		if i == 0 {
+			leaf = cert
+		}
+	}
+	if leaf == nil {
+		return nil, errors.New("no certificates found")
+	}
+	// Check the expiration date
+	if now := time.Now(); now.Before(leaf.NotBefore) || now.After(leaf.NotAfter) {
+		return nil, errors.New("certificate time range is not valid")
+	}
+	// Check that the keys match
+	pub, ok := leaf.PublicKey.(stdPublicKey)
+	if !ok {
+		return nil, errors.New("crypto.PublicKey has no Equal method")
+	}
+	if !pub.Equal(privateKey.Public()) {
+		return nil, errors.New("private key does not match public key")
+	}
+	return leaf, nil
 }
