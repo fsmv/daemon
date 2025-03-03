@@ -33,25 +33,38 @@ func (c *acmeChallenges) Delete(path string) {
 	c.Map.Delete(path)
 }
 
-func obtainACMECert(domain string, accountKey crypto.Signer, challenges *acmeChallenges) (*tls.Certificate, error) {
-	client := acme.Client{
+func acmeClient(accountKey crypto.Signer) *acme.Client {
+	return &acme.Client{
 		Key:          accountKey,
 		DirectoryURL: acme.LetsEncryptURL,
 		UserAgent:    "daemon portal",
 	}
+}
+
+func fetchACMEAccount(client *acme.Client) (*acme.Account, error) {
+	ctx := context.Background()
+	account, err := client.GetReg(ctx, "")
+	if errors.Is(err, acme.ErrNoAccount) {
+		account, err = client.Register(ctx, &acme.Account{}, acme.AcceptTOS)
+		if err != nil {
+			err = fmt.Errorf("acme.Register error: %w", err)
+		}
+	} else {
+		err = fmt.Errorf("acme.GetReg error: %w", err)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return account, nil
+}
+
+func obtainACMECert(domain string, client *acme.Client, account *acme.Account, challenges *acmeChallenges) (*tls.Certificate, error) {
 	ctx := context.Background()
 	directory, err := client.Discover(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("acme.Discover error: %w", err)
 	}
 	// Make an account (can add email here)
-	account, err := client.GetReg(ctx, "")
-	if err != nil {
-		account, err = client.Register(ctx, &acme.Account{}, acme.AcceptTOS)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("acme.Register error: %w", err)
-	}
 	log.Printf("Registering a certificate for %v with: %v", domain, directory.Website)
 	log.Print("By using automatic certs you agree to the CA's TOS: ", directory.Terms)
 	if len(directory.CAA) > 0 {

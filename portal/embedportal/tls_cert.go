@@ -15,10 +15,12 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"sync"
 	"sync/atomic"
 	"time"
 
 	"ask.systems/daemon/tools"
+	"golang.org/x/crypto/acme"
 )
 
 type tlsRefresher struct {
@@ -29,12 +31,17 @@ type tlsRefresher struct {
 // TODO: maybe just merge this with tlsRefresher
 type certGenerator struct {
 	AccountKey crypto.Signer
+	Client     *acme.Client
+	Account    *acme.Account
 	Challenges *acmeChallenges
+	acmeMut    sync.Mutex
 }
 
 func (c *certGenerator) Certificate(domain string) (*tls.Certificate, error) {
+	c.acmeMut.Lock()
+	defer c.acmeMut.Unlock()
 	// TODO: save and load
-	return obtainACMECert(domain, c.AccountKey, c.Challenges)
+	return obtainACMECert(domain, c.Client, c.Account, c.Challenges)
 }
 
 func makeCertGenerator(challenges *acmeChallenges) (*certGenerator, error) {
@@ -43,9 +50,16 @@ func makeCertGenerator(challenges *acmeChallenges) (*certGenerator, error) {
 	if err != nil {
 		return nil, err
 	}
+	client := acmeClient(accountKey)
+	account, err := fetchACMEAccount(client)
+	if err != nil {
+		return nil, err
+	}
 	return &certGenerator{
 		Challenges: challenges,
 		AccountKey: accountKey,
+		Client:     client,
+		Account:    account,
 	}, nil
 }
 
