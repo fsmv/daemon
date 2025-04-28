@@ -202,14 +202,20 @@ func (p *httpProxy) saveForwarder(clientAddr string, lease *gate.Lease,
 			if req.URL.Path[0] != '/' {
 				req.URL.Path = "/" + req.URL.Path
 			}
+			// TODO: strip all X-Forwarded-* and Forwarded: headers from the client
+			// technically clients should also only accept connections from portal,
+			// probably can use a cert for that.
 			if request.StripPattern {
 				if pattern[len(pattern)-1] != '/' { // if the pattern doesn't end in / then it's exact match only
 					req.URL.Path = "/"
+					req.Header.Add("X-Forwarded-Prefix", pattern)
 				} else {
-					req.URL.Path = strings.TrimPrefix(req.URL.Path, pattern[0:len(pattern)-1])
+					prefix := pattern[0 : len(pattern)-1]
+					req.URL.Path = strings.TrimPrefix(req.URL.Path, prefix)
 					if req.URL.Path == "" {
 						req.URL.Path = "/"
 					}
+					req.Header.Add("X-Forwarded-Prefix", prefix)
 				}
 			}
 			req.URL.Path = backend.Path + req.URL.Path
@@ -233,6 +239,8 @@ func (p *httpProxy) saveForwarder(clientAddr string, lease *gate.Lease,
 			if _, port, err := net.SplitHostPort(req.RemoteAddr); err == nil {
 				req.Header.Add("X-Forwarded-For-Port", port) // The client's port
 			}
+			// TODO: also do X-Forwarded-Port if portal is running on a non-standard
+			// port
 		},
 	}
 
