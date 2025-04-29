@@ -202,9 +202,24 @@ func (p *httpProxy) saveForwarder(clientAddr string, lease *gate.Lease,
 			if req.URL.Path[0] != '/' {
 				req.URL.Path = "/" + req.URL.Path
 			}
-			// TODO: strip all X-Forwarded-* and Forwarded: headers from the client
-			// technically clients should also only accept connections from portal,
-			// probably can use a cert for that.
+
+			// For security, delete any Forwarded or X-Forwarded-* headers sent by the
+			// user. If we didn't remove them they might be able to affect certain
+			// backends since we don't always overwrite the value. For example change
+			// the paths generated on server side to scripts.
+			//
+			// TODO: do we need to avoid removing X-Forwarded-For in the case that
+			// someone chains multiple portals together in a double reverse proxy?
+			// It's suppossed to make a list of all the r. proxies in the value and
+			// the go standard library does it.
+			for key, _ := range req.Header {
+				canonical := http.CanonicalHeaderKey(key)
+				if canonical == "Forwarded" ||
+					strings.HasPrefix(canonical, "X-Forwarded") {
+					delete(req.Header, key)
+				}
+			}
+
 			if request.StripPattern {
 				if pattern[len(pattern)-1] != '/' { // if the pattern doesn't end in / then it's exact match only
 					req.URL.Path = "/"

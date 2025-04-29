@@ -206,6 +206,10 @@ func StartTLSRegistration(request *RegisterRequest, quit <-chan struct{}) (*Leas
 	certCache := &atomic.Value{}
 	certCache.Store(lease.Certificate)
 	go c.keepRegistrationAlive(quit, request, lease, func(cert []byte) { certCache.Store(cert) })
+	// TODO: We should do client auth so that nobody but the portal server can
+	// send requests directly to the backend. This completes a secure chain for
+	// the X-Forwarded header values. These headers may be important for IP based
+	// blocking and logging or even generating server side URLs.
 	config := &tls.Config{
 		GetCertificate: func(hi *tls.ClientHelloInfo) (*tls.Certificate, error) {
 			// TODO Probably should cache the tls.Certificate instead of the []byte
