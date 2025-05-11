@@ -411,18 +411,21 @@ func runServer(quit chan struct{}, name string,
 }
 
 func makeChallengeHandler(webRoot string, challenges *acmeChallenges) (http.Handler, error) {
-	if err := os.MkdirAll(webRoot, 0775); err != nil {
-		return nil, err
+	var fileServer http.Handler
+	if webRoot != "" {
+		if err := os.MkdirAll(webRoot, 0775); err != nil {
+			return nil, err
+		}
+		dir := tools.SecureHTTPDir{
+			Dir:                   http.Dir(webRoot),
+			AllowDotfiles:         true,
+			AllowDirectoryListing: false,
+		}
+		if err := dir.TestOpen("/"); err != nil {
+			return nil, err
+		}
+		fileServer = http.FileServer(dir)
 	}
-	dir := tools.SecureHTTPDir{
-		Dir:                   http.Dir(webRoot),
-		AllowDotfiles:         true,
-		AllowDirectoryListing: false,
-	}
-	if err := dir.TestOpen("/"); err != nil {
-		return nil, err
-	}
-	fileServer := http.FileServer(dir)
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		log.Printf("%v requested %v%v (useragent: %q)",
 			req.RemoteAddr, req.Host, req.URL.EscapedPath(), req.UserAgent())
@@ -431,7 +434,11 @@ func makeChallengeHandler(webRoot string, challenges *acmeChallenges) (http.Hand
 		if ok {
 			w.Write([]byte(resp))
 		} else {
-			fileServer.ServeHTTP(w, req)
+			if fileServer != nil {
+				fileServer.ServeHTTP(w, req)
+			} else {
+				http.NotFound(w, req)
+			}
 		}
 	}), nil
 }
@@ -451,20 +458,18 @@ func makeHTTPProxy(l *clientLeasor, rootCert *tls.Config,
 	l.OnCancel(ret.Unregister)
 
 	// Set up serving cert challenges
-	if certChallengeWebRoot != "" {
-		handler, err := makeChallengeHandler(certChallengeWebRoot, ret.challenges)
-		if err != nil {
-			log.Print("Failed to start cert challenge webroot: ", err)
-		} else {
-			ret.forwarders.Store(certChallengePattern, &forwarder{
-				Handler: handler,
-				Lease: &gate.Lease{
-					Pattern: certChallengePattern,
-				},
-				AllowHTTP: true,
-			})
-			log.Print("Started serving cert challenge path.")
-		}
+	handler, err := makeChallengeHandler(certChallengeWebRoot, ret.challenges)
+	if err != nil {
+		log.Print("Failed to start cert challenge HTTP handler: ", err)
+	} else {
+		ret.forwarders.Store(certChallengePattern, &forwarder{
+			Handler: handler,
+			Lease: &gate.Lease{
+				Pattern: certChallengePattern,
+			},
+			AllowHTTP: true,
+		})
+		log.Print("Started serving cert challenges.")
 	}
 
 	// Close the servers on quit signal

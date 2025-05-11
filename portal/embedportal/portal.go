@@ -58,18 +58,18 @@ func Run(flags *flag.FlagSet, args []string) {
 	tlsCertSpec := flags.String("tls_cert", "", ""+
 		"The filepath to the tls cert file (fullchain.pem).\n"+
 		"Accepts multiple certificates with a comma separated list.\n"+
+		"Files are automatically re-read when portal receives SIGUSR1\n"+
+		"or 2/3 of the expiration date.\n"+
 		"This is not needed with spawn because it uses the SPAWN_FILES env var.")
 	tlsKeySpec := flags.String("tls_key", "", ""+
 		"The filepath to the tls key file (privkey.pem).\n"+
 		"Accepts multiple keys with a comma separated list.\n"+
+		"Files are automatically re-read when portal receives SIGUSR1\n"+
+		"or 2/3 of the expiration date.\n"+
 		"This is not needed with spawn because it uses the SPAWN_FILES env var.")
-	// TODO: maybe just delete this flag
-	autoTLSCerts := flags.Bool("auto_tls_certs", true, ""+
-		"If true update the tls files when SIGUSR1 is received. The\n"+
-		"-tls_cert and -tls_key paths must either both be file paths or both be\n"+
-		"OS pipe fd numbers produced by the auto_tls_certs spawn config option.\n")
-	// TODO: default to empty string eventually? Might break people's configs if
-	// they're not using autocert_domains yet.
+	// TODO: default to empty string eventually?
+	// I want to so that we don't make a folder we don't need, but that might
+	// break people's configs if they're not using autocert_domains yet.
 	certChallengeWebRoot := flags.String("cert_challenge_webroot", "./cert-challenge/", ""+
 		"Set to a local folder path to enable hosting the let's encrypt webroot\n"+
 		"challenge path ("+certChallengePattern+") so you can auto-renew with\n"+
@@ -97,20 +97,29 @@ func Run(flags *flag.FlagSet, args []string) {
 	}
 
 	state := newStateManager(*saveFilepath)
+	if err := state.Load(); err != nil {
+		log.Print("Failed to load state: ", err)
+	} else {
+		log.Print("Successfully loaded state.")
+	}
+
+	// Set up the new CA root cert for signing API client TLS certs
 	onCertRenew := func(cert *tls.Certificate) {
-		if err := state.NewRootCA(cert.Certificate[0]); err != nil {
+		if err := state.SaveRootCA(cert.Certificate[0]); err != nil {
 			log.Print("Error saving new root CA, new backend connections may not work: ", err)
 		} else {
 			log.Print("Renewed root CA cert.")
 		}
 	}
-	challenges := &acmeChallenges{}
-	leasor := makeClientLeasor(uint16(*portRangeStart), uint16(*portRangeEnd), reservedPorts, quit)
 	rootCert, err := tools.AutorenewSelfSignedCertificate("portal",
 		10*leaseTTL, true /*isCA*/, onCertRenew, quit)
 	if err != nil {
 		log.Fatalf("Failed to create a self signed certificate for the RPC server: %v", err)
 	}
+
+	challenges := &acmeChallenges{}
+	leasor := makeClientLeasor(uint16(*portRangeStart), uint16(*portRangeEnd), reservedPorts, quit)
+
 	httpProxy, err := makeHTTPProxy(leasor, rootCert,
 		httpListener, httpsListener,
 		*defaultHost, challenges, *certChallengeWebRoot,
@@ -118,49 +127,44 @@ func Run(flags *flag.FlagSet, args []string) {
 	if err != nil {
 		log.Fatalf("Failed to start HTTP proxy server: %v", err)
 	}
+	// Start HTTP first for cert challenges
 	httpProxy.StartHTTP(quit)
 	log.Print("Started HTTP proxy server")
 
+	// Load the serving TLS certs.
+	// This may cause acme cert challenges over HTTP.
 	serveCert, err := loadTLSConfig(
 		strings.Split(*tlsCertSpec, ","),
 		strings.Split(*tlsKeySpec, ","),
-		domains, *autoTLSCerts, challenges, quit)
+		domains, challenges, state, quit)
 	if err != nil {
 		log.Fatalf("failed to load TLS config: %v", err)
 	}
 
-	// Load the previous save data from the file before we overwrite it
-	var saveData []byte
-	if *saveFilepath != "" {
-		saveData, err = os.ReadFile(*saveFilepath)
-		if err != nil {
-			log.Print("No save data: ", err)
-		}
-	}
+	// Doesn't actually do anything until there are registrations (there are no
+	// ports to open if clients haven't requested any)
+	tcpProxy := makeTCPProxy(leasor, serveCert, quit)
 
-	tcpProxy := startTCPProxy(leasor, serveCert, quit)
-
-	// Note: State file gets loaded here (because only the RPC server knows how to
-	// register both the TCP and HTTP proxies, and the state stores RPC requests)
-	//
-	// This needs to go last because it prints the token string spawn looks for
+	// Starts serving the rpc server port.
+	// First loads the registrations from the state into the two proxy servers.
 	_, err = startRPCServer(leasor,
 		tcpProxy, httpProxy, uint16(*rpcPort),
-		rootCert, saveData, state, quit)
+		rootCert, state, quit)
 	log.Print("Started rpc server on port ", *rpcPort)
 	if err != nil {
 		log.Fatal("Failed to start RPC server:", err)
 	}
 
+	// Wait until after we have loaded the registrations so we don't serve a bunch
+	// of 404s during startup
 	httpProxy.StartHTTPS(serveCert, quit)
 	log.Print("Started HTTPS proxy server")
 
-	// TODO: finish auto certs
-	//  + Flag to set which domains to get certs for
-	//  + Use the certs in the https server
-	//  + Autorenew the certs
-	//  - Save and load the accountKey and the certs
-	//  - Always run the challenge handler even if there's no webroot
+	// Spawn looks for this string to know when portal has started. So we need to
+	// have the API port listening before we print this.
+	//
+	// If this changes you have to update the string in spawn so it can find it
+	log.Printf("**** Portal API token: %v ****", state.Token())
 
 	<-quit // Wait for quit
 }

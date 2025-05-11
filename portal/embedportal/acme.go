@@ -41,16 +41,19 @@ func acmeClient(accountKey crypto.Signer) *acme.Client {
 	}
 }
 
+// Make an account
+// TODO: should I bother adding the email address here?
 func fetchACMEAccount(client *acme.Client) (*acme.Account, error) {
 	ctx := context.Background()
 	account, err := client.GetReg(ctx, "")
-	if errors.Is(err, acme.ErrNoAccount) {
-		account, err = client.Register(ctx, &acme.Account{}, acme.AcceptTOS)
-		if err != nil {
-			err = fmt.Errorf("acme.Register error: %w", err)
+	if err != nil {
+		if errors.Is(err, acme.ErrNoAccount) {
+			account, err = client.Register(ctx, &acme.Account{}, acme.AcceptTOS)
+			if err != nil {
+				err = fmt.Errorf("acme.Register error: %w", err)
+			}
 		}
-	} else {
-		err = fmt.Errorf("acme.GetReg error: %w", err)
+		return nil, fmt.Errorf("acme.GetReg error: %w", err)
 	}
 	if err != nil {
 		return nil, err
@@ -64,7 +67,6 @@ func obtainACMECert(domain string, client *acme.Client, account *acme.Account, c
 	if err != nil {
 		return nil, fmt.Errorf("acme.Discover error: %w", err)
 	}
-	// Make an account (can add email here)
 	log.Printf("Registering a certificate for %v with: %v", domain, directory.Website)
 	log.Print("By using automatic certs you agree to the CA's TOS: ", directory.Terms)
 	if len(directory.CAA) > 0 {

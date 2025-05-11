@@ -21,7 +21,6 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -38,30 +37,11 @@ type rpcServ struct {
 	quit         chan struct{}
 }
 
-func (s *rpcServ) loadState(saveData []byte) {
-	state := &State{}
-	if err := proto.Unmarshal(saveData, state); err != nil {
-		log.Print("Failed to unmarshal save state file: ", err)
-		return
-	}
-
-	s.state.SetToken(state.ApiToken) // generates a new token if not set
-
+func (s *rpcServ) loadRegistrations() {
+	attempted := 0
 	loaded := 0
-	for _, ca := range state.RootCAs {
-		if err := s.state.NewRootCA(ca); err != nil {
-			log.Print("Failed to save root CA: ", err)
-			continue
-		}
-		loaded += 1
-	}
-	if len(state.RootCAs) > 0 {
-		log.Printf("Successfully loaded %v/%v saved root CAs", loaded, len(state.RootCAs))
-	}
-
-	// Register the saved registrations
-	loaded = 0
-	for _, registration := range state.Registrations {
+	s.state.ForEachRegistration(func(registration *Registration) {
+		attempted += 1
 		if registration.Request.FixedPort == 0 {
 			// Request a new lease for the port we had before if the original request
 			// was for a random port
@@ -80,12 +60,12 @@ func (s *rpcServ) loadState(saveData []byte) {
 		_, err := s.internalRegister(registration.Lease.Address, registration.Request, timeoutTime)
 		if err != nil {
 			log.Printf("Failed to recreate registration: %v\n%v", err, registration)
-			continue
+			return
 		}
 		loaded += 1
-	}
-	if len(state.Registrations) > 0 {
-		log.Printf("Successfully loaded %v/%v saved registrations", loaded, len(state.Registrations))
+	})
+	if attempted > 0 {
+		log.Printf("Successfully loaded %v/%v saved registrations", loaded, attempted)
 	}
 }
 
@@ -134,6 +114,12 @@ func (s *rpcServ) Register(ctx context.Context, request *gate.RegisterRequest) (
 		log.Printf("Registration failed (%v), failed to setup proxy: %v", request.Pattern, err)
 		return nil, err
 	}
+	if err = s.state.SaveRegistration(&Registration{
+		Request: request,
+		Lease:   lease,
+	}); err != nil {
+		return nil, err
+	}
 	// TODO: should the cert code just go in port_leasor?
 	//
 	// Currently the cert doesn't get saved in the state which is kind of weird.
@@ -153,15 +139,6 @@ func (s *rpcServ) internalRegister(clientAddr string, request *gate.RegisterRequ
 		lease, err = s.tcpProxy.Register(clientAddr, request, fixedTimeout)
 	} else {
 		lease, err = s.httpProxy.Register(clientAddr, request, fixedTimeout)
-	}
-	if err != nil {
-		return
-	}
-	if err = s.state.NewRegistration(&Registration{
-		Request: request,
-		Lease:   lease,
-	}); err != nil {
-		return nil, err
 	}
 	return
 }
@@ -244,8 +221,7 @@ func (s *rpcServ) Renew(ctx context.Context, lease *gate.Lease) (*gate.Lease, er
 func startRPCServer(clientLeasor *clientLeasor,
 	tcpProxy *tcpProxy, httpProxy *httpProxy,
 	port uint16, rootCert *tls.Config,
-	saveData []byte, state *stateManager,
-	quit chan struct{}) (*rpcServ, error) {
+	state *stateManager, quit chan struct{}) (*rpcServ, error) {
 
 	s := &rpcServ{
 		clientLeasor: clientLeasor,
@@ -256,7 +232,7 @@ func startRPCServer(clientLeasor *clientLeasor,
 		rootCert:     rootCert,
 	}
 	clientLeasor.OnCancel(s.state.Unregister)
-	s.loadState(saveData)
+	s.loadRegistrations()
 	server := grpc.NewServer(
 		// TODO: Have a flag like -internet_accessable_rpc which makes the RPC
 		// server use the web server cert, and make the portal client library verify
@@ -287,11 +263,6 @@ func startRPCServer(clientLeasor *clientLeasor,
 	if err != nil {
 		return nil, fmt.Errorf("Failed to start listener: %v", err)
 	}
-	// Spawn looks for this string to know when portal has started. So we need to
-	// have the API port listening before we print this.
-	//
-	// If this changes you have to update the string in spawn so it can find it
-	log.Printf("**** Portal API token: %v ****", s.state.Token())
 	go func() {
 		server.Serve(l) // logs any errors itself instead of returning
 		log.Print("RPC server died, quitting")

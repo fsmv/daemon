@@ -24,42 +24,60 @@ import (
 )
 
 type tlsRefresher struct {
-	cache []*atomic.Value
-	quit  chan struct{}
+	cache     []*atomic.Value
+	quit      chan struct{}
+	generator *acmeCertGenerator // nil if there were no acme certs to register
 }
 
-// TODO: maybe just merge this with tlsRefresher
-type certGenerator struct {
+type acmeCertGenerator struct {
 	AccountKey crypto.Signer
 	Client     *acme.Client
 	Account    *acme.Account
 	Challenges *acmeChallenges
 	acmeMut    sync.Mutex
+	state      *stateManager
 }
 
-func (c *certGenerator) Certificate(domain string) (*tls.Certificate, error) {
+func (c *acmeCertGenerator) Certificate(domain string) (*tls.Certificate, error) {
+	// obtainACMECert is a multi-step process over the network and it is confusing
+	// if we do multiple certs at the same time. All of the cert memory storage is
+	// thread safe but we want to do one network call chain at a time.
 	c.acmeMut.Lock()
 	defer c.acmeMut.Unlock()
-	// TODO: save and load
-	return obtainACMECert(domain, c.Client, c.Account, c.Challenges)
+
+	newCert, err := obtainACMECert(domain, c.Client, c.Account, c.Challenges)
+	if err != nil {
+		log.Printf("Error getting TLS cert for %v: %v", domain, err)
+		return nil, err
+	}
+	log.Printf("Saving new TLS cert for %v.", domain)
+	c.state.SaveTLSCert(domain, newCert)
+	return newCert, nil
 }
 
-func makeCertGenerator(challenges *acmeChallenges) (*certGenerator, error) {
-	// TODO: save and load
-	accountKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		return nil, err
+func makeCertGenerator(state *stateManager, challenges *acmeChallenges) (*acmeCertGenerator, error) {
+	accountKey := state.ACMEAccount()
+	if accountKey == nil {
+		var err error
+		accountKey, err = ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		if err != nil {
+			return nil, err
+		}
+		if err := state.SaveACMEAccount(accountKey); err != nil {
+			return nil, err
+		}
 	}
 	client := acmeClient(accountKey)
 	account, err := fetchACMEAccount(client)
 	if err != nil {
 		return nil, err
 	}
-	return &certGenerator{
+	return &acmeCertGenerator{
 		Challenges: challenges,
 		AccountKey: accountKey,
 		Client:     client,
 		Account:    account,
+		state:      state,
 	}, nil
 }
 
@@ -71,11 +89,20 @@ func isPipeFile(files ...*os.File) bool {
 	return pipe
 }
 
-func startTLSRefresher(tlsCert, tlsKey []*os.File, domains []string, generator *certGenerator, quit chan struct{}) *tlsRefresher {
+// Works for both direct tls cert files / pipes from spawn and auto acme certs
+// via the generator. For auto acme certs initially loads from the stateManager
+// into the cert cache.
+func startTLSRefresher(
+	tlsCert, tlsKey []*os.File,
+	domains []string, challenges *acmeChallenges,
+	state *stateManager, quit chan struct{}) *tlsRefresher {
+
 	t := &tlsRefresher{
 		quit:  quit,
 		cache: make([]*atomic.Value, len(tlsCert)+len(domains)),
 	}
+
+	// Handle the direct cert files / pipes from spawn
 	if len(tlsCert) != len(tlsKey) {
 		log.Fatal("-tls_cert and -tls_key must have the same number of entries.")
 	}
@@ -86,11 +113,13 @@ func startTLSRefresher(tlsCert, tlsKey []*os.File, domains []string, generator *
 		if cert.Name() != key.Name() && (isPipeFile(cert) || isPipeFile(key)) {
 			log.Fatalf("Entry #%v: -tls_cert and -tls_key must being either both paths or both OS pipes for -auto_tls_certs.", i)
 		}
+
+		var startCert *tls.Certificate
+		var err error
 		if !isPipeFile(cert, key) {
-			// Close the files because we will reopen in the refresh loop
-			cert.Close()
-			key.Close()
+			startCert, err = loadTLSCertFiles(cert, key)
 		} else {
+			startCert, err = loadTLSCertScanner(bufio.NewScanner(cert), bufio.NewScanner(key))
 			// Close the pipes on a separate goroutine on quit in-case we get blocked
 			// on a pipe read
 			go func() {
@@ -99,19 +128,44 @@ func startTLSRefresher(tlsCert, tlsKey []*os.File, domains []string, generator *
 				key.Close()
 			}()
 		}
+		if err != nil || startCert == nil {
+			log.Fatalf("Failed to load tls cert and key entry #%v: %v", i, err)
+		}
 		idx := i // go loop variables are reused
+		t.cache[idx].Store(startCert)
 		go t.keepCertRefreshed(
+			startCert,
 			func() (*tls.Certificate, error) {
-				return t.refreshCert(idx, cert, key)
+				return t.refreshCertFile(idx, cert, key)
 			})
+	}
+
+	// Handle the auto acme certs
+	if len(domains) > 0 {
+		var err error
+		// Note: This registers an acme account with the provider
+		t.generator, err = makeCertGenerator(state, challenges)
+		if err != nil {
+			log.Fatalf("Failed to start acme cert generator: %v", err)
+		}
 	}
 	for i, domain := range domains {
 		idx := i + len(tlsCert)
-		t.cache[idx] = &atomic.Value{}
 		d := domain // go loop variables are reused
+		t.cache[idx] = &atomic.Value{}
+		startCert := state.TLSCert(d)
+		if startCert == nil {
+			var err error
+			startCert, err = t.generator.Certificate(d)
+			if err != nil || startCert == nil {
+				log.Fatalf("Failed to get initial acme cert for %v: %v", d, err)
+			}
+		}
+		t.cache[idx].Store(startCert)
 		go t.keepCertRefreshed(
+			startCert,
 			func() (*tls.Certificate, error) {
-				newCert, err := generator.Certificate(d)
+				newCert, err := t.generator.Certificate(d)
 				if err != nil {
 					return nil, err
 				}
@@ -122,7 +176,7 @@ func startTLSRefresher(tlsCert, tlsKey []*os.File, domains []string, generator *
 	return t
 }
 
-func (t *tlsRefresher) refreshCert(idx int, cert, key *os.File) (*tls.Certificate, error) {
+func (t *tlsRefresher) refreshCertFile(idx int, cert, key *os.File) (*tls.Certificate, error) {
 	log.Printf("Starting TLS certificate refresh #%v...", idx+1)
 	var newCert *tls.Certificate
 	var err error
@@ -152,19 +206,15 @@ func (t *tlsRefresher) refreshCert(idx int, cert, key *os.File) (*tls.Certificat
 	return newCert, nil
 }
 
-func (t *tlsRefresher) keepCertRefreshed(refresh func() (*tls.Certificate, error)) {
-	timer := time.NewTimer(time.Duration(0))
+func refreshTime(c *tls.Certificate) time.Duration {
+	return time.Until(c.Leaf.NotAfter) * 2 / 3
+}
+
+// Assumes startCert is not nil and startCert.Leaf is not nil
+func (t *tlsRefresher) keepCertRefreshed(startCert *tls.Certificate, refresh func() (*tls.Certificate, error)) {
+	timer := time.NewTimer(refreshTime(startCert))
 	sig := t.refreshSignal()
 
-	// Start the first refresh immediately
-	cert, err := refresh()
-	if err != nil {
-		log.Print(err)
-	} else {
-		timer.Reset(time.Until(cert.Leaf.NotAfter) / 100)
-	}
-
-	// Close in a separate go routine in case we're blocked on pipe read
 	for {
 		select {
 		case <-t.quit:
@@ -173,9 +223,11 @@ func (t *tlsRefresher) keepCertRefreshed(refresh func() (*tls.Certificate, error
 		case <-sig:
 			cert, err := refresh()
 			if err != nil {
-				log.Print(err)
+				log.Print("Error on cert refresh: ", err)
+				// TODO: exponential backoff or something?
+				timer.Reset(time.Minute)
 			} else {
-				timer.Reset(time.Until(cert.Leaf.NotAfter) / 100)
+				timer.Reset(refreshTime(cert))
 			}
 		}
 	}
@@ -206,6 +258,31 @@ func scanEOT(data []byte, atEOF bool) (advance int, token []byte, err error) {
 	return 0, nil, nil // request more data
 }
 
+// Like tls.X509KeyPair but it tries swapping the order of the key and cert
+// And it sets the Leaf field on all go versions.
+func certFromBytes(certBytes, keyBytes []byte) (*tls.Certificate, error) {
+	cert, err := tls.X509KeyPair(certBytes, keyBytes)
+	if err != nil {
+		// Try it the other way too in case they got mixed up
+		forwardErr := err
+		cert, err = tls.X509KeyPair(keyBytes, certBytes)
+		if err != nil {
+			return nil, fmt.Errorf("invalid TLS file format: %v", forwardErr)
+		}
+	}
+	// Set the Leaf value. Before Go 1.23 tls.X509KeyPair doesn't set this
+	if cert.Leaf == nil && len(cert.Certificate) > 0 {
+		leaf, err := x509.ParseCertificate(cert.Certificate[0])
+		// There shouldn't be an error because tls.X509KeyPair does actually parse
+		// and validate the cert and then it just discards the leaf.
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse leaf cert: %w", err)
+		}
+		cert.Leaf = leaf
+	}
+	return &cert, nil
+}
+
 func loadTLSCertScanner(tlsCert, tlsKey *bufio.Scanner) (*tls.Certificate, error) {
 	tlsCert.Split(scanEOT)
 	tlsKey.Split(scanEOT)
@@ -218,16 +295,7 @@ func loadTLSCertScanner(tlsCert, tlsKey *bufio.Scanner) (*tls.Certificate, error
 		return nil, err
 	}
 	certBytes, keyBytes := tlsCert.Bytes(), tlsKey.Bytes()
-	cert, err := tls.X509KeyPair(certBytes, keyBytes)
-	if err != nil {
-		// Try it the other way too in case they got mixed up
-		forwardErr := err
-		cert, err = tls.X509KeyPair(keyBytes, certBytes)
-		if err != nil {
-			return nil, fmt.Errorf("invalid TLS file format: %v", forwardErr)
-		}
-	}
-	return &cert, nil
+	return certFromBytes(certBytes, keyBytes)
 }
 
 func loadTLSCertFiles(tlsCert, tlsKey *os.File) (*tls.Certificate, error) {
@@ -235,26 +303,19 @@ func loadTLSCertFiles(tlsCert, tlsKey *os.File) (*tls.Certificate, error) {
 	defer tlsKey.Close()
 	certBytes, err := io.ReadAll(tlsCert)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read TLS cert file: %v", err)
+		return nil, fmt.Errorf("failed to read TLS cert file: %w", err)
 	}
 	keyBytes, err := io.ReadAll(tlsKey)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read TLS key file: %v", err)
+		return nil, fmt.Errorf("failed to read TLS key file: %w", err)
 	}
-	cert, err := tls.X509KeyPair(certBytes, keyBytes)
-	if err != nil {
-		// Try it the other way too in case they got mixed up
-		forwardErr := err
-		cert, err = tls.X509KeyPair(keyBytes, certBytes)
-		if err != nil {
-			return nil, fmt.Errorf("invalid TLS file format: %v", forwardErr)
-		}
-	}
-	return &cert, nil
+	return certFromBytes(certBytes, keyBytes)
 }
 
-func loadTLSConfig(tlsCertSpec, tlsKeySpec []string, domains []string,
-	autoTLSCerts bool, challenges *acmeChallenges, quit chan struct{}) (*tls.Config, error) {
+func loadTLSConfig(
+	tlsCertSpec, tlsKeySpec []string,
+	domains []string, challenges *acmeChallenges,
+	state *stateManager, quit chan struct{}) (*tls.Config, error) {
 	if len(tlsCertSpec) != len(tlsKeySpec) {
 		log.Fatal("-tls_cert and -tls_key must have the same number of entries.")
 	}
@@ -314,30 +375,13 @@ func loadTLSConfig(tlsCertSpec, tlsKeySpec []string, domains []string,
 	if len(tlsCert) == 0 && len(domains) == 0 {
 		log.Printf("Warning: no TLS certificate loaded. Using a self-signed certificate.")
 		return tools.AutorenewSelfSignedCertificate( /*hostname*/ "*",
-			24*time.Hour, false /*isCA*/, nil /*onRenew*/, quit)
+			3*24*time.Hour, false /*isCA*/, nil /*onRenew*/, quit)
 	}
 
-	// TODO: decouple this flag maybe or get rid of it
-	if autoTLSCerts {
-		gen, err := makeCertGenerator(challenges)
-		if err != nil {
-			return nil, err
-		}
-		refresher := startTLSRefresher(tlsCert, tlsKey, domains, gen, quit)
-		return &tls.Config{
-			GetCertificate: refresher.GetCertificate,
-		}, nil
-	}
-	// No auto refresh requested
-	conf := &tls.Config{}
-	for i := 0; i < len(tlsCertSpec); i++ {
-		cert, err := loadTLSCertFiles(tlsCert[i], tlsKey[i])
-		if err != nil {
-			return nil, err
-		}
-		conf.Certificates = append(conf.Certificates, *cert)
-	}
-	return conf, nil
+	refresher := startTLSRefresher(tlsCert, tlsKey, domains, challenges, state, quit)
+	return &tls.Config{
+		GetCertificate: refresher.GetCertificate,
+	}, nil
 }
 
 func openFilePathOrFD(pathOrFD string) (*os.File, error) {

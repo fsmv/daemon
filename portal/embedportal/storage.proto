@@ -10,10 +10,19 @@ message Registration {
 	Lease lease = 2;
 }
 
+message Certificate {
+	string domain = 3;
+	bytes key = 1;
+	repeated bytes der = 2;
+}
+
 message State {
 	repeated Registration registrations = 1;
+	// Just the certs no keys because we make a new one every time portal restarts
 	repeated bytes rootCAs = 2;
 	string api_token = 3;
+	bytes acme_account = 5;
+	repeated Certificate certificates = 4; // These are the acme auto TLS certs
 }
 
 // vim: set noexpandtab:

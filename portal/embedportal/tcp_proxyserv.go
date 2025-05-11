@@ -29,7 +29,7 @@ type tcpLease struct {
 	Lease  *gate.Lease
 }
 
-func startTCPProxy(l *clientLeasor, tlsConfig *tls.Config, quit chan struct{}) *tcpProxy {
+func makeTCPProxy(l *clientLeasor, tlsConfig *tls.Config, quit chan struct{}) *tcpProxy {
 	p := &tcpProxy{
 		clientLeasor: l,
 		tlsConfig:    tlsConfig,
