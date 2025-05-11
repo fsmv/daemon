@@ -138,7 +138,9 @@ func Run(flags *flag.FlagSet, args []string) {
 		strings.Split(*tlsKeySpec, ","),
 		domains, challenges, state, quit)
 	if err != nil {
-		log.Fatalf("failed to load TLS config: %v", err)
+		log.Fatalf("Failed to load TLS config: %v", err)
+	} else {
+		log.Print("Successfully loaded TLS config.")
 	}
 
 	// Doesn't actually do anything until there are registrations (there are no
@@ -150,9 +152,10 @@ func Run(flags *flag.FlagSet, args []string) {
 	_, err = startRPCServer(leasor,
 		tcpProxy, httpProxy, uint16(*rpcPort),
 		rootCert, state, quit)
-	log.Print("Started rpc server on port ", *rpcPort)
 	if err != nil {
 		log.Fatal("Failed to start RPC server:", err)
+	} else {
+		log.Print("Started rpc server on port ", *rpcPort)
 	}
 
 	// Wait until after we have loaded the registrations so we don't serve a bunch

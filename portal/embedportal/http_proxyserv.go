@@ -425,9 +425,10 @@ func makeChallengeHandler(webRoot string, challenges *acmeChallenges) (http.Hand
 			return nil, err
 		}
 		fileServer = http.FileServer(dir)
+		log.Printf("Created acme challenge directory webroot: %v", webRoot)
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		log.Printf("%v requested %v%v (useragent: %q)",
+		log.Printf("ACME challenge handler: %v requested %v%v (useragent: %q)",
 			req.RemoteAddr, req.Host, req.URL.EscapedPath(), req.UserAgent())
 
 		resp, ok := challenges.Read(req.URL.Path)
@@ -469,7 +470,7 @@ func makeHTTPProxy(l *clientLeasor, rootCert *tls.Config,
 			},
 			AllowHTTP: true,
 		})
-		log.Print("Started serving cert challenges.")
+		log.Print("Started cert challenges HTTP handler.")
 	}
 
 	// Close the servers on quit signal

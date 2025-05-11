@@ -317,7 +317,7 @@ func loadTLSConfig(
 	domains []string, challenges *acmeChallenges,
 	state *stateManager, quit chan struct{}) (*tls.Config, error) {
 	if len(tlsCertSpec) != len(tlsKeySpec) {
-		log.Fatal("-tls_cert and -tls_key must have the same number of entries.")
+		return nil, fmt.Errorf("-tls_cert and -tls_key must have the same number of entries.")
 	}
 
 	// Open the files from the flags

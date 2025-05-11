@@ -196,18 +196,18 @@ func (s *stateManager) saveUnsafe() {
 
 	saveData, err := proto.Marshal(state)
 	if err != nil {
-		log.Print("Failed to marshal save state to store leases: ", err)
+		log.Print("Failed to marshal save state: ", err)
 		return
 	}
 	tmpFilepath := s.saveFilepath + ".tmp"
 	if err := writeFileSync(tmpFilepath, saveData, 0660); err != nil {
-		log.Print("Failed to write temp save state file to store leases: ", err)
+		log.Print("Failed to write temp save state file: ", err)
 		return
 	}
 	if err := atomicReplaceFile(tmpFilepath, s.saveFilepath); err != nil {
-		log.Print("Failed to overwrite save state file to store leases: ", err)
+		log.Print("Failed to overwrite save state file: ", err)
 	}
-	log.Print("Saved leases state file")
+	log.Print("Saved state file")
 }
 
 func (s *stateManager) Token() string {
