@@ -55,6 +55,11 @@ func (c *acmeCertGenerator) Certificate(domain string) (*tls.Certificate, error)
 	return newCert, nil
 }
 
+func (c *acmeCertGenerator) LogCAARecord(domain string) error {
+	_, err := logCAARecord(domain, c.Client, c.Account)
+	return err
+}
+
 func makeCertGenerator(state *stateManager, challenges *acmeChallenges) (*acmeCertGenerator, error) {
 	accountKey := state.ACMEAccount()
 	if accountKey == nil {
@@ -159,6 +164,11 @@ func startTLSRefresher(
 			startCert, err = t.generator.Certificate(d)
 			if err != nil || startCert == nil {
 				log.Fatalf("Failed to get initial acme cert for %v: %v", d, err)
+			}
+		} else {
+			if err := t.generator.LogCAARecord(d); err != nil {
+				log.Printf("Warning: Failed to connect to acme server (for logging CAA info). Renewing the TLS cert may fail later. Error: %v",
+					err)
 			}
 		}
 		t.cache[idx].Store(startCert)

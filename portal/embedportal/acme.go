@@ -61,18 +61,29 @@ func fetchACMEAccount(client *acme.Client) (*acme.Account, error) {
 	return account, nil
 }
 
+// Calls client.Discover and returns the results
+// Also logs the CAA record information and TOS link
+func logCAARecord(domain string, client *acme.Client, account *acme.Account) (d acme.Directory, err error) {
+	ctx := context.Background()
+	d, err = client.Discover(ctx)
+	if err != nil {
+		return
+	}
+	log.Print("By using automatic certs you agree to the CA's TOS: ", d.Terms)
+	if len(d.CAA) > 0 {
+		log.Printf("For additional security create a DNS CAA record for %v containing: %q",
+			domain, fmt.Sprintf("%v;accounturi=%v", d.CAA[0], account.URI))
+	}
+	return
+}
+
 func obtainACMECert(domain string, client *acme.Client, account *acme.Account, challenges *acmeChallenges) (*tls.Certificate, error) {
 	ctx := context.Background()
-	directory, err := client.Discover(ctx)
+	directory, err := logCAARecord(domain, client, account)
 	if err != nil {
 		return nil, fmt.Errorf("acme.Discover error: %w", err)
 	}
 	log.Printf("Registering a certificate for %v with: %v", domain, directory.Website)
-	log.Print("By using automatic certs you agree to the CA's TOS: ", directory.Terms)
-	if len(directory.CAA) > 0 {
-		log.Printf("For additional security create a DNS CAA record for %v containing: %q",
-			domain, fmt.Sprintf("%v;accounturi=%v", directory.CAA[0], account.URI))
-	}
 	// Start the challenge process
 	order, err := client.AuthorizeOrder(ctx, acme.DomainIDs(domain))
 	if err != nil {
