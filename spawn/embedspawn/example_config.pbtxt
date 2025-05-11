@@ -32,6 +32,10 @@ command {
   # The default working dir is the user's home dir but for local testing we just
   # want the current dir.
   working_dir: "./"
+  # Text proto syntax allows both square-bracketed comma-separated lists and
+  # alternatively you can preface each element with the field name and then you
+  # don't need commas. An example of this is below in the commented host config.
+  #
   # You can list the arguments to any of the commands with, for example:
   # daemon portal -help (and shared args with: daemon -help)
   args: [
@@ -97,34 +101,33 @@ command {
 #  # If you have multiple instances of the same binary, you can add a name so
 #  # that you can tell which is which on the spawn dashboard and in the logs
 #  name: "test"
-#  args: [
-#    # If you want to turn off the page that lists the files in the -web_root
-#    # directory, uncomment this argument.
-#    #
-#    # "--serve_directory_listing=false",
+
+#  # If you want to turn off the page that lists the files in the -web_root
+#  # directory, uncomment this argument.
+#  #
+#  #args: "--serve_directory_listing=false"
 #
-#    # Syslog lets you collect logs and compress old logs for all the servers on
-#    # your machine. All of the daemon binaries support it, so if you use this
-#    # add it to portal too. When using chroots, the simplest way to get syslog
-#    # to work is to use the network protocol.
-#    #
-#    # "-syslog_remote=127.0.0.1",
+#  # Syslog lets you collect logs and compress old logs for all the servers on
+#  # your machine. All of the daemon binaries support it, so if you use this
+#  # add it to portal too. When using chroots, the simplest way to get syslog
+#  # to work is to use the network protocol.
+#  #
+#  #args: "-syslog_remote=127.0.0.1"
 #
-#    # Spawn runs all binaries in a chroot rooted at the user's home directory
-#    # by default. So this path is actually /home/www/public/
-#    #
-#    # It's best to not use the root of the home directory because spawn will
-#    # place some files there to make the chroot work and in general other
-#    # binaries might put things there too.
-#    "-web_root=/public/",
-#    # This is the public URL to register with portal. This pattern is for
-#    # your-domain.example/files/*
-#    #
-#    # If you omit the trailing slash the pattern only matches the exact path,
-#    # not all subdirectories like this pattern. You can also specify a domain
-#    # name before the first slash if you're using multiple domains with portal.
-#    "-url_path=/files/"
-#  ]
+#  # Spawn runs all binaries in a chroot rooted at the user's home directory
+#  # by default. So this path is actually /home/www/public/
+#  #
+#  # It's best to not use the root of the home directory because spawn will
+#  # place some files there to make the chroot work and in general other
+#  # binaries might put things there too.
+#  args: "-web_root=/public/"
+#  # This is the public URL to register with portal. This pattern is for
+#  # your-domain.example/files/*
+#  #
+#  # If you omit the trailing slash the pattern only matches the exact path,
+#  # not all subdirectories like this pattern. You can also specify a domain
+#  # name before the first slash if you're using multiple domains with portal.
+#  args: "-url_path=/files/"
 #}
 
 # Assimilate registers paths on portal on behalf of third-party servers that
