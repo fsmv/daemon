@@ -56,6 +56,9 @@ func newStateManager(saveFilepath string) *stateManager {
 		token:        &atomic.Value{},
 		certificates: make(map[string]*tls.Certificate),
 	}
+	// Always generate a random token so that the token is never nil
+	// Load() might overwrite this with the value in the file.
+	s.token.Store(tools.RandomString(32))
 	if s.saveFilepath == "" {
 		log.Print("No save file, state is only saved in memory.")
 	}
@@ -96,10 +99,9 @@ func (s *stateManager) Load() error {
 	}
 
 	// Load the token
-	if state.ApiToken == "" {
-		state.ApiToken = tools.RandomString(32)
+	if state.ApiToken != "" {
+		s.token.Store(state.ApiToken)
 	}
-	s.token.Store(state.ApiToken)
 
 	// Load acme account key
 	if len(state.AcmeAccount) > 0 {
