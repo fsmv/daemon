@@ -1,5 +1,7 @@
 #!/bin/sh
 
+go mod tidy
+
 UPDATES=$(awk '$1 !~ /^$|^(module|go|require|\))$/ {print $1}' go.mod \
   | xargs go list -u -m)
 
@@ -10,24 +12,17 @@ COMMANDS=$(echo "$UPDATES" | awk '$3 != "" {
 
 echo "$UPDATES"
 
-printf "\nSkipping grpc v1.65.0 and protobuf v1.35.1 because they force a go upgrade...\n"
-
 IFS='
 '
 for cmd in $COMMANDS; do
-  FILTER=$(echo "$cmd" | grep -e "google.golang.org/grpc" -e "google.golang.org/protobuf" -e "google.golang.org/genproto")
-  if [ -n "$FILTER" ]; then continue; fi
-
   echo ""
   echo "Running: $cmd"
   OUT=$(eval "$cmd" 2>&1)
   if [ -n "$OUT" ]; then echo "$OUT"; fi
-  CHECK=$(echo "$OUT" | grep "upgraded go 1.18") 
-  if [ -n "$OUT" -a -n "$CHECK" ]; then
-    echo "This forced an upgrade of the min go version stopping."
-    echo "To reset run: git restore go.mod go.sum."
-    exit 1
-  fi
 done
 
-go mod tidy -go=1.18
+# The downgrade picks 1.65.0-dev which I don't like because it says -dev
+go get google.golang.org/grpc@v1.64.1
+
+go get go@1.20 toolchain@none
+go mod tidy
