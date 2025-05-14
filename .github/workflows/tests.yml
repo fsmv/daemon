@@ -86,7 +86,7 @@ jobs:
       run: |
         cd ./pebble
         go install -v ./cmd/...
-        PEBBLE_AUTHZREUSE=0 pebble &
+        PEBBLE_WFE_NONCEREJECT=0 PEBBLE_AUTHZREUSE=0 pebble &
         echo "127.0.0.1 one.example" | sudo tee -a /etc/hosts
         echo "127.0.0.1 two.example" | sudo tee -a /etc/hosts
 
