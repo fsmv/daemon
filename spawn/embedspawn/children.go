@@ -393,8 +393,13 @@ func (children *children) setupChildFiles(cmd *Command, quit chan struct{}) ([]*
 	if err != nil {
 		return nil, fmt.Errorf("failed to create pipe for logs: %v", err)
 	}
+	inr, inw, err := os.Pipe()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create pipe for stdin: %v", err)
+	}
+	inw.Close()
 	// Setup the file descriptors we will pass to the child
-	files := []*os.File{nil, w, w}
+	files := []*os.File{inr, w, w}
 
 	if len(cmd.Ports) != 0 {
 		socketFiles, err := listenPortsTCP(cmd.Ports)
