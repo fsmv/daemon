@@ -15,7 +15,7 @@ if [ -n "$(git diff --name-only)" ]; then
   NEED_POP=$?
 fi
 
-go mod tidy -go=1.18
+go mod tidy
 TIDY_DIFFS=$(git diff --name-only | grep "go\.")
 if [ -n "$TIDY_DIFFS" ]; then
   echo "go mod tidy produced diffs, add the changes to your commit or before it."

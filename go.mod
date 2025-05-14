@@ -1,6 +1,6 @@
 module ask.systems/daemon
 
-go 1.18
+go 1.20
 
 require (
 	golang.org/x/crypto v0.31.0
