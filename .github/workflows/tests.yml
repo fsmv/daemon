@@ -1,0 +1,220 @@
+name: Tests
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  test-demo:
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version-file: go.mod
+
+    - name: Build
+      run: go build -v ./...
+
+    - name: Test
+      run: go test -v ./...
+
+    - name: Quickstart
+      shell: bash
+      run: |
+        function endtest () {
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            taskkill -im $1 -f -t
+          else
+            killall $1
+          fi
+        }
+        if [ "$RUNNER_OS" = "Windows" ]; then BIN=daemon.exe; else BIN=daemon; fi
+        (go build -o $BIN -v ./ && (mkdir -p quicktest && mv $BIN quicktest/)) || exit 1
+        cd quicktest
+        echo "password" | ./$BIN spawn >logs.txt 2>&1 & sleep 5; endtest $BIN
+        cat logs.txt
+        if [ -z "$(grep 'Token received' logs.txt)" ]; then exit 2; fi
+        if [ -z "$(grep 'Obtained TLS lease' logs.txt)" ]; then exit 3; fi
+        if [ -z "$(grep 'https://127.0.0.1:8080/daemon/' logs.txt)" ]; then exit 4; fi
+
+  test-certbot-certs:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Clone daemon
+      uses: actions/checkout@v4
+      with:
+        path: 'daemon'
+
+    - name: Clone Pebble ACME Server
+      uses: actions/checkout@v4
+      with:
+        repository: 'letsencrypt/pebble'
+        ref: 'v2.7.0'
+        path: 'pebble'
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version-file: pebble/go.mod
+        cache-dependency-path: |
+          daemon/go.sum
+          pebble/go.sum
+
+    - name: Install certbot
+      run: |
+        sudo apt-get install snapd
+        sudo snap install core && sudo snap refresh core
+        sudo snap install --classic certbot && sudo ln -s /snap/bin/certbot /usr/bin/certbot
+
+    - name: Install daemon
+      run: |
+        cd ./daemon
+        go install -v
+
+    - name: Install and Run Pebble ACME Server
+      run: |
+        cd ./pebble
+        go install -v ./cmd/...
+        PEBBLE_AUTHZREUSE=0 pebble &
+        echo "127.0.0.1 one.example" | sudo tee -a /etc/hosts
+        echo "127.0.0.1 two.example" | sudo tee -a /etc/hosts
+
+    - name: Test spawn & portal pipe file
+      run: |
+        export REQUESTS_CA_BUNDLE=./pebble/test/certs/pebble.minica.pem
+        sudo --preserve-env certbot certonly --standalone -d one.example --agree-tos --non-interactive --http-01-port 5002 --server https://127.0.0.1:14000/dir
+        sudo --preserve-env certbot certonly --standalone -d two.example --agree-tos --non-interactive --http-01-port 5002 --server https://127.0.0.1:14000/dir
+
+        mkdir -p p/cert-challenge
+
+        mkdir -p p/dev
+        sudo mknod p/dev/null c 1 3
+        sudo chmod 666 p/dev/null
+
+        cat <<EOT > config.pbtxt
+        command {
+          binary: "portal"
+          user: "runner"
+          working_dir: "./p/"
+          files: [
+            "/etc/letsencrypt/live/one.example/fullchain.pem",
+            "/etc/letsencrypt/live/one.example/privkey.pem"
+          ]
+          files: [
+            "/etc/letsencrypt/live/two.example/fullchain.pem",
+            "/etc/letsencrypt/live/two.example/privkey.pem"
+          ]
+
+          args: "-http_port=5002"
+          args: "-https_port=5001"
+        }
+        EOT
+        echo "password" | sudo env "PATH=$PATH" daemon spawn &
+        sleep 4
+
+        echo "Checking that portal serves the certbot cert"
+        FIRST_ONE_SERVED_CERT=$(openssl s_client -connect one.example:5001 </dev/null 2>/dev/null | openssl x509 -inform pem -text)
+        FILE_CERT=$(sudo openssl x509 -inform pem -text -in /etc/letsencrypt/live/one.example/fullchain.pem)
+        diff <(echo "$FIRST_ONE_SERVED_CERT") <(echo "$FILE_CERT")
+        FIRST_TWO_SERVED_CERT=$(openssl s_client -connect two.example:5001 </dev/null 2>/dev/null | openssl x509 -inform pem -text)
+        FILE_CERT=$(sudo openssl x509 -inform pem -text -in /etc/letsencrypt/live/two.example/fullchain.pem)
+        diff <(echo "$FIRST_TWO_SERVED_CERT") <(echo "$FILE_CERT")
+
+        echo "Renewing cert using portal webroot"
+        sudo --preserve-env certbot certonly --webroot -w ./p/cert-challenge -d one.example --force-renew --agree-tos --non-interactive --http-01-port 5002 --server https://127.0.0.1:14000/dir
+        sudo --preserve-env certbot certonly --webroot -w ./p/cert-challenge -d two.example --force-renew --agree-tos --non-interactive --http-01-port 5002 --server https://127.0.0.1:14000/dir
+        sudo killall -SIGUSR1 {daemon,portal}
+        sleep 1
+
+        echo "Checking that portal serves the renewed cert"
+        SECOND_ONE_SERVED_CERT=$(openssl s_client -connect one.example:5001 </dev/null 2>/dev/null | openssl x509 -inform pem -text)
+        FILE_CERT=$(sudo openssl x509 -inform pem -text -in /etc/letsencrypt/live/one.example/fullchain.pem)
+        diff <(echo "$SECOND_ONE_SERVED_CERT") <(echo "$FILE_CERT")
+        DIFF=$(diff <(echo "$FIRST_ONE_SERVED_CERT") <(echo "$SECOND_ONE_SERVED_CERT"); exit 0)
+        if [ -z "$DIFF" ]; then
+          echo "The one.example cert is the same as it was before and we meant to renew!"
+          exit 1
+        fi
+        SECOND_TWO_SERVED_CERT=$(openssl s_client -connect two.example:5001 </dev/null 2>/dev/null | openssl x509 -inform pem -text)
+        FILE_CERT=$(sudo openssl x509 -inform pem -text -in /etc/letsencrypt/live/two.example/fullchain.pem)
+        diff <(echo "$SECOND_TWO_SERVED_CERT") <(echo "$FILE_CERT")
+        DIFF=$(diff <(echo "$FIRST_TWO_SERVED_CERT") <(echo "$SECOND_TWO_SERVED_CERT"); exit 0)
+        if [ -z "$DIFF" ]; then
+          echo "The two.example cert is the same as it was before and we meant to renew!"
+          exit 1
+        fi
+
+        sudo certbot delete --non-interactive --cert-name one.example
+        sudo certbot delete --non-interactive --cert-name two.example
+        sudo killall daemon
+
+    - name: Test portal only plain file
+      run: |
+        export REQUESTS_CA_BUNDLE=./pebble/test/certs/pebble.minica.pem
+        sudo --preserve-env certbot certonly --standalone -d one.example --agree-tos --non-interactive --http-01-port 5002 --server https://127.0.0.1:14000/dir
+        sudo --preserve-env certbot certonly --standalone -d two.example --agree-tos --non-interactive --http-01-port 5002 --server https://127.0.0.1:14000/dir
+
+        mkdir -p p/cert-challenge
+
+        sudo cp /etc/letsencrypt/live/one.example/fullchain.pem p/one-cert.pem
+        sudo cp /etc/letsencrypt/live/one.example/privkey.pem p/one-key.pem
+        sudo cp /etc/letsencrypt/live/two.example/fullchain.pem p/two-cert.pem
+        sudo cp /etc/letsencrypt/live/two.example/privkey.pem p/two-key.pem
+        sudo chown runner:docker ./p/*.pem
+
+        cd p
+        daemon portal -http_port=5002 -https_port=5001 -tls_cert='one-cert.pem,two-cert.pem' -tls_key='one-key.pem,two-key.pem' &
+        cd ..
+        sleep 2
+
+        echo "Checking that portal serves the certbot cert"
+        FIRST_ONE_SERVED_CERT=$(openssl s_client -connect one.example:5001 </dev/null 2>/dev/null | openssl x509 -inform pem -text)
+        FILE_CERT=$(openssl x509 -inform pem -text -in p/one-cert.pem)
+        diff <(echo "$FIRST_ONE_SERVED_CERT") <(echo "$FILE_CERT")
+        FIRST_TWO_SERVED_CERT=$(openssl s_client -connect two.example:5001 </dev/null 2>/dev/null | openssl x509 -inform pem -text)
+        FILE_CERT=$(openssl x509 -inform pem -text -in p/two-cert.pem)
+        diff <(echo "$FIRST_TWO_SERVED_CERT") <(echo "$FILE_CERT")
+
+        echo "Renewing cert using portal webroot"
+        sudo --preserve-env certbot certonly --webroot -w ./p/cert-challenge -d one.example --force-renew --agree-tos --non-interactive --http-01-port 5002 --server https://127.0.0.1:14000/dir
+        sudo --preserve-env certbot certonly --webroot -w ./p/cert-challenge -d two.example --force-renew --agree-tos --non-interactive --http-01-port 5002 --server https://127.0.0.1:14000/dir
+        sudo cp /etc/letsencrypt/live/one.example/fullchain.pem p/one-cert.pem
+        sudo cp /etc/letsencrypt/live/one.example/privkey.pem p/one-key.pem
+        sudo cp /etc/letsencrypt/live/two.example/fullchain.pem p/two-cert.pem
+        sudo cp /etc/letsencrypt/live/two.example/privkey.pem p/two-key.pem
+        sudo chown runner:docker p/*.pem
+        killall -SIGUSR1 daemon
+        sleep 1
+
+        echo "Checking that portal serves the renewed cert"
+        SECOND_ONE_SERVED_CERT=$(openssl s_client -connect one.example:5001 </dev/null 2>/dev/null | openssl x509 -inform pem -text)
+        FILE_CERT=$(openssl x509 -inform pem -text -in p/one-cert.pem)
+        diff <(echo "$SECOND_ONE_SERVED_CERT") <(echo "$FILE_CERT")
+        DIFF=$(diff <(echo "$FIRST_ONE_SERVED_CERT") <(echo "$SECOND_ONE_SERVED_CERT"); exit 0)
+        if [ -z "$DIFF" ]; then
+          echo "The one.example cert is the same as it was before and we meant to renew!"
+          exit 1
+        fi
+        SECOND_TWO_SERVED_CERT=$(openssl s_client -connect two.example:5001 </dev/null 2>/dev/null | openssl x509 -inform pem -text)
+        FILE_CERT=$(openssl x509 -inform pem -text -in p/two-cert.pem)
+        diff <(echo "$SECOND_TWO_SERVED_CERT") <(echo "$FILE_CERT")
+        DIFF=$(diff <(echo "$FIRST_TWO_SERVED_CERT") <(echo "$SECOND_TWO_SERVED_CERT"); exit 0)
+        if [ -z "$DIFF" ]; then
+          echo "The two.example cert is the same as it was before and we meant to renew!"
+          exit 1
+        fi
+
+        sudo certbot delete --non-interactive --cert-name one.example
+        sudo certbot delete --non-interactive --cert-name two.example
+        killall daemon
