@@ -266,7 +266,11 @@ func startRPCServer(clientLeasor *clientLeasor,
 	go func() {
 		server.Serve(l) // logs any errors itself instead of returning
 		log.Print("RPC server died, quitting")
-		close(quit)
+		select {
+		case <-quit:
+		default:
+			close(quit)
+		}
 	}()
 	go func() {
 		<-quit
