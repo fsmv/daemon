@@ -7,7 +7,7 @@ on:
     branches: [ "main" ]
 
 jobs:
-  test-demo:
+  tests-and-demo:
     runs-on: ${{ matrix.os }}
 
     strategy:
@@ -22,13 +22,13 @@ jobs:
       with:
         go-version-file: go.mod
 
-    - name: Build
+    - name: Build daemon
       run: go build -v ./...
 
-    - name: Test
+    - name: Run daemon unit tests
       run: go test -v ./...
 
-    - name: Quickstart
+    - name: Test demo mode
       shell: bash
       run: |
         function endtest () {
@@ -46,6 +46,79 @@ jobs:
         if [ -z "$(grep 'Token received' logs.txt)" ]; then exit 2; fi
         if [ -z "$(grep 'Obtained TLS lease' logs.txt)" ]; then exit 3; fi
         if [ -z "$(grep 'https://127.0.0.1:8080/daemon/' logs.txt)" ]; then exit 4; fi
+
+  test-auto-certs:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Clone daemon
+      uses: actions/checkout@v4
+      with:
+        path: 'daemon'
+
+    - name: Clone Pebble ACME Server
+      uses: actions/checkout@v4
+      with:
+        repository: 'letsencrypt/pebble'
+        ref: 'v2.7.0'
+        path: 'pebble'
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version-file: pebble/go.mod
+        cache-dependency-path: |
+          daemon/go.sum
+          pebble/go.sum
+
+    - name: Install portal
+      run: |
+        cd ./daemon/portal
+        go install -v
+
+    - name: Install Pebble ACME Server
+      run: |
+        cd ./pebble
+        go install -v ./cmd/...
+        echo "127.0.0.1 one.example" | sudo tee -a /etc/hosts
+        echo "127.0.0.1 two.example" | sudo tee -a /etc/hosts
+
+    - name: Test portal autocerts
+      run: |
+        cd ./pebble
+        PEBBLE_WFE_NONCEREJECT=0 PEBBLE_AUTHZREUSE=0 pebble &
+        cd ..
+
+        sleep 5
+
+        ACME_SERVER_CERT=./pebble/test/certs/pebble.minica.pem portal \
+          -autocert_domains=one.example,two.example \
+          -autocert_server=https://127.0.0.1:14000/dir \
+          -http_port=5002 \
+          -https_port=5001 \
+          -cert_challenge_webroot='' &
+
+        echo "Checking that portal serves the certs"
+        FIRST_ONE_SERVED_CERT=$(openssl s_client -connect one.example:5001 </dev/null 2>/dev/null | openssl x509 -inform pem -text)
+        FIRST_TWO_SERVED_CERT=$(openssl s_client -connect two.example:5001 </dev/null 2>/dev/null | openssl x509 -inform pem -text)
+
+        killall portal
+
+        ACME_SERVER_CERT=./pebble/test/certs/pebble.minica.pem portal \
+          -autocert_domains=one.example,two.example \
+          -autocert_server=https://127.0.0.1:14000/dir \
+          -http_port=5002 \
+          -https_port=5001 \
+          -cert_challenge_webroot='' &
+
+        echo "Checking that portal loaded the same certs"
+        SECOND_ONE_SERVED_CERT=$(openssl s_client -connect one.example:5001 </dev/null 2>/dev/null | openssl x509 -inform pem -text)
+        SECOND_TWO_SERVED_CERT=$(openssl s_client -connect two.example:5001 </dev/null 2>/dev/null | openssl x509 -inform pem -text)
+        diff <(echo "$FIRST_ONE_SERVED_CERT") <(echo "$SECOND_ONE_SERVED_CERT")
+        diff <(echo "$FIRST_TWO_SERVED_CERT") <(echo "$SECOND_TWO_SERVED_CERT")
+
+        killall portal
+        killall pebble
 
   test-certbot-certs:
     runs-on: ubuntu-latest

@@ -4,9 +4,13 @@ import (
 	"context"
 	"crypto"
 	"crypto/tls"
+	"crypto/x509"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"log"
+	"net/http"
+	"os"
 	"sync"
 
 	"ask.systems/daemon/tools"
@@ -33,10 +37,50 @@ func (c *acmeChallenges) Delete(path string) {
 	c.Map.Delete(path)
 }
 
+func loadCACert(certFile string) *x509.CertPool {
+	certBytes, err := os.ReadFile(certFile)
+	if err != nil {
+		log.Print("Error reading ACME_SERVER_CERT file: ", err)
+		return nil
+	}
+	block, _ := pem.Decode(certBytes)
+	if block == nil {
+		log.Print("Error decoding ACME_SERVER_CERT file.")
+		return nil
+	}
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		log.Print("Error parsing ACME_SERVER_CERT file: ", err)
+		return nil
+	}
+	pool, err := x509.SystemCertPool()
+	if err != nil {
+		log.Print("Error reading system CA roots: ", err)
+		return nil
+	}
+	pool.AddCert(cert)
+	return pool
+}
+
 func acmeClient(accountKey crypto.Signer) *acme.Client {
+	client := http.DefaultClient
+	if serverCertFile := os.Getenv("ACME_SERVER_CERT"); serverCertFile != "" {
+		log.Print("Loading test CA root file for ACME server testing: ", serverCertFile)
+		roots := loadCACert(serverCertFile)
+		if roots != nil {
+			transport := http.DefaultTransport.(*http.Transport).Clone()
+			transport.TLSClientConfig = &tls.Config{
+				RootCAs: roots,
+			}
+			client = &http.Client{
+				Transport: transport,
+			}
+		}
+	}
 	return &acme.Client{
 		Key:          accountKey,
-		DirectoryURL: acme.LetsEncryptURL,
+		DirectoryURL: kACMEAddress,
+		HTTPClient:   client,
 		UserAgent:    "daemon portal",
 	}
 }
@@ -50,13 +94,11 @@ func fetchACMEAccount(client *acme.Client) (*acme.Account, error) {
 		if errors.Is(err, acme.ErrNoAccount) {
 			account, err = client.Register(ctx, &acme.Account{}, acme.AcceptTOS)
 			if err != nil {
-				err = fmt.Errorf("acme.Register error: %w", err)
+				return nil, fmt.Errorf("acme.Register error: %w", err)
 			}
+		} else {
+			return nil, fmt.Errorf("acme.GetReg error: %w", err)
 		}
-		return nil, fmt.Errorf("acme.GetReg error: %w", err)
-	}
-	if err != nil {
-		return nil, err
 	}
 	return account, nil
 }

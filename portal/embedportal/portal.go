@@ -18,6 +18,7 @@ import (
 	"time"
 
 	_ "ask.systems/daemon/tools/flags"
+	"golang.org/x/crypto/acme"
 
 	"ask.systems/daemon/tools"
 )
@@ -29,6 +30,8 @@ const (
 	leaseTTL         = 24 * time.Hour
 	ttlRandomStagger = 0.05
 )
+
+var kACMEAddress string
 
 func Run(flags *flag.FlagSet, args []string) {
 
@@ -84,6 +87,12 @@ func Run(flags *flag.FlagSet, args []string) {
 		"certificates for. By default provided freely by https://letsencrypt.org.\n"+
 		"By using this feature you accept their TOS.\n\n"+
 		"If you use this you don't need to set any other tls or cert related flags.")
+	acmeAddress := flags.String("autocert_server", acme.LetsEncryptURL, ""+
+		"The ACME server directory URL to use when automatically obtaining TLS\n"+
+		"certificates. This is uncommon. There are alternate providers, private\n"+
+		"servers, and this is useful for testing. For testing only you can also\n"+
+		"set the ACME_SERVER_CERT env var to a PEM encoded CA cert file for\n"+
+		"connecting to the autocert server over HTTPS.\n")
 	tlsCertSpec := flags.String("tls_cert", "", ""+
 		"The filepath to the tls cert file (fullchain.pem).\n"+
 		"Accepts multiple certificates with a comma separated list.\n"+
@@ -116,6 +125,7 @@ func Run(flags *flag.FlagSet, args []string) {
 		"The path to the file to store active lease information in so that\n"+
 		"the portal server can safely restart without disrupting proxy service.\n")
 	flags.Parse(args[1:])
+	kACMEAddress = *acmeAddress
 
 	quit := make(chan struct{})
 	tools.CloseOnQuitSignals(quit)
