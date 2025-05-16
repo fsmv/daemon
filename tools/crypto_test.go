@@ -9,10 +9,14 @@ import (
 const TestPassword = "hunter2"
 
 func TestCheckPassword(t *testing.T) {
-	if !CheckPassword(HashPassword(TestPassword), TestPassword) {
+	hash, err := HashPassword(TestPassword)
+	if err != nil {
+		t.Error(err)
+	}
+	if !CheckPassword(hash, TestPassword) {
 		t.Errorf("Password didn't match")
 	}
-	if CheckPassword(HashPassword(TestPassword), TestPassword+"!") {
+	if CheckPassword(hash, TestPassword+"!") {
 		t.Errorf("Password shouldn't have matched!")
 	}
 }

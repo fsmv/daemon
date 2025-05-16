@@ -23,18 +23,24 @@ func RandomString(bytes int) string {
 	return base64.URLEncoding.EncodeToString(b)
 }
 
+// The error type returned by HashPassword when the password is too long for the
+// hash function. This will be updated if the password hash function changes.
+var ErrPasswordTooLong = bcrypt.ErrPasswordTooLong
+
 // Returns a password hash compatible with the default [BasicAuthHandler] hash.
 // May change algorithms over time as hash recommendations change.
 //
 // Returns an empty string if there's any error: the password is too long for
 // the current hash function, failed reading random devices, etc.
-func HashPassword(password string) string {
+//
+// Check for [ErrPasswordTooLong] with [errors.Is] to display to the user.
+func HashPassword(password string) (string, error) {
 	// This generates a salt internally and produces the standard encoded string
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
-		return ""
+		return "", err
 	}
-	return string(hash)
+	return string(hash), nil
 }
 
 // Checks passwords for [BasicAuthHandler] (or other uses if you want). Accepts

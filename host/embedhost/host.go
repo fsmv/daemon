@@ -109,10 +109,16 @@ func hashPassword(string) error {
 	fmt.Fprintf(os.Stderr, "Type your password, prints unmasked, then press enter: ")
 	password, err := bufio.NewReader(os.Stdin).ReadString('\n')
 	if err != nil {
-		fmt.Fprint(os.Stderr, "Failed to read password: ", err)
+		fmt.Fprintln(os.Stderr, "Failed to read password:", err)
 		os.Exit(1)
 	}
-	fmt.Println(tools.HashPassword(strings.TrimSpace(password)))
-	os.Exit(0)
+	hash, err := tools.HashPassword(strings.TrimSpace(password))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "Failed to hash password:", err)
+		os.Exit(1)
+	} else {
+		fmt.Println(hash)
+		os.Exit(0)
+	}
 	return nil
 }

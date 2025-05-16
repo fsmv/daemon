@@ -58,13 +58,26 @@ func setupDashboardAuth(adminLogins string, quit <-chan struct{}) (*tools.BasicA
 			scan.Scan()
 			if err := scan.Err(); err != nil {
 				errChan <- err
-			} else {
-				hash := tools.HashPassword(scan.Text())
-				fmt.Println("You can login on the dashboard with username admin and the password you entered.")
-				login := fmt.Sprintf("admin:%v", hash)
-				fmt.Printf("To keep these settings set -dashboard_logins '%v'\n", login)
-				loginChan <- login
+				return
 			}
+			hash, err := tools.HashPassword(scan.Text())
+			for errors.Is(err, tools.ErrPasswordTooLong) {
+				fmt.Print("That password is too long. Try again: ")
+				scan.Scan()
+				if err := scan.Err(); err != nil {
+					errChan <- err
+					return
+				}
+				hash, err = tools.HashPassword(scan.Text())
+			}
+			if err != nil {
+				errChan <- fmt.Errorf("Failed hashing password: %w", err)
+				return
+			}
+			fmt.Println("You can login on the dashboard with username admin and the password you entered.")
+			login := fmt.Sprintf("admin:%v", hash)
+			fmt.Printf("To keep these settings set -dashboard_logins '%v'\n", login)
+			loginChan <- login
 		}()
 		select {
 		case err := <-errChan:
