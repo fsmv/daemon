@@ -31,6 +31,34 @@ const (
 )
 
 func Run(flags *flag.FlagSet, args []string) {
+
+	flags.Usage = func() {
+		fmt.Fprintf(flags.Output(), ""+
+			"Usage: %s [flags]\n"+
+			"Portal is a reverse proxy HTTPS server configured via gRPC.\n"+
+			"\n"+
+			"If you use no options portal will use a self-signed TLS certificate\n"+
+			"for external clients. To automatically obtain an authoritative TLS\n"+
+			"certificate, list the domains and subdomains in -autocert_domains:\n"+
+			"\n"+
+			"    %s -autocert_domains='example.com,test.example.com'\n"+
+			"\n"+
+			"If you use multiple domains, consider setting -default_hostname.\n"+
+			"Clients that register '/example/' as a reverse proxy pattern will by\n"+
+			"default serve on both example.com and test.example.com, leaving it to\n"+
+			"the backends to decide to respond or not. By setting\n"+
+			"-default_hostname=example.com portal will not send requests for\n"+
+			"test.example.com/example/ to the backend that registered '/example/'.\n"+
+			"Note: the above url can also be registered to as a pattern separately.\n"+
+			"\n"+
+			"Lastly the -reserved_ports flag may be useful if you're running\n"+
+			"non-portal-client servers in the ports 2050-4096 (by default).\n"+
+			"The other flags only need to be changed in unusual configurations.\n"+
+			"\n"+
+			"All Flags:\n",
+			flags.Name(), flags.Name())
+		flags.PrintDefaults()
+	}
 	rpcPort := flags.Uint("rpc_port", 2048, ""+
 		"The port to bind for the portal RPC server that clients use to register\n"+
 		"with. You shouldn't need to change this unless there's a conflict or you\n"+
@@ -52,8 +80,9 @@ func Run(flags *flag.FlagSet, args []string) {
 		"requests for any hostname that arrives at the server.")
 	var domains autocertDomains
 	flags.Var(&domains, "autocert_domains", ""+
-		"A comma separated list of domain names to automatically register for with\n"+
-		"https://letsencrypt.org. By using this feature you accept their TOS.\n\n"+
+		"A comma separated list of domain names to automatically obtain TLS\n"+
+		"certificates for. By default provided freely by https://letsencrypt.org.\n"+
+		"By using this feature you accept their TOS.\n\n"+
 		"If you use this you don't need to set any other tls or cert related flags.")
 	tlsCertSpec := flags.String("tls_cert", "", ""+
 		"The filepath to the tls cert file (fullchain.pem).\n"+
@@ -71,9 +100,9 @@ func Run(flags *flag.FlagSet, args []string) {
 	// I want to so that we don't make a folder we don't need, but that might
 	// break people's configs if they're not using autocert_domains yet.
 	certChallengeWebRoot := flags.String("cert_challenge_webroot", "./cert-challenge/", ""+
-		"Set to a local folder path to enable hosting the let's encrypt webroot\n"+
-		"challenge path ("+certChallengePattern+") so you can auto-renew with\n"+
-		"certbot. Set to empty string to turn this off.")
+		"Set to a local folder path to enable hosting the webroot auto TLS cert\n"+
+		"(ACME) challenge path ("+certChallengePattern+") so you can auto-renew\n"+
+		"with certbot or other clients. Set to empty string to turn this off.\n")
 	// Note: these are signed ints because of the -fd feature
 	// see: listenerFromPortOrFD
 	// TODO: maybe take it out for flags or document it
