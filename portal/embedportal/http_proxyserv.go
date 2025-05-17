@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
-	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -411,36 +410,32 @@ func runServer(quit chan struct{}, name string,
 }
 
 func makeChallengeHandler(webRoot string, challenges *acmeChallenges) (http.Handler, error) {
-	var fileServer http.Handler
+	var fileServer http.Handler = http.HandlerFunc(http.NotFound)
 	if webRoot != "" {
-		if err := os.MkdirAll(webRoot, 0775); err != nil {
-			return nil, err
-		}
 		dir := tools.SecureHTTPDir{
 			Dir:                   http.Dir(webRoot),
 			AllowDotfiles:         true,
 			AllowDirectoryListing: false,
 		}
 		if err := dir.TestOpen("/"); err != nil {
-			return nil, err
+			log.Printf("Warning: the -cert_challenge_webroot %v could not be read: %v",
+				webRoot, err)
+			log.Print("If you want to use certbot, correct this error and restart portal.")
+			log.Print("If you use -autocert_domains, you can set args: \"-cert_challenge_webroot=\" to suppress this warning.")
+		} else {
+			log.Printf("Serving acme challenge directory webroot: %v", webRoot)
+			fileServer = http.FileServer(dir)
 		}
-		fileServer = http.FileServer(dir)
-		log.Printf("Created acme challenge directory webroot: %v", webRoot)
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		log.Printf("ACME challenge handler: %v requested %v%v (useragent: %q)",
 			req.RemoteAddr, req.Host, req.URL.EscapedPath(), req.UserAgent())
 
 		resp, ok := challenges.Read(req.URL.Path)
-		if ok {
-			w.Write([]byte(resp))
-		} else {
-			if fileServer != nil {
-				fileServer.ServeHTTP(w, req)
-			} else {
-				http.NotFound(w, req)
-			}
+		if !ok {
+			fileServer.ServeHTTP(w, req)
 		}
+		w.Write([]byte(resp))
 	}), nil
 }
 

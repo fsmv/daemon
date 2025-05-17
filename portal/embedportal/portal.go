@@ -105,9 +105,6 @@ func Run(flags *flag.FlagSet, args []string) {
 		"Files are automatically re-read when portal receives SIGUSR1\n"+
 		"or 2/3 of the expiration date.\n"+
 		"This is not needed with spawn because it uses the SPAWN_FILES env var.")
-	// TODO: default to empty string eventually?
-	// I want to so that we don't make a folder we don't need, but that might
-	// break people's configs if they're not using autocert_domains yet.
 	certChallengeWebRoot := flags.String("cert_challenge_webroot", "./cert-challenge/", ""+
 		"Set to a local folder path to enable hosting the webroot auto TLS cert\n"+
 		"(ACME) challenge path ("+certChallengePattern+") so you can auto-renew\n"+
