@@ -134,9 +134,14 @@ func Run(flags *flag.FlagSet, args []string) {
 
 	state := newStateManager(*saveFilepath)
 	if err := state.Load(); err != nil {
-		log.Print("Failed to load state: ", err)
+		if errors.Is(err, os.ErrNotExist) {
+			log.Printf("State file not found. It will be craeted at %v", *saveFilepath)
+		} else {
+			log.Print("Failed to load state:", err)
+			log.Print("Portal will try to overwrite it, and will run with in a blank state.")
+		}
 	} else {
-		log.Print("Successfully loaded state.")
+		log.Printf("Successfully loaded state file (%v).", *saveFilepath)
 	}
 
 	// Set up the new CA root cert for signing API client TLS certs

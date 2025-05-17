@@ -384,6 +384,7 @@ func loadTLSConfig(
 	// If there was no certificate we could load, use a self-signed cert
 	if len(tlsCert) == 0 && len(domains) == 0 {
 		log.Printf("Warning: no TLS certificate loaded. Using a self-signed certificate.")
+		log.Printf("If you set -autocert_domains=example.com you will get a https://letsencrypt.org certificate automatically.")
 		return tools.AutorenewSelfSignedCertificate( /*hostname*/ "*",
 			3*24*time.Hour, false /*isCA*/, nil /*onRenew*/, quit)
 	}
