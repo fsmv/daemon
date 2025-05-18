@@ -27,7 +27,7 @@ import (
 
 // Methods on this type are exported as rpc calls
 type rpcServ struct {
-	gate.PortalServer
+	gate.UnimplementedPortalServer
 
 	clientLeasor *clientLeasor
 	tcpProxy     *tcpProxy
