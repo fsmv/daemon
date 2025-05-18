@@ -29,7 +29,7 @@ import (
 //
 // The returned config only has [tls.Config.GetCertificate] set, and it will
 // return the latest certificate for any arguments (including nil).
-func AutorenewSelfSignedCertificate(hostname string, TTL time.Duration, isCA bool, onRenew func(*tls.Certificate), quit chan struct{}) (*tls.Config, error) {
+func AutorenewSelfSignedCertificate(hostname string, TTL time.Duration, isCA bool, onRenew func(*tls.Certificate), quit <-chan struct{}) (*tls.Config, error) {
 	cache := &atomic.Value{}
 	newCert, err := GenerateSelfSignedCertificate(hostname, time.Now().Add(TTL), isCA)
 	if err != nil {
@@ -93,7 +93,7 @@ func GenerateSelfSignedCertificate(hostname string, expiration time.Time, isCA b
 
 // Generate a random certificate key and a request to send to a Certificate
 // Authority to get your new certificate signed.
-func GenerateCertificateRequest(hostname string) ([]byte, *ecdsa.PrivateKey, error) {
+func GenerateCertificateRequest(hostname string) ([]byte, crypto.Signer, error) {
 	template := &x509.CertificateRequest{
 		SignatureAlgorithm: x509.ECDSAWithSHA256,
 	}
@@ -211,29 +211,30 @@ type stdPublicKey interface {
 }
 
 func parseAndValidateCert(der [][]byte, privateKey crypto.Signer) (leaf *x509.Certificate, err error) {
+	now := time.Now()
 	for i, block := range der {
 		cert, err := x509.ParseCertificate(block)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("error parsing certificate #%v: %w", i, err)
+		}
+		// Check the expiration date
+		if now.Before(cert.NotBefore) || now.After(cert.NotAfter) {
+			return nil, fmt.Errorf("certificate #%v time range is not valid", i)
 		}
 		if i == 0 {
 			leaf = cert
 		}
 	}
 	if leaf == nil {
-		return nil, errors.New("no certificates found")
-	}
-	// Check the expiration date
-	if now := time.Now(); now.Before(leaf.NotBefore) || now.After(leaf.NotAfter) {
-		return nil, errors.New("certificate time range is not valid")
+		return nil, errors.New("no certificates")
 	}
 	// Check that the keys match
 	pub, ok := leaf.PublicKey.(stdPublicKey)
 	if !ok {
-		return nil, errors.New("crypto.PublicKey has no Equal method")
+		return nil, errors.New("go version error: bad leaf.PublicKey type")
 	}
 	if !pub.Equal(privateKey.Public()) {
-		return nil, errors.New("private key does not match public key")
+		return nil, errors.New("private key does not match leaf public key")
 	}
 	return leaf, nil
 }
