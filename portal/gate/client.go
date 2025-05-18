@@ -4,27 +4,30 @@ The client library for registering paths with [ask.systems/daemon/portal].
 This package contains the raw [gRPC] service [protos] in addition to helper
 functions for using the service. The helpers are:
 
-  - [StartTLSRegistration], [MustStartTLSRegistration], [StartRegistration], and
-    [MustStartRegistration] are all in one helpers for getting a lease from
-    portal and keeping it renewed in the background. Most clients should use
-    one of these.
+  - [AutoRegister] an all in one helper for getting a lease from portal and
+    keeping it renewed in the background. Most clients should use this. If you
+    need multiple registrations use [Client.AutoRegister].
   - [ParsePattern] which splits out the hostname part of multi-hostname patterns
     used to register with portal when portal is hosting multiple URLs. This is
-    needed to extract the path part that can be used with [http.Handle].
+    needed to extract the path part that can be used with [net/http.Handle].
   - [Client] and the methods under it provide full access to the gRPC server
-    using the token authentication. Call methods directly using [Client].RPC if
-    you want detailed access to portal.
+    using the token authentication. Call methods directly using
+    [gate.Client.RPC] if you want detailed access to portal.
+  - This package contains generated [google.golang.org/protobuf/proto.Message]
+    types. They are [Lease], [RegisterRequest], [Hostname], [PortalClient],
+    [PortalServer], [UnimplementedPortalServer], and [UnsafePortalServer]
 
-You need to set the [Address] and [Token] vars to use the 4 helper functions
-like [StartTLSRegistration] so it can connect to portal. The simplest way to
-do this is to import the [ask.systems/daemon/portal/flags] library:
+You need to set the [Address] and [Token] vars to use the helper functions like
+[AutoRegister] and [DefaultClient] so it can connect to portal. The simplest way
+to do this is to import the [ask.systems/daemon/portal/flags] library:
 
 	import (
 		_ "ask.systems/daemon/portal/flags"
 	)
 
 When running portal client binaries on the commandline you can use the
-PORTAL_ADDR and PORTAL_TOKEN environment variables to easily set the values.
+PORTAL_ADDR and PORTAL_TOKEN environment variables to easily set the values,
+which is handled by [ResolveFlags] (called by [DefaultClient]).
 
 [gRPC]: https://grpc.io/
 [protos]: https://developers.google.com/protocol-buffers
@@ -33,6 +36,7 @@ package gate
 
 import (
 	"context"
+	"crypto"
 	"crypto/tls"
 	"errors"
 	"flag"
@@ -40,6 +44,7 @@ import (
 	"log"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -57,6 +62,11 @@ var (
 
 const failRetryDelay = 2 * time.Minute
 
+// Holds a gRPC client and connection, handles authentication with the token.
+//
+// Use [DefaultClient] typically and [Connect] for more direct control.
+//
+// If you use [AutoRegister] it makes a client internally.
 type Client struct {
 	// Call any of the service.proto functions here
 	RPC  PortalClient
@@ -67,8 +77,10 @@ type Client struct {
 //
 // If you read these vars directly, call [ResolveFlags] first!
 //
-// These are set by the [ask.systems/daemon/portal/flags] library. If you don't want to
-// use the flags you can set the values here.
+// These are used by [DefaultClient] and [AutoRegister]. They are set by the
+// [ask.systems/daemon/portal/flags] library. If you don't want to use the flags
+// you can set the values here, or use the PORTAL_ADDR and PORTAL_TOKEN env vars
+// read by [ResolveFlags].
 var (
 	// The hostname (or IP) and port of the portal server to connect to.
 	Address *string
@@ -121,30 +133,69 @@ func ResolveFlags() error {
 	return nil
 }
 
+// Start a new registration with portal and keep it renewed.
+//
+// Uses the [DefaultClient] and calls [Client.AutoRegister] see the
+// documentation there for details on arguments and return values.
+//
+// The lease is kept renewed until the context is cancelled.
+//
+// You can pass in a non-nil [sync.WaitGroup] and call Wait on it to allow time
+// for the lease to be unregistered when the context is cancelled.
+//
+// Returns the result from the initial registration before any renewals.
+// The error return is always the same as [gate.AutoRegisterResult.Error].
+func AutoRegister(ctx context.Context, request *RegisterRequest, wg *sync.WaitGroup) (*AutoRegisterResult, error) {
+	c, err := DefaultClient()
+	if err != nil {
+		return &AutoRegisterResult{Error: err}, err
+	}
+	resultChan := make(chan *AutoRegisterResult, 0)
+	go func() {
+		if wg != nil {
+			wg.Add(1)
+		}
+		c.AutoRegister(ctx, request, resultChan)
+		c.Close()
+		if wg != nil {
+			wg.Done()
+		}
+	}()
+
+	result := <-resultChan
+	return result, result.Error
+}
+
 // Make a connection to the portal RPC service and send the registration
 // request. Also starts a goroutine to renew (and potentially re-register) the
 // lease until the quit channel is closed.
 //
 // Returns the initial lease or an error if the registration didn't work.
+//
+// Deprecated: Use [AutoRegister] instead
 func StartRegistration(request *RegisterRequest, quit <-chan struct{}) (*Lease, error) {
-	if err := ResolveFlags(); err != nil {
-		return nil, err
-	}
-	c, err := Connect(*Address, *Token)
+	c, err := DefaultClient()
 	if err != nil {
 		return nil, err
 	}
-	lease, err := c.RPC.Register(context.Background(), request)
-	if err != nil {
-		return nil, fmt.Errorf("Failed to obtain lease from portal: %v", err)
-	}
-	log.Printf("Obtained lease for %#v, port: %v, ttl: %v",
-		lease.Pattern, lease.Port, lease.Timeout.AsTime())
-	go c.keepRegistrationAlive(quit, request, lease, nil)
-	return lease, nil
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		<-quit
+		cancel()
+		c.Close()
+	}()
+
+	request.CertificateRequest = []byte{} // force no SSL cert signing
+	resultChan := make(chan *AutoRegisterResult, 0)
+	go c.AutoRegister(ctx, request, resultChan)
+
+	result := <-resultChan
+	return result.Lease, result.Error
 }
 
 // The same as [StartRegistration] but call [log.Fatal] on error
+//
+// Deprecated: Use [AutoRegister] instead
 func MustStartRegistration(request *RegisterRequest, quit <-chan struct{}) *Lease {
 	lease, err := StartRegistration(request, quit)
 	if err != nil {
@@ -154,6 +205,8 @@ func MustStartRegistration(request *RegisterRequest, quit <-chan struct{}) *Leas
 }
 
 // The same as [StartTLSRegistration] but call [log.Fatal] on error
+//
+// Deprecated: Use [AutoRegister] instead
 func MustStartTLSRegistration(request *RegisterRequest, quit <-chan struct{}) (*Lease, *tls.Config) {
 	lease, conf, err := StartTLSRegistration(request, quit)
 	if err != nil {
@@ -171,60 +224,26 @@ func MustStartTLSRegistration(request *RegisterRequest, quit <-chan struct{}) (*
 // re-register the lease if necessary) until the quit channel is closed.
 //
 // Returns the initial lease, and a [tls.Config] which automatically
-// renews the certificate seemlessly. Or return an error if the registration
+// renews the certificate seamlessly. Or return an error if the registration
 // didn't work.
+//
+// Deprecated: Use [AutoRegister] instead
 func StartTLSRegistration(request *RegisterRequest, quit <-chan struct{}) (*Lease, *tls.Config, error) {
-	if err := ResolveFlags(); err != nil {
-		return nil, nil, err
-	}
-	c, err := Connect(*Address, *Token)
+	c, err := DefaultClient()
 	if err != nil {
 		return nil, nil, err
 	}
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		<-quit
+		cancel()
+		c.Close()
+	}()
+	resultChan := make(chan *AutoRegisterResult, 0)
+	go c.AutoRegister(ctx, request, resultChan)
 
-	// Setup the request for a new certificate
-	hostResp, err := c.RPC.MyHostname(context.Background(), &emptypb.Empty{})
-	if err != nil {
-		return nil, nil, fmt.Errorf("Error from MyHostname: %v", err)
-	}
-	csr, privateKey, err := tools.GenerateCertificateRequest(hostResp.Hostname)
-	request.CertificateRequest = csr
-	if err != nil {
-		return nil, nil, fmt.Errorf("Error generating cert request: %v", err)
-	}
-
-	// Do the registration
-	lease, err := c.RPC.Register(context.Background(), request)
-	if err != nil {
-		return nil, nil, fmt.Errorf("Failed to obtain lease from portal: %v", err)
-	}
-	log.Printf("Obtained TLS lease for %#v, port: %v, ttl: %v",
-		lease.Pattern, lease.Port, lease.Timeout.AsTime())
-
-	// Keep the lease renewed and set up a TLS config that uses the auto-renewed
-	// TLS certificate
-	certCache := &atomic.Value{}
-	certCache.Store(lease.Certificate)
-	go c.keepRegistrationAlive(quit, request, lease, func(cert []byte) { certCache.Store(cert) })
-	// TODO: We should do client auth so that nobody but the portal server can
-	// send requests directly to the backend. This completes a secure chain for
-	// the X-Forwarded header values. These headers may be important for IP based
-	// blocking and logging or even generating server side URLs.
-	config := &tls.Config{
-		GetCertificate: func(hi *tls.ClientHelloInfo) (*tls.Certificate, error) {
-			// TODO Probably should cache the tls.Certificate instead of the []byte
-			cert, err := tools.TLSCertificateFromBytes([][]byte{certCache.Load().([]byte)}, privateKey)
-			if cert == nil {
-				log.Print("Failed to load certificate: ", err)
-				return nil, errors.New("Internal error: cannot load certificate")
-			}
-			if err := hi.SupportsCertificate(cert); err != nil {
-				return nil, err
-			}
-			return cert, nil
-		},
-	}
-	return lease, config, nil
+	result := <-resultChan
+	return result.Lease, result.TLSConfig, result.Error
 }
 
 // Parse a pattern in the syntax accepted by portal separating the hostname
@@ -254,24 +273,173 @@ func (token rpcToken) RequireTransportSecurity() bool {
 	return true
 }
 
-// Connect to the portal RPC server and don't do anything else. Use this if you
-// want to call the proto RPCs directly.
-func Connect(portalAddr, token string) (Client, error) {
-	conn, err := grpc.Dial(portalAddr,
+// Create the portal RPC client using the [ask.systems/daemon/portal/flags]
+// package configuration. Calls [ResolveFlags] and [Connect].
+func DefaultClient() (*Client, error) {
+	if err := ResolveFlags(); err != nil {
+		return nil, err
+	}
+	return Connect(*Address, *Token)
+}
+
+// Create the portal RPC client and don't do anything else. Use this if you
+// want to call the proto RPCs directly and don't want to use
+// [ask.systems/daemon/portal/flags].
+//
+// For most use cases [DefaultClient] is what you want.
+//
+// Note: this function doesn't actually perform I/O anymore. Originally it used
+// [grpc.Dial] but now it uses [grpc.NewClient]. See: [grpc antipatterns]
+//
+// [grpc antipatterns]: https://github.com/grpc/grpc-go/blob/master/Documentation/anti-patterns.md
+func Connect(portalAddr, token string) (*Client, error) {
+	conn, err := grpc.NewClient(portalAddr,
 		grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{
 			InsecureSkipVerify: true,
 		})),
 		grpc.WithPerRPCCredentials(rpcToken(token)),
 	)
 	if err != nil {
-		return Client{}, fmt.Errorf("Failed to connect to frontend proxy RPC server: %v", err)
+		return nil, fmt.Errorf("Failed to connect to portal RPC server: %w", err)
 	}
-	return Client{NewPortalClient(conn), conn}, nil
+	return &Client{NewPortalClient(conn), conn}, nil
 }
 
 // Close the connection to the RPC server
-func (c Client) Close() {
-	c.conn.Close()
+func (c *Client) Close() {
+	if c != nil {
+		c.conn.Close()
+	}
+}
+
+// The result type for [AutoRegister] and [Client.AutoRegister]
+//
+// See also: [gate.RegisterRequest.CertificateRequest].
+type AutoRegisterResult struct {
+	// The lease obtained in the initial registration request if successful.
+	Lease *Lease
+	// Will only be set if request.CertificateRequest was nil when
+	// calling AutoRegister. In that case this config will automatically update
+	// with the renewed certificate from portal.
+	TLSConfig *tls.Config
+	// The error status of the initial registration before moving on to auto-renew
+	// from AutoRegister. If set the other fields are nil.
+	Error error
+}
+
+// Starts a new registration with portal and keeps it renewed. Blocks until the
+// context is cancelled, so call it in a goroutine.
+//
+// Automatically generates a certificate request if
+// [gate.RegisterRequest.CertificateRequest] is left nil. If you set your own
+// CertificateRequest it will used as-is and [gate.AutoRegisterResult.Lease]
+// will contain the signed cert but you will have to make your own [tls.Config].
+// If you want to turn off requesting a certificate entirely you can set
+// [gate.RegisterRequest.CertificateRequest] to a non-nil empty slice.
+//
+// Note: portal requires HTTPS if it signed a certificate with the lease and
+// only accepts the certificate it signed.
+//
+// If non-nil, result will be blocking written to after the initial
+// registration attempt is done, and then non-blocking written to for each
+// renewal. result will be closed when this function returns.
+//
+// When you read the first result, if [gate.AutoRegisterResult.Error] is non-nil
+// then this function will shortly return the same error, otherwise this
+// function will continue to renew the registration, eventually returning with
+// the error that caused it to stop.
+func (c *Client) AutoRegister(ctx context.Context, request *RegisterRequest, result chan<- *AutoRegisterResult) error {
+	if result != nil {
+		defer close(result)
+	}
+
+	// Add a certificate request if one isn't already set
+	var privateKey crypto.Signer
+	if request.CertificateRequest == nil {
+		// Setup the request for a new certificate
+		hostResp, err := c.RPC.MyHostname(ctx, &emptypb.Empty{})
+		if err != nil {
+			err = fmt.Errorf("Error from MyHostname: %w", err)
+			if result != nil {
+				result <- &AutoRegisterResult{Error: err}
+			}
+			return err
+		}
+		request.CertificateRequest, privateKey, err = tools.GenerateCertificateRequest(hostResp.Hostname)
+		if err != nil {
+			err = fmt.Errorf("Error generating cert request: %w", err)
+			if result != nil {
+				result <- &AutoRegisterResult{Error: err}
+			}
+			return err
+		}
+	}
+
+	// Do the initial registration
+	lease, err := c.RPC.Register(ctx, request)
+	if err != nil {
+		err = fmt.Errorf("Failed to obtain lease from portal: %w", err)
+		if result != nil {
+			result <- &AutoRegisterResult{Error: err}
+		}
+		return err
+	}
+	log.Printf("Obtained lease for %#v, port: %v, ttl: %v",
+		lease.Pattern, lease.Port, lease.Timeout.AsTime())
+
+	var updateConf func([]byte)
+	var conf *tls.Config
+	if privateKey != nil {
+		cert, err := tools.TLSCertificateFromBytes([][]byte{lease.Certificate}, privateKey)
+		if err != nil {
+			err := fmt.Errorf("Failed to parse certificate for lease %#v: %w", lease.Pattern, err)
+			if result != nil {
+				result <- &AutoRegisterResult{Error: err}
+			}
+			return err
+		}
+
+		certCache := &atomic.Value{}
+		certCache.Store(cert)
+		updateConf = func(certBytes []byte) {
+			newCert, err := tools.TLSCertificateFromBytes([][]byte{certBytes}, privateKey)
+			if err != nil {
+				log.Printf("Failed to parse renewed certificate from portal for lease %#v: %v",
+					lease.Pattern, err)
+			} else {
+				certCache.Store(newCert)
+			}
+		}
+		// TODO: We should do client auth so that nobody but the portal server can
+		// send requests directly to the backend. This completes a secure chain for
+		// the X-Forwarded header values. These headers may be important for IP based
+		// blocking and logging or even generating server side URLs.
+		conf = &tls.Config{
+			GetCertificate: func(hi *tls.ClientHelloInfo) (*tls.Certificate, error) {
+				cert, ok := certCache.Load().(*tls.Certificate)
+				if !ok || cert == nil {
+					log.Print("Failed to load certificate!")
+					return nil, errors.New("Internal error: cannot load certificate")
+				}
+				if hi != nil {
+					if err := hi.SupportsCertificate(cert); err != nil {
+						return nil, err
+					}
+				}
+				return cert, nil
+			},
+		}
+	}
+
+	initResult := &AutoRegisterResult{
+		Lease:     lease,
+		TLSConfig: conf,
+		Error:     nil,
+	}
+	if result != nil {
+		result <- initResult
+	}
+	return c.keepRegistrationAlive(ctx, request, initResult, result, updateConf)
 }
 
 // Run a loop to call the Renew RPC for the given lease before the lease expires
@@ -280,13 +448,13 @@ func (c Client) Close() {
 // When the quit channel is closed this function unregisters the lease and
 // closes the client.
 //
-// Deprecated: It's best to use [StartRegistration] because this function cannot
+// Deprecated: It's best to use [AutoRegister] because this function cannot
 // re-register the lease in the unlikely event that the server somehow forgets
 // the lease exists when it tries to renew, because it does not have access to
 // the registration request. In that case this function gets stuck trying to
-// renew forever. The server can't do it because it has forgetten in this
+// renew forever. The server can't do it because it has forgotten in this
 // scenario.
-func (c Client) KeepLeaseRenewed(quit <-chan struct{}, lease *Lease) {
+func (c *Client) KeepLeaseRenewed(quit <-chan struct{}, lease *Lease) {
 	c.KeepLeaseRenewedTLS(quit, lease, nil)
 }
 
@@ -300,13 +468,13 @@ func (c Client) KeepLeaseRenewed(quit <-chan struct{}, lease *Lease) {
 // When the quit channel is closed this function unregisters the lease and
 // closes the client.
 //
-// Deprecated: It's best to use [StartTLSRegistration] because this function
-// cannot re-register the lease in the unlikely event that the server somehow
-// forgets the lease exists when it tries to renew, because it does not have
-// access to the registration request. In that case this function gets stuck
-// trying to renew forever. The server can't do it because it has forgetten in
-// this scenario.
-func (c Client) KeepLeaseRenewedTLS(quit <-chan struct{}, lease *Lease, newCert func([]byte)) {
+// Deprecated: It's best to use [AutoRegister] because this function cannot
+// re-register the lease in the unlikely event that the server somehow forgets
+// the lease exists when it tries to renew, because it does not have access to
+// the registration request. In that case this function gets stuck trying to
+// renew forever. The server can't do it because it has forgotten in this
+// scenario.
+func (c *Client) KeepLeaseRenewedTLS(quit <-chan struct{}, lease *Lease, newCert func([]byte)) {
 	defer func() {
 		c.RPC.Unregister(context.Background(), lease)
 		c.Close()
@@ -338,31 +506,37 @@ func (c Client) KeepLeaseRenewedTLS(quit <-chan struct{}, lease *Lease, newCert 
 	}
 }
 
-func (c Client) keepRegistrationAlive(quit <-chan struct{}, request *RegisterRequest, lease *Lease, newCert func(cert []byte)) {
-	defer func() {
-		c.RPC.Unregister(context.Background(), lease)
-		c.Close()
-		log.Printf("portal lease %#v unregistered and connection closed",
-			lease.Pattern)
-	}()
-
+func (c *Client) keepRegistrationAlive(
+	ctx context.Context, request *RegisterRequest,
+	lastResult *AutoRegisterResult, result chan<- *AutoRegisterResult,
+	newCert func(cert []byte)) error {
 	// Set the FixedPort to the Port we got so we never change the port if we
 	// re-register. Then we don't have to restart the server.
-	request.FixedPort = lease.Port
+	request.FixedPort = lastResult.Lease.Port
 	// Wait until 1% of the time is remaining
-	timer := time.NewTimer(renewDuration(lease.Timeout.AsTime()))
+	timer := time.NewTimer(renewDuration(lastResult.Lease.Timeout.AsTime()))
 	for {
 		select {
-		case <-quit:
+		case <-ctx.Done():
 			timer.Stop()
-			return
+			// Use the background context because if we're here the context is
+			// cancelled and we still want to unregister.
+			_, err := c.RPC.Unregister(context.Background(), lastResult.Lease)
+			if err == nil {
+				log.Printf("portal lease %#v unregistered",
+					lastResult.Lease.Pattern)
+			} else {
+				log.Printf("Error unregistering portal lease %#v: %v",
+					lastResult.Lease.Pattern, err)
+			}
+			return context.Cause(ctx)
 		case <-timer.C:
 		}
-		newLease, err := c.RPC.Renew(context.Background(), lease)
+		newLease, err := c.RPC.Renew(ctx, lastResult.Lease)
 		action := "Renewed"
 		if err != nil && status.Code(err) == codes.NotFound {
 			log.Print("Tried to renew but the lease wasn't valid, trying to re-register...")
-			newLease, err = c.RPC.Register(context.Background(), request)
+			newLease, err = c.RPC.Register(ctx, request)
 			if err != nil {
 				log.Printf("Failed to re-register lease from portal: %v", err)
 				timer.Reset(failRetryDelay)
@@ -374,12 +548,18 @@ func (c Client) keepRegistrationAlive(quit <-chan struct{}, request *RegisterReq
 			timer.Reset(failRetryDelay)
 			continue
 		}
-		lease = newLease
 		if newCert != nil {
-			newCert(lease.Certificate)
+			newCert(newLease.Certificate)
 		}
-		timeout := lease.Timeout.AsTime()
-		log.Printf("%v lease, port: %v, ttl: %v", action, lease.Port, timeout)
+		lastResult.Lease = newLease
+		if result != nil {
+			select {
+			case result <- lastResult:
+			default:
+			}
+		}
+		timeout := newLease.Timeout.AsTime()
+		log.Printf("%v lease, port: %v, ttl: %v", action, newLease.Port, timeout)
 		timer.Reset(renewDuration(timeout))
 	}
 }

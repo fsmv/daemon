@@ -6,6 +6,7 @@ package embedassimilate
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -50,46 +51,38 @@ func Run(flags *flag.FlagSet, args []string) {
 		"Print the schema for gate.RegisterRequest in proto form and exit.")
 	flags.Parse(args[1:])
 
-	var wg sync.WaitGroup
-	quit := make(chan struct{})
-	if err := gate.ResolveFlags(); err != nil {
-		log.Fatal(err)
-	}
-	fe, err := gate.Connect(*gate.Address, *gate.Token)
+	client, err := gate.DefaultClient()
 	if err != nil {
 		log.Fatal(err)
 	}
+	var wg sync.WaitGroup
+	ctx := tools.ContextWithQuitSignals(context.Background())
 	errCount := 0
 	for i, requestText := range flags.Args() {
 		registration := &gate.RegisterRequest{}
 		err := prototext.Unmarshal([]byte(requestText), registration)
 		if err != nil {
-			log.Printf("Failed to unmarshal RegisterRequest %#v: %v", requestText, registration)
+			log.Printf("Failed to unmarshal RegisterRequest #%v %#v: %v",
+				i, requestText, registration)
 			errCount++
 			continue
 		}
-		lease, err := fe.RPC.Register(context.Background(), registration)
-		if err != nil {
-			log.Printf("Failed to register #%v %+v: %v", i, registration, err)
-			errCount++
-			continue
-		}
-		log.Printf("Obtained lease for %#v, port: %v, timeout: %v",
-			lease.Pattern, lease.Port, lease.Timeout.AsTime())
-		wg.Add(1)
+		idx := i
 		go func() {
-			fe.KeepLeaseRenewed(quit, lease)
+			wg.Add(1)
+			err := client.AutoRegister(ctx, registration, nil)
 			wg.Done()
+			if err != nil && !errors.Is(err, context.Cause(ctx)) {
+				log.Printf("Error for registration #%v: %v", idx, err)
+			}
 		}()
 	}
 	if errCount == len(flag.Args()) {
-		close(quit)
-		wg.Wait()
+		client.Close()
 		log.Fatal("None of the registrations were successful.")
 	}
 
-	tools.CloseOnQuitSignals(quit)
-	<-quit
 	wg.Wait()
+	client.Close()
 	log.Print("Goodbye.")
 }

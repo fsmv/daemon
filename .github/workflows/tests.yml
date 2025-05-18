@@ -44,7 +44,7 @@ jobs:
         echo "password" | ./$BIN spawn >logs.txt 2>&1 & sleep 5; endtest $BIN
         cat logs.txt
         if [ -z "$(grep 'Token received' logs.txt)" ]; then exit 2; fi
-        if [ -z "$(grep 'Obtained TLS lease' logs.txt)" ]; then exit 3; fi
+        if [ -z "$(grep 'Obtained lease' logs.txt)" ]; then exit 3; fi
         if [ -z "$(grep 'https://127.0.0.1:8080/daemon/' logs.txt)" ]; then exit 4; fi
 
   test-auto-certs:

@@ -34,7 +34,6 @@ const (
 var kACMEAddress string
 
 func Run(flags *flag.FlagSet, args []string) {
-
 	flags.Usage = func() {
 		fmt.Fprintf(flags.Output(), ""+
 			"Usage: %s [flags]\n"+

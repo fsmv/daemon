@@ -15,10 +15,23 @@ service Portal {
 	rpc MyHostname(google.protobuf.Empty) returns (Hostname) {}
 }
 
+// The response proto for the [gate.PortalClient.MyHostname] RPC
 message Hostname {
 	string hostname = 1;
 }
 
+// The options proto when making a requests to portal to register for a reverse proxy
+// path [Lease].
+//
+// The minimal request is to only set [gate.RegisterRequest.Pattern].
+// [AutoRegister] will automatically set the CertificateRequest.
+//
+// See also: [tools.GenerateCertificateRequest] to parse the certificate if
+// doing custom cert management.
+//
+// You can use [tools.TLSCertificateFromBytes] with the private key from
+// the certificate request you generate to convert this into a
+// [tls.Certificate] .
 message RegisterRequest {
 	// For HTTP: A url pattern that works with http.DefaultServMux. Ex: /images/
 	// For TCP: ":tcp:port" for the port number portal should listen on. Only tcp
@@ -37,6 +50,7 @@ message RegisterRequest {
 	//
 	// Existing leases with the same pattern will be replaced
 	string pattern = 1;
+
 	// Optional: If set this port for the lease instead of getting a random port
 	// assigned by portal.
 	//
@@ -46,6 +60,7 @@ message RegisterRequest {
 	//
 	// Existing leases with the same port and pattern will be replaced
 	uint32 fixed_port = 2;
+
 	// Optional: If set, forward the requests for pattern to this IP/hostname.
 	// If unset, forward requests to the IP that sent the RegisterRequest.
 	//
@@ -69,6 +84,7 @@ message RegisterRequest {
 	//
 	// Ignored for TCP proxies.
 	bool strip_pattern = 3;
+
 	// If true, do not redirect HTTP requests to HTTPS. This means the data will
 	// be sent in plain-text readable to anyone if the client requests it. Some
 	// legacy systems require plain HTTP requests. Leave this off by default for
@@ -82,9 +98,21 @@ message RegisterRequest {
 	// network traffic behind the reverse proxy can be encrypted.
 	//
 	// Use this instead of a self signed cert.
+	//
+	// You can use [tools.GenerateCertificateRequest] to make this.
+	// It is ASN.1 DER data.
 	bytes certificate_request = 4;
 }
 
+// Information proto about a successful registration portal is storing.
+//
+// For the Certificate field use [tools.TLSCertificateFromBytes] for parsing the
+// Certificate field data into a [*tls.Certificate] ex:
+//
+//   cert, err := tools.TLSCertificateFromBytes([][]byte{lease.Certificate}, privateKey)
+//
+// Note: privateKey comes from [tools.GenerateCertificateRequest] before you
+// make the registration
 message Lease {
 	string pattern = 1;
 	string address = 5;
@@ -93,6 +121,8 @@ message Lease {
 
 	// If generate_certificate was set in the request, this is the signed x509
 	// certificate to use for your server. It will be renewed with the lease.
+	//
+	// This is ASN.1 DER data for the leaf certificate public key.
 	bytes certificate = 4;
 }
 
