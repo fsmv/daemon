@@ -52,6 +52,19 @@ func CloseOnQuitSignals(quit chan struct{}) {
 // a signal to stop.
 //
 // Catches: SIGINT, SIGKILL, SIGTERM, SIGHUP
+//
+// To also have a global stop function it's cleanest to do:
+//
+//	ctx, stop := context.WithCancel(context.Background())
+//	ctx = tools.ContextWithQuitSignals(ctx)
+//	defer stop()
+//
+// Since this signals the signal handler goroutine to shutdown and close
+// channels. However it's not a problem to let the runtime exit without
+// signaling this cleanup and do it in one line:
+//
+//	ctx, stop := context.WithCancel(tools.ContextWithQuitSignals(context.Background()))
+//	defer stop()
 func ContextWithQuitSignals(ctx context.Context) context.Context {
 	ret, cancel := context.WithCancelCause(ctx)
 	go func() {

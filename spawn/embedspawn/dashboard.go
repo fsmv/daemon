@@ -126,6 +126,8 @@ func startDashboard(children *children, adminAuth *tools.BasicAuthHandler, quit 
 	_, dashboardUrl = gate.ParsePattern(pattern)
 	logsUrl = dashboardUrl + "logs"
 
+	// TODO: update this to use the new API
+
 	// If the main  quit closes, shut down the dashboard. But, if the dashboard
 	// crashes don't shut down the main process.
 	dashboardQuit = make(chan struct{})

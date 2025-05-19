@@ -5,6 +5,7 @@ package embedhost
 
 import (
 	"bufio"
+	"context"
 	"flag"
 	"fmt"
 	"log"
@@ -12,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	_ "ask.systems/daemon/portal/flags"
 	_ "ask.systems/daemon/tools/flags"
@@ -45,16 +47,34 @@ func Run(flags *flag.FlagSet, args []string) {
 		"instead of hosting a server.")
 	flags.Parse(args[1:])
 
-	quit := make(chan struct{})
-	tools.CloseOnQuitSignals(quit)
+	// Setup graceful stopping
+	ctx, cancel := context.WithCancel(context.Background())
+	ctx = tools.ContextWithQuitSignals(ctx)
+	wg := &sync.WaitGroup{}
+	defer func() {
+		cancel()
+		wg.Wait()
+		log.Print("Goodbye.")
+	}()
 
-	pattern := *urlPath
-	_, servePath := gate.ParsePattern(pattern)
-	lease, tlsConf := gate.MustStartTLSRegistration(&gate.RegisterRequest{
-		Pattern: pattern,
-	}, quit)
+	reg, err := gate.AutoRegister(ctx, &gate.RegisterRequest{
+		Pattern: *urlPath,
+	}, wg)
+	if err != nil {
+		log.Print("Fatal error registering with portal:", err)
+		return
+	}
+
+	// Extract the path part of the pattern and the prefix to remove
+	_, servePath := gate.ParsePattern(*urlPath)
+	prefix := servePath
+	if !strings.HasSuffix(prefix, "/") {
+		// Don't strip off the filename if we're serving a single file
+		prefix = filepath.Dir(prefix)
+	}
 
 	// Setup the server handler
+	var handler http.Handler
 	dir := tools.SecureHTTPDir{
 		Dir:                   http.Dir(*webRoot),
 		AllowDotfiles:         *serveDotfiles,
@@ -62,43 +82,35 @@ func Run(flags *flag.FlagSet, args []string) {
 		BasicAuthRealm:        *passwordRealm,
 	}
 	fileServer := http.FileServer(dir)
-	var prefix string
-	if strings.HasSuffix(servePath, "/") {
-		prefix = servePath
+	if !*logRequests {
+		handler = dir.CheckPasswordsHandler(fileServer)
 	} else {
-		// Don't strip off the filename if we're serving a single file
-		prefix = filepath.Dir(servePath)
-	}
-	http.Handle(servePath, http.StripPrefix(prefix, http.HandlerFunc(
-		func(w http.ResponseWriter, req *http.Request) {
-			fullPath := prefix + req.URL.String()
-			clientName := fmt.Sprintf("%v:%v",
-				req.Header.Get("X-Forwarded-For"), req.Header.Get("X-Forwarded-For-Port"))
-			if err := dir.CheckPasswordsFiles(w, req); err != nil {
-				if *logRequests {
-					log.Printf("%v %v at %v (useragent: %q)", clientName, err, fullPath, req.UserAgent())
+		handler = http.HandlerFunc(
+			func(w http.ResponseWriter, req *http.Request) {
+				fullPath := prefix + req.URL.String()
+				clientName := fmt.Sprintf("%v:%v",
+					req.Header.Get("X-Forwarded-For"),
+					req.Header.Get("X-Forwarded-For-Port"))
+
+				if err := dir.CheckPasswordsFiles(w, req); err != nil {
+					log.Printf("%v %v at %v (useragent: %q)",
+						clientName, err, fullPath, req.UserAgent())
+					return // Auth failed!
 				}
-				return // Auth failed!
-			}
-			if *logRequests {
-				w = tools.NewSizeTrackerHTTPResponseWriter(w)
-			}
-			fileServer.ServeHTTP(w, req)
-			if *logRequests {
-				size := w.(tools.SizeTrackerHTTPResponseWriter).BytesRead()
+				sw := tools.NewSizeTrackerHTTPResponseWriter(w)
+				fileServer.ServeHTTP(sw, req)
 				log.Printf("%v requested and was served %v (%v bytes) useragent: %q",
-					clientName, fullPath, size, req.UserAgent())
-			}
-		},
-	)))
+					clientName, fullPath, sw.BytesRead(), req.UserAgent())
+			})
+	}
+	http.Handle(servePath, http.StripPrefix(prefix, handler))
 
 	// Test if we can open the files, http.FileServer doesn't log anything helpful
 	if err := dir.TestOpen("/"); err != nil {
 		log.Print("WARNING: Failed to open and stat web_root directory, we probably can't serve anything. Error: ", err)
 	}
 
-	tools.RunHTTPServerTLS(lease.Port, tlsConf, quit)
-	log.Print("Goodbye.")
+	tools.HTTPServer(ctx.Done(), reg.Lease.Port, reg.TLSConfig, nil)
 }
 
 // The -hash_pasword utility
@@ -106,7 +118,8 @@ func hashPassword(string) error {
 	fmt.Fprintf(os.Stderr,
 		"After you hash your password, add a line to %v in the format username:password_hash.\n",
 		tools.PasswordsFile)
-	fmt.Fprintf(os.Stderr, "Type your password, prints unmasked, then press enter: ")
+	fmt.Fprintf(os.Stderr,
+		"Type your password, prints unmasked, then press enter: ")
 	password, err := bufio.NewReader(os.Stdin).ReadString('\n')
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Failed to read password:", err)

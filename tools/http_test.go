@@ -1,11 +1,71 @@
 package tools_test
 
 import (
+	"context"
+	"crypto/tls"
+	"errors"
 	"log"
 	"net/http"
+	"time"
 
 	"ask.systems/daemon/tools"
 )
+
+// Shows the usual way of using HTTPServer to make an https cert
+//
+// For a more realistic usage example check the package example of
+// [ask.systems/daemon/portal/gate].
+//
+// See also: [ask.systems/daemon/portal/gate.AutoRegister] and
+// [tools.AutorenewSelfSignedCertificate]
+func ExampleHTTPServer_normal() {
+	ctx, stop := context.WithTimeout(context.Background(), 30*time.Second)
+	defer stop()
+	var cert *tls.Config // get this with gate.AutoRegister
+	err := tools.HTTPServer(ctx.Done(), 8080, cert, nil)
+	if err != nil && !errors.Is(err, http.ErrServerClosed) {
+		log.Print("Server failed:", err)
+	}
+}
+
+func ExampleHTTPServer_onlyHTTP() {
+	ctx, stop := context.WithTimeout(context.Background(), 30*time.Second)
+	defer stop()
+	err := tools.HTTPServer(ctx.Done(), 8080, nil, &tools.HTTPServerOptions{
+		Server: &http.Server{Handler: tools.RedirectToHTTPS{}},
+	})
+	if err != nil && !errors.Is(err, http.ErrServerClosed) {
+		log.Print("Server failed:", err)
+	}
+}
+
+func ExampleHTTPServer_quitChan() {
+	quit := make(chan struct{})
+	go func() {
+		t := time.NewTimer(30 * time.Second)
+		defer t.Stop()
+		select {
+		case <-t.C:
+			close(quit)
+		case <-quit:
+		}
+	}()
+	err := tools.HTTPServer(quit, 8080, nil, nil)
+	if err != nil && !errors.Is(err, http.ErrServerClosed) {
+		log.Print("Server failed:", err)
+	}
+}
+
+func ExampleHTTPServer_turnOffLogging() {
+	ctx, stop := context.WithTimeout(context.Background(), 30*time.Second)
+	defer stop()
+	err := tools.HTTPServer(ctx.Done(), 8080, nil, &tools.HTTPServerOptions{
+		Quiet: true,
+	})
+	if err != nil && !errors.Is(err, http.ErrServerClosed) {
+		log.Print("Server failed:", err)
+	}
+}
 
 func ExampleRedirectToHTTPS() {
 	// Serve an encrypted greeting

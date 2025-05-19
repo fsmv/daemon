@@ -7,9 +7,9 @@ provides -version and -syslog when you include it.
 Common features:
 
   - Run a web server with graceful shutdown when the quit channel is closed in
-    one function call. Prefer [RunHTTPServerTLS].
+    one function call. Prefer [HTTPServer].
   - Easily setup standard signal handlers to close your quit channel with
-    [CloseOnQuitSignals]
+    [ContextWithQuitSignals] and [CloseOnQuitSignals]
   - Generate random tokens or secret URL paths with [RandomString]
   - Authenticate users via HTTP basic auth with [BasicAuthHandler]
   - [SecureHTTPDir] which is a way to use [http.FileServer] and not serve
@@ -44,6 +44,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"log"
 	"net/http"
@@ -61,71 +62,116 @@ import (
 // [SecureHTTPDir.CheckPasswordsFiles]
 var PasswordsFile = ".passwords"
 
-func strSliceContains(slice []string, key string) bool {
-	for _, val := range slice {
-		if val == key {
-			return true
+// The options for [HTTPServer]
+type HTTPServerOptions struct {
+	// Configure extra server options here
+	// Server.Addr and Server.TLSConfig will be overwritten by [HTTPServer]
+	Server *http.Server
+	// If true don't do any extra logging
+	Quiet bool
+	// The amount of time to wait for connections to close during shutdown before
+	// force quitting
+	ShutdownTimeout time.Duration
+}
+
+// Start an HTTPS (or HTTP) server on the specified port, shutdown when quit is
+// closed, and block until the server is gracefully stopped.
+//
+// If config is not nil, do HTTPS, otherwise do HTTP. opt is optional.
+//
+// You can set up advanced options with [tools.HTTPServerOptions.Server] but
+// opt.Server.Addr and opt.Server.TLSConfig will be overwritten with the args.
+//
+// If you use [context.Context] you can pass the ctx.Done() for quit; you can
+// also pass nil for quit to never shutdown.
+//
+// If the server crashes, returns the error from [http.ListenAndServeTLS]. If
+// quit is closed, returns the error from [http.Server.Shutdown]
+func HTTPServer(quit <-chan struct{}, port uint32, cert *tls.Config, opt *HTTPServerOptions) error {
+	if opt == nil {
+		opt = &HTTPServerOptions{
+			ShutdownTimeout: 10 * time.Second,
 		}
 	}
-	return false
+	if opt.Server == nil {
+		opt.Server = &http.Server{}
+	}
+
+	opt.Server.Addr = ":" + strconv.Itoa(int(port))
+	opt.Server.TLSConfig = cert
+
+	if opt.Quiet && opt.Server.ErrorLog == nil {
+		opt.Server.ErrorLog = log.New(io.Discard, "", 0)
+	}
+
+	var proto string
+	if opt.Server.TLSConfig != nil {
+		proto = "HTTPS"
+	} else {
+		proto = "HTTP"
+	}
+
+	exitChan := make(chan error, 1)
+	go func() {
+		if !opt.Quiet {
+			log.Printf("Starting %v server on port %d...", proto, port)
+		}
+		var err error
+		if opt.Server.TLSConfig != nil {
+			err = opt.Server.ListenAndServeTLS("", "")
+		} else {
+			err = opt.Server.ListenAndServe()
+		}
+		if !opt.Quiet && err != nil && errors.Is(err, http.ErrServerClosed) {
+			log.Printf("%v server (port %d) died: %v", proto, port, err)
+		}
+		exitChan <- err
+		close(exitChan)
+	}()
+
+	select {
+	case <-quit:
+		if !opt.Quiet {
+			log.Printf("Shutting down %v server on port %d...", proto, port)
+			log.Printf("Waiting up to %v for %v connections to close on port %d.", opt.ShutdownTimeout, proto, port)
+		}
+		ttl, ttl_cancel := context.WithTimeout(context.Background(), opt.ShutdownTimeout)
+		err := opt.Server.Shutdown(ttl)
+		ttl_cancel()
+		if !opt.Quiet {
+			log.Printf("%v server (port %d) exit status: %v", proto, port, err)
+		}
+		<-exitChan
+		return err
+	case err := <-exitChan:
+		return err
+	}
 }
 
 // Starts an HTTPS server on the specified port using the TLS config and block
 // until the quit channel is closed and graceful shutdown has finished.
-func RunHTTPServerTLS(port uint32, config *tls.Config, quit chan struct{}) {
-	log.Printf("Starting HTTPS server on port %d...", port)
-	var srv http.Server
-
-	// Support HTTP/2. See https://pkg.go.dev/net/http#Serve
-	// > HTTP/2 support is only enabled if ... configured with "h2" in the TLS Config.NextProtos.
-	if !strSliceContains(config.NextProtos, "h2") {
-		config.NextProtos = append(config.NextProtos, "h2")
+//
+// Deprecated: Use [HTTPServer] instead, it's more general. The only thing this
+// does that [HTTPServer] can't do is this function closes quit when the server
+// crashes.
+func RunHTTPServerTLS(port uint32, cert *tls.Config, quit chan struct{}) {
+	err := HTTPServer(quit, port, cert, nil)
+	if errors.Is(err, http.ErrServerClosed) {
+		close(quit)
 	}
-
-	go func() {
-		listener, err := tls.Listen("tcp", ":"+strconv.Itoa(int(port)), config)
-		if err != nil {
-			close(quit)
-			log.Print("Failed to start listener for TLS server: ", err)
-			return
-		}
-		err = srv.Serve(listener)
-		if err != nil && err != http.ErrServerClosed {
-			close(quit)
-			log.Print("TLS Server died: ", err)
-		}
-	}()
-
-	<-quit
-	log.Printf("Shutting down HTTPS Server on port %d...", port)
-	log.Printf("Waiting up to 10 seconds for HTTPS connections to close on port %d.", port)
-	ttl, ttl_cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	code := srv.Shutdown(ttl)
-	ttl_cancel()
-	log.Printf("HTTPS server (port %d) exit status: %v", port, code)
 }
 
 // Starts an HTTP server on the specified port and block until the quit channel
 // is closed and graceful shutdown has finished.
+//
+// Deprecated: Use [HTTPServer] instead, it's more general. The only thing this
+// does that [HTTPServer] can't do is this function closes quit when the server
+// crashes.
 func RunHTTPServer(port uint32, quit chan struct{}) {
-	log.Printf("Starting HTTP server on port %d...", port)
-	var srv http.Server
-	srv.Addr = ":" + strconv.Itoa(int(port))
-	go func() {
-		err := srv.ListenAndServe()
-		if err != nil && err != http.ErrServerClosed {
-			close(quit)
-			log.Fatal("Server died:", err)
-		}
-	}()
-
-	<-quit
-	log.Print("Shutting down HTTP Server...")
-	log.Print("Waiting up to 10 seconds for HTTP connections to close.")
-	ttl, ttl_cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	code := srv.Shutdown(ttl)
-	ttl_cancel()
-	log.Print("HTTP server exit status:", code)
+	err := HTTPServer(quit, port, nil, nil)
+	if errors.Is(err, http.ErrServerClosed) {
+		close(quit)
+	}
 }
 
 // Wraps another [http.Handler] and only calls the wrapped handler if BasicAuth
@@ -520,6 +566,8 @@ func (r RedirectToHTTPS) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	http.Redirect(w, req, url.String(), http.StatusSeeOther)
 }
 
+// Wraps an [http.ResponseWriter] and tracks the total number of bytes written.
+// Call [SizeTrackerHTTPResponseWriter.BytesRead] to get the current count.
 type SizeTrackerHTTPResponseWriter struct {
 	http.ResponseWriter
 	bytesRead *atomic.Uint64
@@ -544,6 +592,7 @@ func (w SizeTrackerHTTPResponseWriter) Flush() {
 	}
 }
 
+// Returns the total bytes read by the client
 func (w SizeTrackerHTTPResponseWriter) BytesRead() uint64 {
 	return w.bytesRead.Load()
 }
