@@ -23,10 +23,10 @@ jobs:
         go-version-file: go.mod
 
     - name: Build daemon
-      run: go build -v ./...
+      run: go build -race -v ./...
 
     - name: Run daemon unit tests
-      run: go test -v ./...
+      run: go test -race -v ./...
 
     - name: Test demo mode
       shell: bash
@@ -39,7 +39,7 @@ jobs:
           fi
         }
         if [ "$RUNNER_OS" = "Windows" ]; then BIN=daemon.exe; else BIN=daemon; fi
-        (go build -o $BIN -v ./ && (mkdir -p quicktest && mv $BIN quicktest/)) || exit 1
+        (go build -o $BIN -race -v ./ && (mkdir -p quicktest && mv $BIN quicktest/)) || exit 1
         cd quicktest
         echo "password" | ./$BIN spawn >logs.txt 2>&1 & sleep 5; endtest $BIN
         cat logs.txt
@@ -74,7 +74,7 @@ jobs:
     - name: Install portal
       run: |
         cd ./daemon/portal
-        go install -v
+        go install -race -v
 
     - name: Install Pebble ACME Server
       run: |
@@ -153,7 +153,7 @@ jobs:
     - name: Install daemon
       run: |
         cd ./daemon
-        go install -v
+        go install -race -v
 
     - name: Install and Run Pebble ACME Server
       run: |
