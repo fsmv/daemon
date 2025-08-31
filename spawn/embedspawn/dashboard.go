@@ -3,6 +3,7 @@ package embedspawn
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"embed"
 	"fmt"
 	"html/template"
@@ -10,6 +11,7 @@ import (
 	"net/http"
 	"runtime/debug"
 	"sort"
+	"sync"
 	"time"
 
 	_ "ask.systems/daemon/portal/flags"
@@ -121,23 +123,34 @@ func (d *dashboard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func startDashboard(children *children, adminAuth *tools.BasicAuthHandler, quit chan struct{}) (dashboardQuit chan struct{}, err error) {
+func startDashboard(ctx context.Context, children *children, adminAuth *tools.BasicAuthHandler, wg *sync.WaitGroup, quit chan struct{}) (dashboardQuit chan struct{}, err error) {
 	pattern := *dashboardUrlFlag
 	_, dashboardUrl = gate.ParsePattern(pattern)
 	logsUrl = dashboardUrl + "logs"
 
-	// TODO: update this to use the new API
+	// TODO: maybe switch the whole thing to context so I can just pass one in
+	// Most of the stuff I can just switch to receiver only chans.
+	// Although I think I might still have this cancel func here anyway.
+	ctx, stopDashboard := context.WithCancel(context.Background())
 
+	// TODO: I think I could delete the dashboardQuit chan and just use the
+	// context but I would have to change the return value to a func
+	//
 	// If the main  quit closes, shut down the dashboard. But, if the dashboard
 	// crashes don't shut down the main process.
 	dashboardQuit = make(chan struct{})
-	lease, tlsConf, err := gate.StartTLSRegistration(&gate.RegisterRequest{
+	reg, wait, err := gate.AutoRegister(ctx, &gate.RegisterRequest{
 		Pattern: pattern,
-	}, dashboardQuit)
+	})
 	if err != nil {
 		close(dashboardQuit)
 		return dashboardQuit, err
 	}
+	wg.Add(1)
+	go func() {
+		<-wait
+		wg.Done()
+	}()
 
 	templates := template.New("templates")
 	templates = templates.Funcs(map[string]interface{}{
@@ -158,8 +171,13 @@ func startDashboard(children *children, adminAuth *tools.BasicAuthHandler, quit 
 			close(dashboardQuit)
 		case <-dashboardQuit: // If it gets closed, don't close it again
 		}
+		stopDashboard()
 	}()
-	go tools.RunHTTPServerTLS(lease.Port, tlsConf, dashboardQuit)
+	wg.Add(1)
+	go func() {
+		tools.HTTPServer(dashboardQuit, reg.Lease.Port, reg.TLSConfig, nil)
+		wg.Done()
+	}()
 	return dashboardQuit, nil
 }
 

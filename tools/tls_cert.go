@@ -16,6 +16,38 @@ import (
 	"time"
 )
 
+// TODO: switch to
+//func AutoTLSConf(<-chan *Lease) *tls.Config
+// Actually if this is in tools it should be
+//func AutoTLSConf(<-chan *tls.Certificate) *tls.Config
+
+// TODO: maybe this should stay a private API until I figure out client auth
+// I need to have an auto-updating ClientCAs field too.
+func AutoTLSConfig(cert *tls.Certificate) (conf *tls.Config, newCert func(*tls.Certificate)) {
+	certCache := &atomic.Value{}
+	certCache.Store(cert)
+
+	newCert = func(c *tls.Certificate) {
+		certCache.Store(c)
+	}
+	conf = &tls.Config{
+		GetCertificate: func(hi *tls.ClientHelloInfo) (*tls.Certificate, error) {
+			cert, ok := certCache.Load().(*tls.Certificate)
+			if !ok || cert == nil {
+				return nil, errors.New("Internal error: cannot load certificate")
+			}
+			if hi != nil {
+				if err := hi.SupportsCertificate(cert); err != nil {
+					return nil, err
+				}
+			}
+			return cert, nil
+		},
+	}
+
+	return
+}
+
 // Generate a new self signed certificate for the given hostname with the given
 // TTL expiration time, and keep it renewed in the background until the quit
 // channel is closed.
@@ -29,6 +61,7 @@ import (
 //
 // The returned config only has [tls.Config.GetCertificate] set, and it will
 // return the latest certificate for any arguments (including nil).
+// TODO: use AutoTLSConf
 func AutorenewSelfSignedCertificate(hostname string, TTL time.Duration, isCA bool, onRenew func(*tls.Certificate), quit <-chan struct{}) (*tls.Config, error) {
 	cache := &atomic.Value{}
 	newCert, err := GenerateSelfSignedCertificate(hostname, time.Now().Add(TTL), isCA)

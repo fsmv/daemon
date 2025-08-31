@@ -70,7 +70,7 @@ func Run(ctx context.Context, flags *flag.FlagSet, args []string) {
 		idx := i
 		wg.Add(1)
 		go func() {
-			err := client.AutoRegister(ctx, registration, nil)
+			err := client.AutoRegisterChan(ctx, registration, nil)
 			wg.Done()
 			if err != nil && !errors.Is(err, context.Cause(ctx)) {
 				log.Printf("Error for registration #%v: %v", idx, err)

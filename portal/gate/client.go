@@ -44,8 +44,6 @@ import (
 	"log"
 	"os"
 	"strings"
-	"sync"
-	"sync/atomic"
 	"time"
 
 	"ask.systems/daemon/tools"
@@ -90,7 +88,16 @@ var (
 
 func renewDuration(deadline time.Time) time.Duration {
 	remainingTime := time.Until(deadline)
-	return remainingTime - remainingTime/100
+	buffer := remainingTime / 10
+	// For really short TTLs, used in tests, we need to have a minimum buffer time
+	// so that we don't detect an expired cert.
+	if buffer < time.Second {
+		buffer = time.Second
+		if buffer >= remainingTime {
+			return 0
+		}
+	}
+	return remainingTime - buffer
 }
 
 // Sets up [Address] and [Token] based on optional
@@ -112,7 +119,7 @@ func ResolveFlags() error {
 		// Don't overwrite the default flag value if it's empty.
 		// But if the user didn't include the flags library we allow setting to "".
 		// They might have set *Address to "" but that's their problem.
-		if envAddr != "" || Address == nil {
+		if envAddr != "" && Address == nil {
 			Address = &envAddr
 		}
 	}
@@ -133,6 +140,12 @@ func ResolveFlags() error {
 	return nil
 }
 
+// TODO: Can we have this?
+//func AutoTLSConf(<-chan *Lease) *tls.Config
+
+// TODO: decide on context vs quit chan for AutoRegister
+// We are kind of inconsistent right now because tools.HTTPServer uses quit chan
+
 // Start a new registration with portal and keep it renewed.
 //
 // Uses the [DefaultClient] and calls [Client.AutoRegister] see the
@@ -145,25 +158,52 @@ func ResolveFlags() error {
 //
 // Returns the result from the initial registration before any renewals.
 // The error return is always the same as [gate.AutoRegisterResult.Error].
-func AutoRegister(ctx context.Context, request *RegisterRequest, wg *sync.WaitGroup) (*AutoRegisterResult, error) {
+//
+// TODO: why not just
+// func AutoRegister(ctx context.Context, request *RegisterRequest) (<-chan *Lease, error) {
+//   - Hmm if we pass the lease chan to AutoTLSConf then we can't also wait on
+//     it.
+//   - I could make a helper to duplicate a chan but it would have to use
+//     generics
+func AutoRegister(ctx context.Context, request *RegisterRequest) (ret *AutoRegisterResult, wait <-chan struct{}, err error) {
+	done := make(chan struct{})
 	c, err := DefaultClient()
 	if err != nil {
-		return &AutoRegisterResult{Error: err}, err
+		close(done)
+		return nil, done, err
 	}
-	resultChan := make(chan *AutoRegisterResult, 0)
+
+	// Note: we can't just use c.AutoRegister because this function needs to close
+	// the client at the end while that function does not.
+	//
+	// If we called c.AutoRegister we would be able to call c.Close() after the
+	// wait chan closes, but then there would be no way for the user to wait until
+	// after the close is complete. To make it work we would need a second done
+	// channel that this function acutally returns which is only closed by our
+	// internal goroutine after the c.AutoRegister done chan closes and we call
+	// c.Close(); but that doesn't seem worth the code reuse.
+
+	errChan := make(chan error, 1)
+	resultChan := make(chan *AutoRegisterResult, 1)
 	go func() {
-		if wg != nil {
-			wg.Add(1)
-		}
-		c.AutoRegister(ctx, request, resultChan)
+		errChan <- c.AutoRegisterChan(ctx, request, resultChan)
 		c.Close()
-		if wg != nil {
-			wg.Done()
-		}
+		close(errChan)
 	}()
 
-	result := <-resultChan
-	return result, result.Error
+	if ret, ok := <-resultChan; ok {
+		// Close done when c.AutoRegister exits and closes resultChan
+		go func() {
+			for range resultChan {
+			}
+			close(done)
+		}()
+		return ret, done, nil
+	} else {
+		err := <-errChan
+		close(done)
+		return nil, done, err
+	}
 }
 
 // Make a connection to the portal RPC service and send the registration
@@ -174,23 +214,15 @@ func AutoRegister(ctx context.Context, request *RegisterRequest, wg *sync.WaitGr
 //
 // Deprecated: Use [AutoRegister] instead
 func StartRegistration(request *RegisterRequest, quit <-chan struct{}) (*Lease, error) {
-	c, err := DefaultClient()
-	if err != nil {
-		return nil, err
-	}
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
 		<-quit
 		cancel()
-		c.Close()
 	}()
 
 	request.CertificateRequest = []byte{} // force no SSL cert signing
-	resultChan := make(chan *AutoRegisterResult, 0)
-	go c.AutoRegister(ctx, request, resultChan)
-
-	result := <-resultChan
-	return result.Lease, result.Error
+	result, _, err := AutoRegister(ctx, request)
+	return result.Lease, err
 }
 
 // The same as [StartRegistration] but call [log.Fatal] on error
@@ -229,21 +261,14 @@ func MustStartTLSRegistration(request *RegisterRequest, quit <-chan struct{}) (*
 //
 // Deprecated: Use [AutoRegister] instead
 func StartTLSRegistration(request *RegisterRequest, quit <-chan struct{}) (*Lease, *tls.Config, error) {
-	c, err := DefaultClient()
-	if err != nil {
-		return nil, nil, err
-	}
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
 		<-quit
 		cancel()
-		c.Close()
 	}()
-	resultChan := make(chan *AutoRegisterResult, 0)
-	go c.AutoRegister(ctx, request, resultChan)
 
-	result := <-resultChan
-	return result.Lease, result.TLSConfig, result.Error
+	result, _, err := AutoRegister(ctx, request)
+	return result.Lease, result.TLSConfig, err
 }
 
 // Parse a pattern in the syntax accepted by portal separating the hostname
@@ -312,6 +337,13 @@ func (c *Client) Close() {
 	}
 }
 
+// TODO: can I delete this?
+//
+// - client users could call newCert from tools on new lease
+// - main AutoRegister returns port/lease, conf, wait, err (thats a lot)
+// - no more magic API flexibility
+// - the unchanging conf pointer in channel is weird
+//
 // The result type for [AutoRegister] and [Client.AutoRegister]
 //
 // See also: [gate.RegisterRequest.CertificateRequest].
@@ -321,10 +353,33 @@ type AutoRegisterResult struct {
 	// Will only be set if request.CertificateRequest was nil when
 	// calling AutoRegister. In that case this config will automatically update
 	// with the renewed certificate from portal.
+	//
+	// Will always be the same pointer after the first result.
 	TLSConfig *tls.Config
-	// The error status of the initial registration before moving on to auto-renew
-	// from AutoRegister. If set the other fields are nil.
-	Error error
+}
+
+func (c *Client) AutoRegister(ctx context.Context, request *RegisterRequest) (ret *AutoRegisterResult, wait <-chan struct{}, err error) {
+	errChan := make(chan error, 1)
+	resultChan := make(chan *AutoRegisterResult, 1)
+	go func() {
+		errChan <- c.AutoRegisterChan(ctx, request, resultChan)
+		close(errChan)
+	}()
+
+	done := make(chan struct{})
+	if ret, ok := <-resultChan; ok {
+		// Close done when c.AutoRegister exits and closes resultChan
+		go func() {
+			for range resultChan {
+			}
+			close(done)
+		}()
+		return ret, done, nil
+	} else {
+		err := <-errChan
+		close(done)
+		return nil, done, err
+	}
 }
 
 // Starts a new registration with portal and keeps it renewed. Blocks until the
@@ -342,17 +397,17 @@ type AutoRegisterResult struct {
 //
 // If non-nil, result will be blocking written to after the initial
 // registration attempt is done, and then non-blocking written to for each
-// renewal. result will be closed when this function returns.
+// renewal. It will be closed when AutoRegister returns.
 //
 // When you read the first result, if [gate.AutoRegisterResult.Error] is non-nil
 // then this function will shortly return the same error, otherwise this
 // function will continue to renew the registration, eventually returning with
 // the error that caused it to stop.
-func (c *Client) AutoRegister(ctx context.Context, request *RegisterRequest, result chan<- *AutoRegisterResult) error {
+// TODO: better name
+func (c *Client) AutoRegisterChan(ctx context.Context, request *RegisterRequest, result chan<- *AutoRegisterResult) error {
 	if result != nil {
 		defer close(result)
 	}
-
 	// Add a certificate request if one isn't already set
 	var privateKey crypto.Signer
 	if request.CertificateRequest == nil {
@@ -360,17 +415,11 @@ func (c *Client) AutoRegister(ctx context.Context, request *RegisterRequest, res
 		hostResp, err := c.RPC.MyHostname(ctx, &emptypb.Empty{})
 		if err != nil {
 			err = fmt.Errorf("Error from MyHostname: %w", err)
-			if result != nil {
-				result <- &AutoRegisterResult{Error: err}
-			}
 			return err
 		}
 		request.CertificateRequest, privateKey, err = tools.GenerateCertificateRequest(hostResp.Hostname)
 		if err != nil {
 			err = fmt.Errorf("Error generating cert request: %w", err)
-			if result != nil {
-				result <- &AutoRegisterResult{Error: err}
-			}
 			return err
 		}
 	}
@@ -379,9 +428,6 @@ func (c *Client) AutoRegister(ctx context.Context, request *RegisterRequest, res
 	lease, err := c.RPC.Register(ctx, request)
 	if err != nil {
 		err = fmt.Errorf("Failed to obtain lease from portal: %w", err)
-		if result != nil {
-			result <- &AutoRegisterResult{Error: err}
-		}
 		return err
 	}
 	log.Printf("Obtained lease for %#v, port: %v, ttl: %v",
@@ -393,48 +439,45 @@ func (c *Client) AutoRegister(ctx context.Context, request *RegisterRequest, res
 		cert, err := tools.TLSCertificateFromBytes([][]byte{lease.Certificate}, privateKey)
 		if err != nil {
 			err := fmt.Errorf("Failed to parse certificate for lease %#v: %w", lease.Pattern, err)
-			if result != nil {
-				result <- &AutoRegisterResult{Error: err}
-			}
 			return err
 		}
 
-		certCache := &atomic.Value{}
-		certCache.Store(cert)
-		updateConf = func(certBytes []byte) {
-			newCert, err := tools.TLSCertificateFromBytes([][]byte{certBytes}, privateKey)
-			if err != nil {
-				log.Printf("Failed to parse renewed certificate from portal for lease %#v: %v",
-					lease.Pattern, err)
-			} else {
-				certCache.Store(newCert)
-			}
-		}
+		// Needs to be updated on renew, when newCert is called
+		// TODO: support reading the portal CA cert for client auth
+		//caCert := &tls.Certificate{
+		//	Certificate: lease.Certificate[1:],
+		//}
+
 		// TODO: We should do client auth so that nobody but the portal server can
 		// send requests directly to the backend. This completes a secure chain for
 		// the X-Forwarded header values. These headers may be important for IP based
 		// blocking and logging or even generating server side URLs.
-		conf = &tls.Config{
-			GetCertificate: func(hi *tls.ClientHelloInfo) (*tls.Certificate, error) {
-				cert, ok := certCache.Load().(*tls.Certificate)
-				if !ok || cert == nil {
-					log.Print("Failed to load certificate!")
-					return nil, errors.New("Internal error: cannot load certificate")
-				}
-				if hi != nil {
-					if err := hi.SupportsCertificate(cert); err != nil {
-						return nil, err
-					}
-				}
-				return cert, nil
-			},
+		//
+		// - Set conf.ClientAuth to tls.RequireAndVerifyClientCert
+		// - Set conf.ClientCAs to the portal cert (and make sure to keep it up to date)
+		//   - It would be nice to have some kind of push update system because if
+		//     we use a timer requests wouldn't be valid anymore when the old cert
+		//     expires
+		//   - Maybe portal can send two client certs the old and the new and we
+		//     update that way?
+		// - on portal we need to set conf.GetClientCertificate
+		var newCert func(*tls.Certificate)
+		conf, newCert = tools.AutoTLSConfig(cert)
+		// TODO: make the other function take newCert directly maybe?
+		updateConf = func(certBytes []byte) {
+			c, err := tools.TLSCertificateFromBytes([][]byte{certBytes}, privateKey)
+			if err != nil {
+				log.Printf("Failed to parse renewed certificate from portal for lease %#v: %v",
+					lease.Pattern, err)
+			} else {
+				newCert(c)
+			}
 		}
 	}
 
 	initResult := &AutoRegisterResult{
 		Lease:     lease,
 		TLSConfig: conf,
-		Error:     nil,
 	}
 	if result != nil {
 		result <- initResult

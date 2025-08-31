@@ -47,6 +47,7 @@ import (
 	"io"
 	"io/fs"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"path"
@@ -72,6 +73,8 @@ type HTTPServerOptions struct {
 	// The amount of time to wait for connections to close during shutdown before
 	// force quitting
 	ShutdownTimeout time.Duration
+
+	Listener net.Listener
 }
 
 // Start an HTTPS (or HTTP) server on the specified port, shutdown when quit is
@@ -87,7 +90,12 @@ type HTTPServerOptions struct {
 //
 // If the server crashes, returns the error from [http.ListenAndServeTLS]. If
 // quit is closed, returns the error from [http.Server.Shutdown]
-func HTTPServer(quit <-chan struct{}, port uint32, cert *tls.Config, opt *HTTPServerOptions) error {
+//
+// Note: port is a uint32 because the most common use will be setting it to
+// [gate.Lease.Port], and protos don't have a uint16 type.
+//
+// TODO: should I just make quit a context?
+func HTTPServer(quit <-chan struct{}, port uint32, conf *tls.Config, opt *HTTPServerOptions) error {
 	if opt == nil {
 		opt = &HTTPServerOptions{
 			ShutdownTimeout: 10 * time.Second,
@@ -98,7 +106,7 @@ func HTTPServer(quit <-chan struct{}, port uint32, cert *tls.Config, opt *HTTPSe
 	}
 
 	opt.Server.Addr = ":" + strconv.Itoa(int(port))
-	opt.Server.TLSConfig = cert
+	opt.Server.TLSConfig = conf
 
 	if opt.Quiet && opt.Server.ErrorLog == nil {
 		opt.Server.ErrorLog = log.New(io.Discard, "", 0)
@@ -117,10 +125,18 @@ func HTTPServer(quit <-chan struct{}, port uint32, cert *tls.Config, opt *HTTPSe
 			log.Printf("Starting %v server on port %d...", proto, port)
 		}
 		var err error
-		if opt.Server.TLSConfig != nil {
-			err = opt.Server.ListenAndServeTLS("", "")
+		if opt.Listener != nil {
+			if opt.Server.TLSConfig != nil {
+				err = opt.Server.ServeTLS(opt.Listener, "", "")
+			} else {
+				err = opt.Server.Serve(opt.Listener)
+			}
 		} else {
-			err = opt.Server.ListenAndServe()
+			if opt.Server.TLSConfig != nil {
+				err = opt.Server.ListenAndServeTLS("", "")
+			} else {
+				err = opt.Server.ListenAndServe()
+			}
 		}
 		if !opt.Quiet && err != nil && errors.Is(err, http.ErrServerClosed) {
 			log.Printf("%v server (port %d) died: %v", proto, port, err)

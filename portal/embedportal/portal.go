@@ -27,8 +27,9 @@ import (
 //go:generate protoc -I ../ ../embedportal/storage.proto --go_out ../ --go_opt=paths=source_relative
 //go:generate protoc -I ../ ../gate/service.proto --go_out ../ --go-grpc_out ../ --go_opt=paths=source_relative --go-grpc_opt=paths=source_relative
 
-const (
-	leaseTTL         = 24 * time.Hour
+var (
+	LeaseTTL         = 24 * time.Hour
+	leaseTTL         = LeaseTTL // TODO
 	ttlRandomStagger = 0.05
 )
 
@@ -36,6 +37,7 @@ var kACMEAddress string
 
 // TODO: actually use ctx
 func Run(ctx context.Context, flags *flag.FlagSet, args []string) {
+	leaseTTL = LeaseTTL // TODO
 	flags.Usage = func() {
 		fmt.Fprintf(flags.Output(), ""+
 			"Usage: %s [flags]\n"+
@@ -63,7 +65,7 @@ func Run(ctx context.Context, flags *flag.FlagSet, args []string) {
 			flags.Name(), flags.Name())
 		flags.PrintDefaults()
 	}
-	rpcPort := flags.Uint("rpc_port", 2048, ""+
+	rpcPort := flags.Int("rpc_port", 2048, ""+
 		"The port to bind for the portal RPC server that clients use to register\n"+
 		"with. You shouldn't need to change this unless there's a conflict or you\n"+
 		"run multiple instances of portal.")
@@ -198,7 +200,7 @@ func Run(ctx context.Context, flags *flag.FlagSet, args []string) {
 	// Starts serving the rpc server port.
 	// First loads the registrations from the state into the two proxy servers.
 	_, err = startRPCServer(leasor,
-		tcpProxy, httpProxy, uint16(*rpcPort),
+		tcpProxy, httpProxy, *rpcPort,
 		rootCert, state, quit)
 	if err != nil {
 		log.Fatal("Failed to start RPC server:", err)

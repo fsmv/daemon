@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"runtime/debug"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -192,11 +193,12 @@ func Run(ctx context.Context, flagset *flag.FlagSet, args []string) {
 	// Give portal time to start up if portal was the only child to start
 	time.Sleep(*spawningDelay)
 
+	wg := &sync.WaitGroup{} // TODO: pass this to everything
 	adminAuth, err := setupDashboardAuth(*adminLogins, quit)
 	if err != nil {
 		log.Print("Failed to setup dashboard auth, not starting the dashboard. Error: ", err)
 	} else {
-		if _, err := startDashboard(children, adminAuth, quit); err != nil {
+		if _, err := startDashboard(ctx, children, adminAuth, wg, quit); err != nil {
 			// TODO: retry it? Also check the dashboardQuit signal for retries?
 			log.Print("Failed to start dashboard: ", err)
 		} else if usedExampleConf {
@@ -222,6 +224,7 @@ func Run(ctx context.Context, flagset *flag.FlagSet, args []string) {
 			children.ReportDown(proc.Pid, shutdownErr)
 		}
 	}
+	wg.Wait()
 	log.Print("Goodbye.")
 }
 

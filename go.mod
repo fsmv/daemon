@@ -1,12 +1,14 @@
 module ask.systems/daemon
 
-go 1.20
+go 1.21.13
+
+toolchain go1.24.0
 
 require (
 	golang.org/x/crypto v0.33.0
 	golang.org/x/sys v0.30.0
 	google.golang.org/grpc v1.64.1
-	google.golang.org/protobuf v1.34.2
+	google.golang.org/protobuf v1.36.5
 )
 
 require (

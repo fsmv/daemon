@@ -18,11 +18,10 @@ import (
 func ExampleAutoRegister() {
 	ctx, stop := context.WithTimeout(context.Background(), 30*time.Second)
 	defer stop()
-	wg := &sync.WaitGroup{}
 
-	reg, err := gate.AutoRegister(ctx, &gate.RegisterRequest{
+	reg, wait, err := gate.AutoRegister(ctx, &gate.RegisterRequest{
 		Pattern: "/test/",
-	}, wg)
+	})
 	if err == nil {
 		log.Printf("Obtained lease for port %v!", reg.Lease.Port)
 	} else {
@@ -30,7 +29,7 @@ func ExampleAutoRegister() {
 		log.Print("Will retry")
 	}
 
-	wg.Wait() // wait for the AutoRegister background goroutine to stop
+	<-wait // wait for the AutoRegister background goroutine to stop
 }
 
 // Demonstrates using [DefaultClient] to obtain a client and
@@ -78,10 +77,10 @@ func ExampleClient_autoRegister() {
 	wg := &sync.WaitGroup{}
 	for i := 0; i < 5; i++ {
 		idx := i
+		wg.Add(1) // It's important to do this outside of the goroutine, otherwise the scheduler may not run the goroutine at all.
 		go func() {
-			wg.Add(1)
 			defer wg.Done()
-			err := client.AutoRegister(ctx, &gate.RegisterRequest{
+			err := client.AutoRegisterChan(ctx, &gate.RegisterRequest{
 				Pattern:   "/",
 				FixedPort: uint32(8080 + idx),
 			}, nil)
@@ -127,7 +126,7 @@ func ExampleClient_AutoRegister() {
 			}
 		}
 	}()
-	err = client.AutoRegister(ctx, &gate.RegisterRequest{
+	err = client.AutoRegisterChan(ctx, &gate.RegisterRequest{
 		Pattern: "/test/",
 	}, results)
 	log.Print("AutoRegister stopped:", err)

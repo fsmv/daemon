@@ -5,7 +5,6 @@ import (
 	"flag"
 	"log"
 	"net/http"
-	"sync"
 
 	_ "ask.systems/daemon/portal/flags" // -portal_addr and -portal_token
 	_ "ask.systems/daemon/tools/flags"  // for the -version and -syslog flags
@@ -18,40 +17,43 @@ var pattern = flag.String("pattern", "/hello/", "The path to register with porta
 
 func Example() {
 	flag.Parse()
+
 	// Setup graceful stopping
 	//   - Call stop() to trigger a full server graceful shutdown
 	//   - When ctrl+C or other OS quit signals are sent ctx is cancelled
 	//   - If you start other background tasks, use wg.Add(1) and wg.Done() and
 	//     exit when ctx.Done() is closed to participate in the graceful shutdown.
-	ctx, stop := context.WithCancel(context.Background())
+	ctx, stop := context.WithCancelCause(context.Background())
 	ctx = tools.ContextWithQuitSignals(ctx)
-	wg := &sync.WaitGroup{}
-	defer func() {
-		stop()
-		wg.Wait()
-		log.Print("Goodbye.")
-	}()
-
-	// Register with portal, generate a TLS cert signed by portal, and keep the
-	// registration and cert renewed in the background (until ctx is cancelled)
-	reg, err := gate.AutoRegister(ctx, &gate.RegisterRequest{
-		Pattern: *pattern,
-	}, wg)
-	if err != nil {
-		log.Fatal(err)
-	}
 
 	// Remove the optional URL prefix from the pattern (http.Handle doesn't understand it)
 	_, path := gate.ParsePattern(*pattern)
 	// Serve Hello World with standard go server functions
 	http.Handle(path, http.HandlerFunc(
 		func(w http.ResponseWriter, req *http.Request) {
+			// Gracefully shut down the server if requested
+			if req.URL.Path == "/hello/stop" {
+				stop(nil)
+			}
+
+			// Normally serve a greeting
 			w.Write([]byte("Hello World!"))
-			// portal adds these headers to tell you who sent the request to portal
+			// Log who sent a request.
+			// Portal adds these headers to tell you who sent the request to portal
 			log.Printf("Hello from %v:%v",
 				req.Header.Get("X-Forwarded-For"),
 				req.Header.Get("X-Forwarded-For-Port"))
 		}))
+
+	// Register with portal, generate a TLS cert signed by portal, and keep the
+	// registration and cert renewed in the background (until ctx is cancelled).
+	// Blocks until the first registration is done.
+	reg, waitForUnregister, err := gate.AutoRegister(ctx, &gate.RegisterRequest{
+		Pattern: *pattern,
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	// Run the server and block until ctx is cancelled and the graceful stop is
 	// done.
@@ -64,4 +66,6 @@ func Example() {
 	// goroutine and use wg.Add(1) before and wg.Done() after. You may also want
 	// to turn on Quiet mode and do your own error logging using the return error.
 	tools.HTTPServer(ctx.Done(), reg.Lease.Port, reg.TLSConfig, nil)
+	<-waitForUnregister
+	log.Print("Goodbye.")
 }

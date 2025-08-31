@@ -50,7 +50,6 @@ type httpProxy struct {
 type forwarder struct {
 	Handler   http.Handler
 	Lease     *gate.Lease
-	AdminOnly bool
 	AllowHTTP bool
 }
 

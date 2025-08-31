@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"log"
 	"net"
-	"strconv"
 	"strings"
 	"time"
 
@@ -220,7 +219,7 @@ func (s *rpcServ) Renew(ctx context.Context, lease *gate.Lease) (*gate.Lease, er
 // StartNew creates a new RPCServ and starts it
 func startRPCServer(clientLeasor *clientLeasor,
 	tcpProxy *tcpProxy, httpProxy *httpProxy,
-	port uint16, rootCert *tls.Config,
+	port int, rootCert *tls.Config,
 	state *stateManager, quit chan struct{}) (*rpcServ, error) {
 
 	s := &rpcServ{
@@ -259,7 +258,7 @@ func startRPCServer(clientLeasor *clientLeasor,
 		}),
 	)
 	gate.RegisterPortalServer(server, s)
-	l, err := net.Listen("tcp", ":"+strconv.Itoa(int(port)))
+	l, err := listenerFromPortOrFD(port)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to start listener: %v", err)
 	}

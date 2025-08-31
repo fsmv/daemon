@@ -14,7 +14,7 @@ import (
 )
 
 // How often to look through the Leases and unregister those past TTL
-const (
+var (
 	ttlCheckFreq = leaseTTL / 100
 )
 
@@ -27,8 +27,8 @@ var (
 type onCancelFunc func(*gate.Lease)
 
 type clientLeasor struct {
-	leasors    *sync.Map
-	nextLeasor *portLeasor
+	leasors    *sync.Map  // Key: string Value: *portLeasor
+	leasorPool *sync.Pool // Contains *portLeasor
 
 	startPort     uint16
 	endPort       uint16
@@ -43,8 +43,7 @@ func makeClientLeasor(startPort, endPort uint16, reservedPorts map[uint16]bool, 
 	if endPort < startPort {
 		startPort, endPort = endPort, startPort
 	}
-	return &clientLeasor{
-		nextLeasor:  &portLeasor{},
+	c := &clientLeasor{
 		leasors:     &sync.Map{},
 		onCancelMut: &sync.Mutex{},
 
@@ -53,6 +52,27 @@ func makeClientLeasor(startPort, endPort uint16, reservedPorts map[uint16]bool, 
 		reservedPorts: reservedPorts,
 		quit:          quit,
 	}
+	c.leasorPool = &sync.Pool{
+		New: func() any {
+			return &portLeasor{
+				mut:       &sync.Mutex{},
+				startPort: startPort,
+				endPort:   endPort,
+				// TODO: clean up this weird system with copyOnCancel and and c.OnCancel
+				// calling OnCancel on all the portLeasors. I think the onCancel list
+				// should not be copied to each portLeasor and instead they should
+				// report cancels back to the clientLeasor which should keep the only
+				// list.
+				//
+				// I think leasorPool.New is garunteed to only be called when we call
+				// Get and that is the only reason this system is safe
+				onCancel:    c.copyOnCancel(),
+				leases:      make(map[uint32][]*gate.Lease),
+				unusedPorts: makeUnusedPorts(startPort, endPort, reservedPorts),
+			}
+		},
+	}
+	return c
 }
 
 func leaseString(lease *gate.Lease) string {
@@ -62,20 +82,30 @@ func leaseString(lease *gate.Lease) string {
 }
 
 func (c *clientLeasor) PortLeasorForClient(clientAddr string) *portLeasor {
-	leasor, loaded := c.leasors.LoadOrStore(clientAddr, c.nextLeasor)
+	// We use a sync.Pool because we have to call LoadOrStore on the leasors map,
+	// we need to have a pointer to space on the heap every time we lookup a
+	// client so that we can start a new leasor if one doesn't exist.
+	//
+	// The pool lets us save and re-use the heap space here when we find a client
+	// we already have a leasor for.
+	nextLeasor := c.leasorPool.Get()
+	// This thread exclusively owns nextLeasor right now becasue we called Get and
+	// have not stored it in the map yet.
+	nextLeasor.(*portLeasor).clientAddr = clientAddr
+	leasor, loaded := c.leasors.LoadOrStore(clientAddr, nextLeasor)
 	if !loaded {
-		// Because we have to call LoadOrStore on the leasors map, we need to have a
-		// pointer to space on the heap every time we lookup a client so that we can
-		// start a new leasor if one doesn't exist.
-		//
-		// So, save and re-use the heap space here when we find a client we already
-		// have a leasor for.
-		c.nextLeasor.Start(clientAddr, c.startPort, c.endPort,
-			makeUnusedPorts(c.startPort, c.endPort, c.reservedPorts),
-			c.quit, c.copyOnCancel())
-		c.nextLeasor = &portLeasor{}
+		// This same pointer might have been returned from a concurrent call before
+		// we start this goroutine, but this will still only happen once and it's
+		// okay if we start using leasor before this.
+		go leasor.(*portLeasor).monitorTTLs(c.quit)
+	} else {
+		c.leasorPool.Put(nextLeasor)
 	}
 	return leasor.(*portLeasor)
+}
+
+func (c *clientLeasor) makePortLeasor() any {
+	return &portLeasor{}
 }
 
 func (c *clientLeasor) copyOnCancel() []onCancelFunc {
@@ -90,9 +120,9 @@ func (c *clientLeasor) OnCancel(cancelFunc func(*gate.Lease)) {
 	c.onCancelMut.Lock()
 	defer c.onCancelMut.Unlock()
 	c.onCancel = append(c.onCancel, cancelFunc)
-	// Since we still have the mutex lock, this covers all existing leasors. New
-	// leasors can't be created until the mutex is released and they'll get the
-	// new list.
+	// Since we still have the mutex lock and copyOnCancel also uses it, this
+	// covers all existing leasors. New leasors can't be created until the mutex
+	// is released and they'll get the new list.
 	c.leasors.Range(func(key, value interface{}) bool {
 		l := value.(*portLeasor)
 		l.OnCancel(cancelFunc)
@@ -115,19 +145,6 @@ type portLeasor struct {
 	startPort   uint16
 	endPort     uint16
 	clientAddr  string
-}
-
-func (l *portLeasor) Start(clientAddr string, startPort, endPort uint16, unusedPorts []uint16, quit chan struct{}, onCancel []onCancelFunc) {
-	*l = portLeasor{
-		mut:         &sync.Mutex{},
-		clientAddr:  clientAddr,
-		startPort:   startPort,
-		endPort:     endPort,
-		onCancel:    onCancel,
-		leases:      make(map[uint32][]*gate.Lease),
-		unusedPorts: unusedPorts,
-	}
-	go l.monitorTTLs(quit)
 }
 
 func (l *portLeasor) OnCancel(cancelFunc func(*gate.Lease)) {

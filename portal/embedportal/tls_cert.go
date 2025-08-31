@@ -194,7 +194,7 @@ func (t *tlsRefresher) refreshCertFile(idx int, cert, key *os.File) (*tls.Certif
 		newCertFile, errCert := os.Open(cert.Name())
 		newKeyFile, errKey := os.Open(key.Name())
 		if errCert != nil || errKey != nil {
-			err := fmt.Errorf("Failed to reopen tls cert (%w) or key (%w) files", errCert, errKey)
+			err := fmt.Errorf("Failed to reopen TLS cert (%w) or key (%w) files", errCert, errKey)
 			log.Print(err.Error())
 			newCertFile.Close()
 			newKeyFile.Close()

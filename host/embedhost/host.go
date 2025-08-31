@@ -13,7 +13,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 
 	_ "ask.systems/daemon/portal/flags"
 	_ "ask.systems/daemon/tools/flags"
@@ -46,24 +45,6 @@ func Run(ctx context.Context, flags *flag.FlagSet, args []string) {
 		"Set this flag to run a password hash utility for the .passwords file,\n"+
 		"instead of hosting a server.")
 	flags.Parse(args[1:])
-
-	// Setup graceful stopping
-	ctx, cancel := context.WithCancel(context.Background())
-	ctx = tools.ContextWithQuitSignals(ctx)
-	wg := &sync.WaitGroup{}
-	defer func() {
-		cancel()
-		wg.Wait()
-		log.Print("Goodbye.")
-	}()
-
-	reg, err := gate.AutoRegister(ctx, &gate.RegisterRequest{
-		Pattern: *urlPath,
-	}, wg)
-	if err != nil {
-		log.Print("Fatal error registering with portal:", err)
-		return
-	}
 
 	// Extract the path part of the pattern and the prefix to remove
 	_, servePath := gate.ParsePattern(*urlPath)
@@ -110,7 +91,23 @@ func Run(ctx context.Context, flags *flag.FlagSet, args []string) {
 		log.Print("WARNING: Failed to open and stat web_root directory, we probably can't serve anything. Error: ", err)
 	}
 
+	// Setup graceful stopping
+	ctx = tools.ContextWithQuitSignals(context.Background())
+
+	// Register the reverse proxy pattern with portal.
+	// Only blocks until the initial registration is done, then keeps renewing.
+	reg, waitForUnregister, err := gate.AutoRegister(ctx, &gate.RegisterRequest{
+		Pattern: *urlPath,
+	})
+	if err != nil {
+		log.Print("Fatal error registering with portal:", err)
+		return
+	}
+	// Start serving files (blocks until graceful stop is done)
 	tools.HTTPServer(ctx.Done(), reg.Lease.Port, reg.TLSConfig, nil)
+	// Wait for the AutoRegister background goroutine to gracefully stop
+	<-waitForUnregister
+	log.Print("Goodbye.")
 }
 
 // The -hash_pasword utility
