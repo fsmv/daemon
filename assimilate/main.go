@@ -15,6 +15,7 @@ binary.
 package main
 
 import (
+	"context"
 	"flag"
 	"os"
 
@@ -26,5 +27,5 @@ func main() {
 	flags.CopyrightNotice = "" +
 		"Provided under the MIT License https://mit-license.org\n" +
 		"Copyright 2017-2024 Andy Kallmeyer"
-	embedassimilate.Run(flag.CommandLine, os.Args)
+	embedassimilate.Run(context.Background(), flag.CommandLine, os.Args)
 }

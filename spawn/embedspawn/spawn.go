@@ -5,6 +5,7 @@ package embedspawn
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -104,7 +105,7 @@ func setupDashboardAuth(adminLogins string, quit <-chan struct{}) (*tools.BasicA
 	return adminAuth, nil
 }
 
-func Run(flagset *flag.FlagSet, args []string) {
+func Run(ctx context.Context, flagset *flag.FlagSet, args []string) {
 	configFilename = flagset.String("config", "config.pbtxt",
 		"The path to the config file")
 	searchPath = flagset.String("path", "",
@@ -180,6 +181,7 @@ func Run(flagset *flag.FlagSet, args []string) {
 
 	quit := make(chan struct{})
 	tools.CloseOnQuitSignals(quit)
+	ctx = tools.ContextWithQuitSignals(context.Background())
 
 	children := newChildren(quit)
 	go children.MonitorDeaths(quit)

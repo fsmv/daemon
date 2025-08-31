@@ -53,6 +53,7 @@ Example config.pbtxt: (here showing two different repeated field styles)
 package main
 
 import (
+	"context"
 	"flag"
 	"os"
 
@@ -66,5 +67,5 @@ func main() {
 	flags.CopyrightNotice = "" +
 		"Provided under the MIT License https://mit-license.org\n" +
 		"Copyright 2017-2024 Andy Kallmeyer"
-	embedspawn.Run(flag.CommandLine, os.Args)
+	embedspawn.Run(context.Background(), flag.CommandLine, os.Args)
 }

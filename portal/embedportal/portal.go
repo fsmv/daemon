@@ -5,6 +5,7 @@
 package embedportal
 
 import (
+	"context"
 	"crypto/tls"
 	"errors"
 	"flag"
@@ -33,7 +34,8 @@ const (
 
 var kACMEAddress string
 
-func Run(flags *flag.FlagSet, args []string) {
+// TODO: actually use ctx
+func Run(ctx context.Context, flags *flag.FlagSet, args []string) {
 	flags.Usage = func() {
 		fmt.Fprintf(flags.Output(), ""+
 			"Usage: %s [flags]\n"+
@@ -125,6 +127,12 @@ func Run(flags *flag.FlagSet, args []string) {
 
 	quit := make(chan struct{})
 	tools.CloseOnQuitSignals(quit)
+
+	// TODO: actually use ctx
+	go func() {
+		<-ctx.Done()
+		close(quit)
+	}()
 
 	httpListener, httpsListener, err := openWebListeners(*httpPort, *httpsPort)
 	if err != nil {

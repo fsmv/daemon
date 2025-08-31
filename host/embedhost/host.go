@@ -22,7 +22,7 @@ import (
 	"ask.systems/daemon/tools"
 )
 
-func Run(flags *flag.FlagSet, args []string) {
+func Run(ctx context.Context, flags *flag.FlagSet, args []string) {
 	webRoot := flags.String("web_root", "./",
 		"Directory to serve files from")
 	urlPath := flags.String("url_path", "/", ""+

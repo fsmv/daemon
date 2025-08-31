@@ -77,6 +77,7 @@ syslog as the correct name.
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
@@ -99,7 +100,7 @@ import (
 
 type command struct {
 	name        string
-	run         func(*flag.FlagSet, []string)
+	run         func(context.Context, *flag.FlagSet, []string)
 	description string
 }
 
@@ -138,6 +139,8 @@ func init() {
 }
 
 func main() {
+	// TODO: maybe we should handle the close on quit signals in the mains
+	ctx := context.Background()
 	// If the binary has been renamed to start with one of the subcommand names,
 	// act as if it is just that one binary.
 	binName := filepath.Base(os.Args[0])
@@ -145,7 +148,7 @@ func main() {
 		if !strings.HasPrefix(binName, cmd.name) {
 			continue
 		}
-		cmd.run(flag.CommandLine, os.Args)
+		cmd.run(ctx, flag.CommandLine, os.Args)
 		return
 	}
 	// The binary name didn't match, operate in subcommands mode
@@ -180,7 +183,7 @@ func main() {
 		if subcommand != cmd.name {
 			continue
 		}
-		cmd.run(flags, args)
+		cmd.run(ctx, flags, args)
 		return
 	}
 	fmt.Fprintf(flag.CommandLine.Output(), "Invalid subcommand %#v\n\n", subcommand)

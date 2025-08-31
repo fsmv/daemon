@@ -27,7 +27,7 @@ import (
 // go:embed ../portal/service.proto
 var schemaText string
 
-func Run(flags *flag.FlagSet, args []string) {
+func Run(ctx context.Context, flags *flag.FlagSet, args []string) {
 	flags.Usage = func() {
 		fmt.Fprintf(flag.CommandLine.Output(),
 			"Usage: %s [flags] \"[textproto gate.RegisterRequest]\"...\n", flags.Name())
@@ -56,7 +56,7 @@ func Run(flags *flag.FlagSet, args []string) {
 		log.Fatal(err)
 	}
 	var wg sync.WaitGroup
-	ctx := tools.ContextWithQuitSignals(context.Background())
+	ctx = tools.ContextWithQuitSignals(context.Background())
 	errCount := 0
 	for i, requestText := range flags.Args() {
 		registration := &gate.RegisterRequest{}
@@ -68,8 +68,8 @@ func Run(flags *flag.FlagSet, args []string) {
 			continue
 		}
 		idx := i
+		wg.Add(1)
 		go func() {
-			wg.Add(1)
 			err := client.AutoRegister(ctx, registration, nil)
 			wg.Done()
 			if err != nil && !errors.Is(err, context.Cause(ctx)) {

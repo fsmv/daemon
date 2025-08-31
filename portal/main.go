@@ -17,6 +17,7 @@ The client library for portal is [ask.systems/daemon/portal/gate]
 package main
 
 import (
+	"context"
 	"flag"
 	"os"
 
@@ -31,5 +32,5 @@ func main() {
 	flags.CopyrightNotice = "" +
 		"Provided under the MIT License https://mit-license.org\n" +
 		"Copyright 2017-2024 Andy Kallmeyer"
-	embedportal.Run(flag.CommandLine, os.Args)
+	embedportal.Run(context.Background(), flag.CommandLine, os.Args)
 }
