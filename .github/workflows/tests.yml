@@ -28,6 +28,9 @@ jobs:
         GOTOOLCHAIN=local go version
         GOTOOLCHAIN=local go build -v ./...
 
+    - name: Vet daemon
+      run: go vet ./...
+
     - name: Run daemon unit tests
       run: go test -race -v ./...
 

@@ -144,6 +144,7 @@ func startDashboard(ctx context.Context, children *children, adminAuth *tools.Ba
 	})
 	if err != nil {
 		close(dashboardQuit)
+		stopDashboard()
 		return dashboardQuit, err
 	}
 	wg.Add(1)
@@ -159,6 +160,7 @@ func startDashboard(ctx context.Context, children *children, adminAuth *tools.Ba
 	templates, err = templates.ParseFS(templatesFS, "*.tmpl.html")
 	if err != nil {
 		close(dashboardQuit)
+		stopDashboard()
 		return dashboardQuit, err
 	}
 	http.Handle(dashboardUrl, &dashboard{children, templates, adminAuth})

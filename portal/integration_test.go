@@ -405,6 +405,7 @@ func equalCerts(lhs, rhs [][]byte) bool {
 func (*PortalTest) AutoRegister_ClientCert(t *testing.T) {
 	t.Parallel()
 	ctx, done := context.WithDeadline(t.Context(), time.Now().Add(15*time.Second))
+	defer done()
 	ret, wait, err := gate.AutoRegister(ctx, &gate.RegisterRequest{
 		Pattern: fmt.Sprintf("/%v/", t.Name()),
 	})
@@ -455,7 +456,8 @@ func (*PortalTest) AutoRegister_Wait(t *testing.T) {
 	t.Parallel()
 	const testTime = time.Second
 	start := time.Now()
-	ctx, _ := context.WithTimeout(t.Context(), testTime)
+	ctx, done := context.WithTimeout(t.Context(), testTime)
+	defer done()
 	_, wait, err := gate.AutoRegister(ctx, &gate.RegisterRequest{
 		Pattern: fmt.Sprintf("/%v/", t.Name()),
 	})
