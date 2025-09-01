@@ -123,7 +123,7 @@ message Lease {
 	// certificate to use for your server. It will be renewed with the lease.
 	//
 	// This is ASN.1 DER data for the leaf certificate public key.
-	bytes certificate = 4;
+	repeated bytes certificate = 4;
 }
 
 // vim: set noexpandtab:

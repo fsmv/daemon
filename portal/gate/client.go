@@ -436,7 +436,7 @@ func (c *Client) AutoRegisterChan(ctx context.Context, request *RegisterRequest,
 	var updateConf func([]byte)
 	var conf *tls.Config
 	if privateKey != nil {
-		cert, err := tools.TLSCertificateFromBytes([][]byte{lease.Certificate}, privateKey)
+		cert, err := tools.TLSCertificateFromBytes(lease.Certificate, privateKey)
 		if err != nil {
 			err := fmt.Errorf("Failed to parse certificate for lease %#v: %w", lease.Pattern, err)
 			return err
@@ -541,7 +541,7 @@ func (c *Client) KeepLeaseRenewedTLS(quit <-chan struct{}, lease *Lease, newCert
 		}
 		lease = newLease
 		if newCert != nil {
-			newCert(lease.Certificate)
+			newCert(lease.Certificate[0]) // TODO: CA cert?
 		}
 		timeout := lease.Timeout.AsTime()
 		log.Printf("Renewed lease, port: %v, ttl: %v", lease.Port, timeout)
@@ -592,7 +592,7 @@ func (c *Client) keepRegistrationAlive(
 			continue
 		}
 		if newCert != nil {
-			newCert(newLease.Certificate)
+			newCert(newLease.Certificate[0])
 		}
 		lastResult.Lease = newLease
 		if result != nil {

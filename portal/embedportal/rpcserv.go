@@ -156,7 +156,7 @@ func (s *rpcServ) signCert(request *gate.RegisterRequest, lease *gate.Lease) err
 		if err != nil {
 			return err
 		}
-		lease.Certificate = newCert
+		lease.Certificate = [][]byte{newCert}
 	}
 	return nil
 }
