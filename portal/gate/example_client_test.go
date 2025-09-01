@@ -18,13 +18,9 @@ var pattern = flag.String("pattern", "/hello/", "The path to register with porta
 func Example() {
 	flag.Parse()
 
-	// Setup graceful stopping
-	//   - Call stop() to trigger a full server graceful shutdown
-	//   - When ctrl+C or other OS quit signals are sent ctx is cancelled
-	//   - If you start other background tasks, use wg.Add(1) and wg.Done() and
-	//     exit when ctx.Done() is closed to participate in the graceful shutdown.
-	ctx, stop := context.WithCancelCause(context.Background())
-	ctx = tools.ContextWithQuitSignals(ctx)
+	// Create a context for the server that will be cancelled when the process is
+	// signalled to exit. You can call stop(nil) to gracefully stop the server.
+	ctx, stop := tools.ContextWithQuitSignals(context.Background())
 
 	// Remove the optional URL prefix from the pattern (http.Handle doesn't understand it)
 	_, path := gate.ParsePattern(*pattern)

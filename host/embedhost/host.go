@@ -92,7 +92,7 @@ func Run(ctx context.Context, flags *flag.FlagSet, args []string) {
 	}
 
 	// Setup graceful stopping
-	ctx = tools.ContextWithQuitSignals(context.Background())
+	ctx, _ = tools.ContextWithQuitSignals(context.Background())
 
 	// Register the reverse proxy pattern with portal.
 	// Only blocks until the initial registration is done, then keeps renewing.

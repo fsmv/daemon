@@ -56,7 +56,7 @@ func Run(ctx context.Context, flags *flag.FlagSet, args []string) {
 		log.Fatal(err)
 	}
 	var wg sync.WaitGroup
-	ctx = tools.ContextWithQuitSignals(context.Background())
+	ctx, _ = tools.ContextWithQuitSignals(context.Background())
 	errCount := 0
 	for i, requestText := range flags.Args() {
 		registration := &gate.RegisterRequest{}

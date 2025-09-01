@@ -182,7 +182,7 @@ func Run(ctx context.Context, flagset *flag.FlagSet, args []string) {
 
 	quit := make(chan struct{})
 	tools.CloseOnQuitSignals(quit)
-	ctx = tools.ContextWithQuitSignals(context.Background())
+	ctx, _ = tools.ContextWithQuitSignals(context.Background())
 
 	children := newChildren(quit)
 	go children.MonitorDeaths(quit)
