@@ -12,8 +12,9 @@ for security to make the binary owned by root, otherwise the user that owns the
 binary could edit it and run any code as root. The easiest way to do this and
 allow for updating daemon is to just run go install as root.
 
-If you run spawn with no arguments it will create the example config and run
-portal plus the dashboard. If you want to just print the example config run:
+If you run spawn with no arguments it will create the example [textproto] config
+and run portal plus the dashboard. If you want to just print the example config
+run:
 
 	daemon spawn -example_config
 
@@ -24,28 +25,29 @@ For more info read the README! Expand it above on the go docs site.
 For servers written in go, you can use the portal client library
 [ask.systems/daemon/portal/gate] to register with portal, automatically select a
 port to listen on that won't conflict and even automatically use a newly
-generated TLS certificate to encrypt local traffic (this time it's easy!). To do
-this you will call [ask.systems/daemon/portal/gate.StartTLSRegistration], set up
-any application handlers with [net/http.Handle] then call
+generated TLS certificate to encrypt local traffic. Check the example for the
+gate package, it's easy!. To do this you will call
+[ask.systems/daemon/portal/gate.StartTLSRegistration], set up any application
+handlers with [net/http.Handle] then call
 [ask.systems/daemon/tools.RunHTTPServerTLS].
 
 The easiest way to configure access to portal registration RPCs is via the
-environment variables PORTAL_ADDR and PORTAL_TOKEN. You can find the portal
-token printed in the portal logs on startup. If you set the portal flags on
-spawn it will propegate them to child processes with thes env vars, and you can
-set them up in your shell dotfiles. You can also import _
-[ask.systems/daemon/portal/flags] if you'd like to configure the portal address
-and token with flags instead of the environment variables.
+environment variables PORTAL_ADDR and PORTAL_TOKEN, which spawn can set
+automatically. You can find the portal token printed in the portal logs on
+startup. You can set the env vars up in your shell dotfiles so you can run test
+binaries that register with portal.
+
+Aside from the env vars you can also import _ [ask.systems/daemon/portal/flags]
+if you'd like to configure the portal address and token with flags instead of
+the environment variables.
 
 Make sure to take a look at the other utility functions in
 [ask.systems/daemon/tools] too! There's a second flags flags package which
 provides the version stamp flag and the syslog support via the [log] package:
 [ask.systems/daemon/tools/flags].
 
-Take a look at the package example for the client library
-[ask.systems/daemon/portal/gate] for a simple go client of portal with encrypted
-internal traffic. It uses the standard [net/http.Handle] system. The source code
-of [ask.systems/daemon/host] is a good basic server example too.
+The source code of [ask.systems/daemon/host] is a good basic server example if
+you want more than the [ask.systems/daemon/portal/gate] package example.
 
 You can then sudo go install your own binary (or copy your binary to /root/) and
 add an entry to your config.pbtxt with binary name and arguments. By default
@@ -54,15 +56,15 @@ the spawn -path argument to change it.
 
 # Megabinary
 
-The way it works is each of the individual binaries in daemon have all of their
-code packed into the <bin>/embed<bin> packages. Each of them have a standard Run
-function that accepts commandline arguments. Then the packages you actually
-install, such as [ask.systems/daemon/assimilate] or [ask.systems/daemon] have a
-simple main function that just calls the Run function from the appropriate
-embed package.
+The way the daemon binary works is each of the individual binaries in daemon
+have all of their code packed into the <bin>/embed<bin> packages. Each of them
+have a standard Run function that accepts commandline arguments. Then the
+packages you actually install, such as [ask.systems/daemon/assimilate] or
+[ask.systems/daemon] have a simple main function that just calls the Run
+function from the appropriate embed package.
 
 If you would like to, you can use the public interfaces in the embed packages
-for your applications as well, if you would like to for example embed a copy of
+for your applications as well, so you could for example embed a copy of
 [ask.systems/daemon/host] instead of calling the helper functions in
 [ask.systems/daemon/tools] (which cover pretty much all of host's
 functionality).

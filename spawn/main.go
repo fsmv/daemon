@@ -1,6 +1,6 @@
 /*
 Spawn is a launcher with a web dashboard that runs commands with arguments
-listed in the [textproto] config.pbtxt file.
+listed in the textproto config.pbtxt file.
 
 Install spawn standalone with:
 
@@ -16,7 +16,7 @@ run them as. This means we can avoid running any servers as root.
 The dashboard provides a convenient way to restart servers and read the logs in
 real time.
 
-Example config.pbtxt: (here showing two different repeated field styles)
+Example [textproto] config.pbtxt: (here showing two different repeated field styles)
 
 	command {
 		binary: "portal"

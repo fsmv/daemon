@@ -235,13 +235,13 @@ func listenPortsTCP(ports []uint32) ([]*os.File, error) {
 			return nil, fmt.Errorf("error listening on port (%v): %v",
 				port, err)
 		}
+		defer l.Close()
 		f, err := l.File()
 		if err != nil {
-			return nil, fmt.Errorf("error listening on port (%v): %v",
+			return nil, fmt.Errorf("error getting FD for port (%v): %v",
 				port, err)
 		}
 		ret = append(ret, f)
-		l.Close()
 	}
 	return ret, nil
 }

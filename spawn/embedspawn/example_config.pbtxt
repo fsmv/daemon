@@ -85,7 +85,7 @@ command {
 #  #
 #  #files: [
 #  #  "/etc/letsencrypt/live/<YOUR DOMAIN>/fullchain.pem",
-#  #  "/etc/letsencrypt/live/<YOUR DOMAIN>/privkey.pem",
+#  #  "/etc/letsencrypt/live/<YOUR DOMAIN>/privkey.pem"
 #  #]
 #}
 

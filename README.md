@@ -228,7 +228,8 @@ certificate we can't use that killall command in the script. Luckily, there is
 also no root user in windows so when you run certbot the files will be
 accessible by any process you run. So, you can just have portal open the files
 directly using the `-tls_cert` and `-tls_key` flags, portal will reopen the
-files automatically 1 hour before expiration.
+files automatically 1 hour before expiration. Also you can't pass socket FDs to
+subprocesses in windows.
 
 So the config changes you need to make are:
 
@@ -240,3 +241,7 @@ So the config changes you need to make are:
     just use the default values for the port flags (so delete that line).
  4. In textproto syntax any \ characters need to be escaped so windows paths
     will look like `"-tls_cert=C:\\Certbot\\..."`
+ 5. Don't use the ports field in the command message of the spawn config file.
+    Instead just have portal open the ports by setting them in the flags for
+    portal. This feature is for unix systems that require root to open port 80
+    and 443 anyway.
