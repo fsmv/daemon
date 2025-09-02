@@ -10,8 +10,11 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
+	"os"
 	"reflect"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -85,6 +88,61 @@ func Subtests(t *testing.T, receiver any) {
 		t.Run(test.Name, func(st *testing.T) {
 			call(test, receiver, st)
 		})
+	}
+}
+
+func FreePort(t *testing.T) (int, net.Listener, *os.File) {
+	t.Helper()
+	// bind to localhost because we don't want to allow external connections
+	l, err := net.ListenTCP("tcp", &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal("Failed to listen on a free port:", err)
+	}
+	var f *os.File
+	if runtime.GOOS != "windows" {
+		f, err = l.File()
+		if err != nil {
+			t.Fatal("Failed to get file for a free port:", err)
+		}
+	}
+	t.Cleanup(func() {
+		l.Close()
+		if f != nil {
+			f.Close()
+		}
+	})
+	return l.Addr().(*net.TCPAddr).Port, l, f
+}
+
+func PortalPorts(t *testing.T) (*PortalTest, []string) {
+	httpPort, hl, httpFD := FreePort(t)
+	httpsPort, sl, httpsFD := FreePort(t)
+	rpcPort, rl, rpcFD := FreePort(t)
+
+	if runtime.GOOS == "windows" {
+		hl.Close()
+		sl.Close()
+		rl.Close()
+
+		return &PortalTest{
+				HTTPPort:  httpPort,
+				HTTPSPort: httpsPort,
+				RPCPort:   rpcPort,
+			}, []string{
+				fmt.Sprintf("-http_port=%v", httpPort),
+				fmt.Sprintf("-https_port=%v", httpsPort),
+				fmt.Sprintf("-rpc_port=%v", rpcPort),
+			}
+	} else {
+		return &PortalTest{
+				HTTPPort:  httpPort,
+				HTTPSPort: httpsPort,
+				RPCPort:   rpcPort,
+			}, []string{
+				fmt.Sprintf("-http_port=-%v", httpFD.Fd()),
+				fmt.Sprintf("-https_port=-%v", httpsFD.Fd()),
+				fmt.Sprintf("-rpc_port=-%v", rpcFD.Fd()),
+			}
 	}
 }
 
