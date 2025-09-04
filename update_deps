@@ -21,8 +21,8 @@ for cmd in $COMMANDS; do
   if [ -n "$OUT" ]; then echo "$OUT"; fi
 done
 
-# The downgrade picks 1.65.0-dev which I don't like because it says -dev
-go get google.golang.org/grpc@v1.64.1
+# The downgrade picks 1.68.0-dev which I don't like because it says -dev
+go get google.golang.org/grpc@v1.67.3
 
-go get go@1.21 toolchain@1.24.0
+go get go@1.21.0 toolchain@1.24.0
 go mod tidy
