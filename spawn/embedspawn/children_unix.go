@@ -19,6 +19,7 @@ import (
 	"syscall"
 	"time"
 
+	"ask.systems/daemon/internal/spawnpb"
 	"ask.systems/daemon/portal/gate"
 )
 
@@ -63,12 +64,12 @@ type platformSpecificChildrenInfo struct{}
 
 func (p *platformSpecificChildrenInfo) Init(c *children) {}
 
-func (children *children) StartProgram(cmd *Command) error {
+func (children *children) StartProgram(cmd *spawnpb.Command) error {
 	if len(cmd.Binary) == 0 {
 		return fmt.Errorf("Binary is required")
 	}
 	isPortal := filepath.Base(cmd.Binary) == "portal"
-	name := cmd.FullName()
+	name := commandName(cmd)
 	attr := &os.ProcAttr{
 		Env: []string{
 			fmt.Sprintf("SPAWN_FILES=%v", len(cmd.Files)),
@@ -328,7 +329,7 @@ func lookupUser(username string) (*syscall.Credential, *user.User, error) {
 	}, u, nil
 }
 
-func openOrRefreshFiles(cmd *Command, quitFileRefresh <-chan struct{}) ([]*os.File, error) {
+func openOrRefreshFiles(cmd *spawnpb.Command, quitFileRefresh <-chan struct{}) ([]*os.File, error) {
 	if len(cmd.Files) == 0 {
 		return nil, nil
 	}

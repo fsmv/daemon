@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"ask.systems/daemon/internal/spawnpb"
 	_ "ask.systems/daemon/portal/flags"
 	"ask.systems/daemon/tools"
 )
@@ -30,7 +31,7 @@ type child struct {
 	Up          bool
 	Message     error
 	Name        string
-	Cmd         *Command
+	Cmd         *spawnpb.Command
 	Proc        *os.Process
 	ChrootFiles []string
 	Binary      string
@@ -66,7 +67,7 @@ func newChildren(quit chan struct{}) *children {
 	return c
 }
 
-func (c *children) StartPrograms(programs []*Command) (errCnt int) {
+func (c *children) StartPrograms(programs []*spawnpb.Command) (errCnt int) {
 	// Make portal first if it exists
 	portalIdx := 0
 	for i, cmd := range programs {
@@ -125,7 +126,7 @@ func (c *children) waitForPortalToken() (string, error) {
 	}
 }
 
-func (cmd *Command) FullName() string {
+func commandName(cmd *spawnpb.Command) string {
 	name := filepath.Base(cmd.Binary)
 	if cmd.Name != "" {
 		name = fmt.Sprintf("%v-%v", name, cmd.Name)
@@ -170,7 +171,7 @@ func (c *children) ReloadConfig() {
 	c.Lock()
 	defer c.Unlock()
 	for _, cmd := range commands {
-		name := cmd.FullName()
+		name := commandName(cmd)
 		cmdChild, ok := c.ByName[name]
 		if ok {
 			cmdChild.Cmd = cmd
@@ -393,7 +394,7 @@ func copyBinary(bin, out string, exclusive bool, uid, gid uint32) (string, error
 	return binary, openerr
 }
 
-func (children *children) setupChildFiles(cmd *Command, quit chan struct{}) ([]*os.File, error) {
+func (children *children) setupChildFiles(cmd *spawnpb.Command, quit chan struct{}) ([]*os.File, error) {
 	// Set up stdout and stderr piping
 	r, w, err := os.Pipe()
 	if err != nil {
@@ -420,6 +421,6 @@ func (children *children) setupChildFiles(cmd *Command, quit chan struct{}) ([]*
 	if err != nil {
 		return files, err
 	}
-	go children.HandleLogs(r, cmd.FullName())
+	go children.HandleLogs(r, commandName(cmd))
 	return files, nil
 }

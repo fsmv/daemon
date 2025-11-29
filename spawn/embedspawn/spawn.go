@@ -22,19 +22,15 @@ import (
 
 	_ "embed"
 
+	"ask.systems/daemon/internal/spawnpb"
 	"ask.systems/daemon/tools"
 	"ask.systems/daemon/tools/flags"
 
 	"google.golang.org/protobuf/encoding/prototext"
 )
 
-//go:embed config.proto
-var configSchema string
-
 //go:embed example_config.pbtxt
 var exampleConfig []byte
-
-//go:generate protoc -I ../ ../embedspawn/config.proto --go_out ../ --go_opt=paths=source_relative
 
 var (
 	configFilename   *string
@@ -128,7 +124,7 @@ func Run(ctx context.Context, flagset *flag.FlagSet, args []string) {
 		"the dashboard.")
 	flagset.Var(
 		tools.BoolFuncFlag(func(string) error {
-			fmt.Print(configSchema)
+			fmt.Print(spawnpb.ConfigProto)
 			os.Exit(2)
 			return nil
 		}),
@@ -228,7 +224,7 @@ func Run(ctx context.Context, flagset *flag.FlagSet, args []string) {
 	log.Print("Goodbye.")
 }
 
-func resolveRelativePaths(path string, commands []*Command) error {
+func resolveRelativePaths(path string, commands []*spawnpb.Command) error {
 	for i, _ := range commands {
 		cmd := commands[i]
 		if len(cmd.Binary) == 0 || cmd.Binary[0] == '/' {
@@ -246,7 +242,7 @@ func resolveRelativePaths(path string, commands []*Command) error {
 	return nil
 }
 
-func ReadConfig(filename string) ([]*Command, error) {
+func ReadConfig(filename string) ([]*spawnpb.Command, error) {
 	configText, err := os.ReadFile(filename)
 	if err != nil {
 		return nil, err
@@ -254,8 +250,8 @@ func ReadConfig(filename string) ([]*Command, error) {
 	return loadConfig(configText)
 }
 
-func loadConfig(configText []byte) ([]*Command, error) {
-	config := &Config{}
+func loadConfig(configText []byte) ([]*spawnpb.Command, error) {
+	config := &spawnpb.Config{}
 	if err := prototext.Unmarshal(configText, config); err != nil {
 		return nil, err
 	}

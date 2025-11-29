@@ -14,6 +14,7 @@ import (
 	"time"
 	"unsafe"
 
+	"ask.systems/daemon/internal/spawnpb"
 	"ask.systems/daemon/portal/gate"
 
 	"golang.org/x/sys/windows"
@@ -72,7 +73,7 @@ func (c *children) addProcToJobObject(proc *os.Process) error {
 	return nil
 }
 
-func (children *children) StartProgram(cmd *Command) error {
+func (children *children) StartProgram(cmd *spawnpb.Command) error {
 	if len(cmd.Binary) == 0 {
 		return fmt.Errorf("Binary is required")
 	}
@@ -89,7 +90,7 @@ func (children *children) StartProgram(cmd *Command) error {
 	if err != nil {
 		return err
 	}
-	name := cmd.FullName()
+	name := commandName(cmd)
 	attr := &os.ProcAttr{
 		// Note: on windows we need to pass in the existing environment variables
 		// because there are some important system variables that are needed to
@@ -276,7 +277,7 @@ func copyFile(oldName string, newName string, uid, gid uint32, exclusive bool) (
 // Windows doesn't support watching files on spawn
 // TODO: try windows.FindFirstChangeNotification or windows.ReadDirectoryChanges
 // thanks https://stackoverflow.com/a/17376701/428740
-func openOrRefreshFiles(cmd *Command, quitFileRefresh <-chan struct{}) ([]*os.File, error) {
+func openOrRefreshFiles(cmd *spawnpb.Command, quitFileRefresh <-chan struct{}) ([]*os.File, error) {
 	if len(cmd.Files) == 0 {
 		return nil, nil
 	}

@@ -98,7 +98,7 @@ import (
 
 //go:generate protoc -I ./ internal/portalpb/storage.proto --go_out ./ --go_opt=paths=source_relative
 //go:generate protoc -I ./ internal/portalpb/service.proto --go_out ./ --go-grpc_out ./ --go_opt=paths=source_relative --go-grpc_opt=paths=source_relative
-//go:generate protoc -I ./spawn/ spawn/embedspawn/config.proto --go_out ./spawn --go_opt=paths=source_relative
+//go:generate protoc -I ./ internal/spawnpb/config.proto --go_out ./ --go_opt=paths=source_relative
 
 type command struct {
 	name        string
