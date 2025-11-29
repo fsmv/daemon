@@ -96,7 +96,7 @@ func Run(ctx context.Context, flags *flag.FlagSet, args []string) {
 
 	// Register the reverse proxy pattern with portal.
 	// Only blocks until the initial registration is done, then keeps renewing.
-	reg, waitForUnregister, err := gate.AutoRegister(ctx, &gate.RegisterRequest{
+	port, tlsconf, wait, err := gate.AutoRegister(ctx, &gate.RegisterRequest{
 		Pattern: *urlPath,
 	})
 	if err != nil {
@@ -104,9 +104,8 @@ func Run(ctx context.Context, flags *flag.FlagSet, args []string) {
 		return
 	}
 	// Start serving files (blocks until graceful stop is done)
-	tools.HTTPServer(ctx.Done(), reg.Lease.Port, reg.TLSConfig, nil)
-	// Wait for the AutoRegister background goroutine to gracefully stop
-	<-waitForUnregister
+	tools.HTTPServer(ctx, port, tlsconf, nil)
+	<-wait // Wait for the AutoRegister background goroutine to gracefully stop
 	log.Print("Goodbye.")
 }
 

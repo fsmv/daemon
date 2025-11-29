@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"ask.systems/daemon/internal/portalpb"
 	"ask.systems/daemon/portal/gate"
 	"ask.systems/daemon/tools"
 )
@@ -49,18 +50,18 @@ type httpProxy struct {
 // forwarder holds the data for a forwarding rule registered with httpProxy
 type forwarder struct {
 	Handler   http.Handler
-	Lease     *gate.Lease
+	Lease     *portalpb.Lease
 	AllowHTTP bool
 }
 
-func (p *httpProxy) Unregister(lease *gate.Lease) {
+func (p *httpProxy) Unregister(lease *portalpb.Lease) {
 	p.forwarders.Delete(lease.Pattern)
 }
 
 // Register leases a new forwarder for the given pattern.
 // Returns an error if the server has no more ports to lease.
 func (p *httpProxy) Register(
-	clientAddr string, request *gate.RegisterRequest, fixedTimeout time.Time) (*gate.Lease, error) {
+	clientAddr string, request *portalpb.RegisterRequest, fixedTimeout time.Time) (*portalpb.Lease, error) {
 
 	if request.Pattern == "" {
 		return nil, fmt.Errorf("Registration pattern must not be empty.")
@@ -97,8 +98,8 @@ func (p *httpProxy) Register(
 // if stripPattern is true, the pattern will be removed from the prefix of the
 // http request paths. This is needed for third party applications that expect
 // to get requests for / not /pattern/
-func (p *httpProxy) saveForwarder(clientAddr string, lease *gate.Lease,
-	request *gate.RegisterRequest) error {
+func (p *httpProxy) saveForwarder(clientAddr string, lease *portalpb.Lease,
+	request *portalpb.RegisterRequest) error {
 
 	var host string
 	if request.Hostname != "" {
@@ -459,7 +460,7 @@ func makeHTTPProxy(l *clientLeasor, rootCert *tls.Config,
 	} else {
 		ret.forwarders.Store(certChallengePattern, &forwarder{
 			Handler: handler,
-			Lease: &gate.Lease{
+			Lease: &portalpb.Lease{
 				Pattern: certChallengePattern,
 			},
 			AllowHTTP: true,
@@ -480,7 +481,7 @@ func (p *httpProxy) StartHTTP(quit chan struct{}) {
 	go func() {
 		<-quit
 		httpServer.Close()
-		fmt.Print("Got quit signal, killed HTTP servers")
+		log.Print("Got quit signal, killed HTTP server")
 	}()
 }
 
@@ -497,6 +498,6 @@ func (p *httpProxy) StartHTTPS(serveCert *tls.Config, quit chan struct{}) {
 	go func() {
 		<-quit
 		tlsServer.Close()
-		fmt.Print("Got quit signal, killed HTTPS server")
+		log.Print("Got quit signal, killed HTTPS server")
 	}()
 }

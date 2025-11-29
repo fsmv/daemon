@@ -9,7 +9,6 @@ import (
 
 	_ "ask.systems/daemon/portal/flags"
 	"ask.systems/daemon/portal/gate"
-	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 // Use the all in one helper to obtain a lease and wait for graceful shutdown
@@ -19,14 +18,14 @@ func ExampleAutoRegister() {
 	ctx, stop := context.WithTimeout(context.Background(), 30*time.Second)
 	defer stop()
 
-	reg, wait, err := gate.AutoRegister(ctx, &gate.RegisterRequest{
+	port, _, wait, err := gate.AutoRegister(ctx, &gate.RegisterRequest{
 		Pattern: "/test/",
 	})
 	if err == nil {
-		log.Printf("Obtained lease for port %v!", reg.Lease.Port)
+		log.Printf("Obtained lease for port %v!", port)
 	} else {
 		log.Print("Failed to obtain initial lease:", err)
-		log.Print("Will retry")
+		stop()
 	}
 
 	<-wait // wait for the AutoRegister background goroutine to stop
@@ -48,19 +47,19 @@ func ExampleClient_directRPC() {
 	defer client.Close()
 	// Call the MyHostname RPC directly. This is used by Client.AutoRegister to
 	// set the hostname in the TLS certificate request.
-	resp, err := client.RPC.MyHostname(context.Background(), &emptypb.Empty{})
+	hostname, err := client.MyHostname(context.Background())
 	if err != nil {
 		log.Fatal(err)
 	}
-	log.Print(resp.Hostname)
+	log.Print(hostname)
 }
 
 // Shows using [Client.AutoRegister] to make multiple registrations in parallel
 // and gracefully wait for them to clean up when stopped.
 //
-// In a real application you likely want to use the channel argument to at least
-// read the initial registration result to get the randomly assigned port you
-// should listen on. See the [Client.AutoRegister] example.
+// In a real application you likely want to use the callback argument to at
+// least read the initial registration result to get the randomly assigned port
+// you should listen on. See the [Client.AutoRegister] example.
 //
 // Import the [ask.systems/daemon/portal/flags] package to use [DefaultClient].
 func ExampleClient_autoRegister() {
@@ -80,9 +79,9 @@ func ExampleClient_autoRegister() {
 		wg.Add(1) // It's important to do this outside of the goroutine, otherwise the scheduler may not run the goroutine at all.
 		go func() {
 			defer wg.Done()
-			err := client.AutoRegisterChan(ctx, &gate.RegisterRequest{
+			err := client.AutoRegister(ctx, &gate.RegisterRequest{
 				Pattern:   "/",
-				FixedPort: uint32(8080 + idx),
+				FixedPort: uint16(8080 + idx),
 			}, nil)
 			if err != nil && !errors.Is(err, context.Cause(ctx)) {
 				log.Printf("Error in registration #%v stopping all: %v", idx, err)
@@ -108,27 +107,18 @@ func ExampleClient_AutoRegister() {
 	ctx, stop := context.WithTimeout(context.Background(), 30*time.Second)
 	defer stop()
 
-	results := make(chan *gate.AutoRegisterResult, 0) // closed by AutoRegister
-	go func() {
-		first := true
-		for {
-			select {
-			case ret := <-results:
-				if first {
-					log.Printf("Lease for port %v obtained. Expires at: %v",
-						ret.Lease.Port, ret.Lease.Timeout.AsTime())
-					first = false
-				} else {
-					log.Print("Lease renewed now expires at:", ret.Lease.Timeout.AsTime())
-				}
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
-	err = client.AutoRegisterChan(ctx, &gate.RegisterRequest{
+	first := true
+	err = client.AutoRegister(ctx, &gate.RegisterRequest{
 		Pattern: "/test/",
-	}, results)
+	}, func(lease *gate.Lease) {
+		if first {
+			log.Printf("Lease for port %v obtained. Expires at: %v",
+				lease.Port, lease.Timeout)
+			first = false
+		} else {
+			log.Print("Lease renewed now expires at:", lease.Timeout)
+		}
+	})
 	log.Print("AutoRegister stopped:", err)
 }
 

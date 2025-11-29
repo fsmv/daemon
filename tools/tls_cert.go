@@ -16,38 +16,6 @@ import (
 	"time"
 )
 
-// TODO: switch to
-//func AutoTLSConf(<-chan *Lease) *tls.Config
-// Actually if this is in tools it should be
-//func AutoTLSConf(<-chan *tls.Certificate) *tls.Config
-
-// TODO: maybe this should stay a private API until I figure out client auth
-// I need to have an auto-updating ClientCAs field too.
-func AutoTLSConfig(cert *tls.Certificate) (conf *tls.Config, newCert func(*tls.Certificate)) {
-	certCache := &atomic.Value{}
-	certCache.Store(cert)
-
-	newCert = func(c *tls.Certificate) {
-		certCache.Store(c)
-	}
-	conf = &tls.Config{
-		GetCertificate: func(hi *tls.ClientHelloInfo) (*tls.Certificate, error) {
-			cert, ok := certCache.Load().(*tls.Certificate)
-			if !ok || cert == nil {
-				return nil, errors.New("Internal error: cannot load certificate")
-			}
-			if hi != nil {
-				if err := hi.SupportsCertificate(cert); err != nil {
-					return nil, err
-				}
-			}
-			return cert, nil
-		},
-	}
-
-	return
-}
-
 // Generate a new self signed certificate for the given hostname with the given
 // TTL expiration time, and keep it renewed in the background until the quit
 // channel is closed.
@@ -61,7 +29,6 @@ func AutoTLSConfig(cert *tls.Certificate) (conf *tls.Config, newCert func(*tls.C
 //
 // The returned config only has [tls.Config.GetCertificate] set, and it will
 // return the latest certificate for any arguments (including nil).
-// TODO: use AutoTLSConf
 func AutorenewSelfSignedCertificate(hostname string, TTL time.Duration, isCA bool, onRenew func(*tls.Certificate), quit <-chan struct{}) (*tls.Config, error) {
 	cache := &atomic.Value{}
 	newCert, err := GenerateSelfSignedCertificate(hostname, time.Now().Add(TTL), isCA)
@@ -126,7 +93,7 @@ func GenerateSelfSignedCertificate(hostname string, expiration time.Time, isCA b
 
 // Generate a random certificate key and a request to send to a Certificate
 // Authority to get your new certificate signed.
-func GenerateCertificateRequest(hostname string) ([]byte, crypto.Signer, error) {
+func GenerateCertificateRequest(hostname string) ([]byte, crypto.PrivateKey, error) {
 	template := &x509.CertificateRequest{
 		SignatureAlgorithm: x509.ECDSAWithSHA256,
 	}
@@ -203,7 +170,7 @@ func SignCertificate(root *tls.Certificate, rawCertRequest []byte, expiration ti
 //
 // Deprecated: It's better to use [TLSCertificateFromBytes] because that
 // function returns the validation errors while this one ignores them.
-func CertificateFromSignedCert(rawCert []byte, privateKey crypto.Signer) *tls.Certificate {
+func CertificateFromSignedCert(rawCert []byte, privateKey crypto.PrivateKey) *tls.Certificate {
 	cert, _ := TLSCertificateFromBytes([][]byte{rawCert}, privateKey)
 	return cert
 }
@@ -220,7 +187,7 @@ func CertificateFromSignedCert(rawCert []byte, privateKey crypto.Signer) *tls.Ce
 //
 // Returns an error if the certificate data is invalid or doesn't match the
 // privateKey
-func TLSCertificateFromBytes(der [][]byte, privateKey crypto.Signer) (*tls.Certificate, error) {
+func TLSCertificateFromBytes(der [][]byte, privateKey crypto.PrivateKey) (*tls.Certificate, error) {
 	leaf, err := parseAndValidateCert(der, privateKey)
 	if err != nil {
 		// Return this for compatibility with CertificateFromSignedCert's old
@@ -237,13 +204,20 @@ func TLSCertificateFromBytes(der [][]byte, privateKey crypto.Signer) (*tls.Certi
 	}, nil
 }
 
+// All standard library crypto.PrivateKey types support this interface.
+// See: https://pkg.go.dev/crypto#PrivateKey
+type stdPrivateKey interface {
+	Public() crypto.PublicKey
+	Equal(x crypto.PrivateKey) bool
+}
+
 // All standard library crypto.PublicKey types support this interface.
 // See: https://pkg.go.dev/crypto#PublicKey
 type stdPublicKey interface {
 	Equal(x crypto.PublicKey) bool
 }
 
-func parseAndValidateCert(der [][]byte, privateKey crypto.Signer) (leaf *x509.Certificate, err error) {
+func parseAndValidateCert(der [][]byte, privateKey crypto.PrivateKey) (leaf *x509.Certificate, err error) {
 	now := time.Now()
 	for i, block := range der {
 		cert, err := x509.ParseCertificate(block)
@@ -266,7 +240,7 @@ func parseAndValidateCert(der [][]byte, privateKey crypto.Signer) (leaf *x509.Ce
 	if !ok {
 		return nil, errors.New("go version error: bad leaf.PublicKey type")
 	}
-	if !pub.Equal(privateKey.Public()) {
+	if !pub.Equal(privateKey.(stdPrivateKey).Public()) {
 		return nil, errors.New("private key does not match leaf public key")
 	}
 	return leaf, nil

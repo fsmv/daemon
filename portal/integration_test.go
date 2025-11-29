@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"crypto"
 	"crypto/tls"
 	"flag"
 	"fmt"
@@ -91,7 +90,7 @@ func Subtests(t *testing.T, receiver any) {
 	}
 }
 
-func FreePort(t *testing.T) (int, net.Listener, *os.File) {
+func FreePort(t *testing.T) (uint16, net.Listener, *os.File) {
 	t.Helper()
 	// bind to localhost because we don't want to allow external connections
 	l, err := net.ListenTCP("tcp", &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1)})
@@ -111,7 +110,7 @@ func FreePort(t *testing.T) (int, net.Listener, *os.File) {
 			f.Close()
 		}
 	})
-	return l.Addr().(*net.TCPAddr).Port, l, f
+	return uint16(l.Addr().(*net.TCPAddr).Port), l, f
 }
 
 func PortalPorts(t *testing.T) (*PortalTest, []string) {
@@ -207,9 +206,9 @@ func CaptureTokenFromLogs(t *testing.T) <-chan string {
 }
 
 type PortalTest struct {
-	RPCPort   int
-	HTTPPort  int
-	HTTPSPort int
+	RPCPort   uint16
+	HTTPPort  uint16
+	HTTPSPort uint16
 }
 
 func TestPortal(t *testing.T) {
@@ -252,9 +251,9 @@ func (p *PortalTest) AutoRegister_HTTPProxy(t *testing.T) {
 	port, listener, _ := FreePort(t)
 
 	regctx, killAutoRegister := context.WithCancel(t.Context())
-	ret, waitAutoRegister, err := gate.AutoRegister(regctx, &gate.RegisterRequest{
+	port, tlsconf, waitAutoRegister, err := gate.AutoRegister(regctx, &gate.RegisterRequest{
 		Pattern:   pattern,
-		FixedPort: uint32(port),
+		FixedPort: port,
 	})
 	if err != nil {
 		t.Error(err)
@@ -272,7 +271,7 @@ func (p *PortalTest) AutoRegister_HTTPProxy(t *testing.T) {
 	httpctx, killHTTP := context.WithCancel(t.Context())
 	waitHTTP := make(chan struct{})
 	go func() {
-		err := tools.HTTPServer(httpctx.Done(), ret.Lease.Port, ret.TLSConfig, &tools.HTTPServerOptions{
+		err := tools.HTTPServer(httpctx, port, tlsconf, &tools.HTTPServerOptions{
 			Server:          srv,
 			ShutdownTimeout: time.Second,
 			Listener:        listener,
@@ -336,16 +335,17 @@ func (p *PortalTest) AutoRegister_HTTPProxy(t *testing.T) {
 // comes back on. In that scenario AutoRegister should recover.
 func (p *PortalTest) AutoRegister_HTTPRecovery(t *testing.T) {
 	t.Parallel()
-	const waitForRenewals = 2 // controls the length of the test
 
 	pattern := fmt.Sprintf("/%v/", t.Name())
 	port, listener, _ := FreePort(t)
 
+	lease := &atomic.Value{}
 	regctx, killAutoRegister := context.WithCancel(t.Context())
-	ret, waitAutoRegister, err := gate.AutoRegister(regctx, &gate.RegisterRequest{
+	regctx = context.WithValue(regctx, "debuglease", lease)
+	port, tlsconf, waitAutoRegister, err := gate.AutoRegister(regctx, &gate.RegisterRequest{
 		Pattern:      pattern,
 		StripPattern: true,
-		FixedPort:    uint32(port),
+		FixedPort:    port,
 	})
 	if err != nil {
 		t.Error(err)
@@ -362,7 +362,7 @@ func (p *PortalTest) AutoRegister_HTTPRecovery(t *testing.T) {
 	httpctx, killHTTP := context.WithCancel(t.Context())
 	waitHTTP := make(chan struct{})
 	go func() {
-		err := tools.HTTPServer(httpctx.Done(), ret.Lease.Port, ret.TLSConfig, &tools.HTTPServerOptions{
+		err := tools.HTTPServer(httpctx, port, tlsconf, &tools.HTTPServerOptions{
 			Server:          srv,
 			ShutdownTimeout: time.Second,
 			Listener:        listener,
@@ -399,7 +399,7 @@ func (p *PortalTest) AutoRegister_HTTPRecovery(t *testing.T) {
 		t.Error("Expected 1 HTTP request, got: ", count)
 	}
 	// Force an unregister, so Renew would not work.
-	if _, err := portal.RPC.Unregister(t.Context(), ret.Lease); err != nil {
+	if err := portal.Unregister(t.Context(), lease.Load().(*gate.Lease)); err != nil {
 		t.Error(err)
 	}
 	// Wait until we get a successful HTTP request to our backend
@@ -464,7 +464,7 @@ func (*PortalTest) AutoRegister_ClientCert(t *testing.T) {
 	t.Parallel()
 	ctx, done := context.WithDeadline(t.Context(), time.Now().Add(15*time.Second))
 	defer done()
-	ret, wait, err := gate.AutoRegister(ctx, &gate.RegisterRequest{
+	_, tlsconf, wait, err := gate.AutoRegister(ctx, &gate.RegisterRequest{
 		Pattern: fmt.Sprintf("/%v/", t.Name()),
 	})
 	if err != nil {
@@ -472,12 +472,12 @@ func (*PortalTest) AutoRegister_ClientCert(t *testing.T) {
 	}
 
 	refreshed := false
-	cert, err := ret.TLSConfig.GetCertificate(nil)
+	cert, err := tlsconf.GetCertificate(nil)
 	if err != nil {
 		t.Error(err)
 	}
 	// For the internal parseAndValidateCert function
-	if _, err := tools.TLSCertificateFromBytes(cert.Certificate, cert.PrivateKey.(crypto.Signer)); err != nil {
+	if _, err := tools.TLSCertificateFromBytes(cert.Certificate, cert.PrivateKey); err != nil {
 		t.Error(err)
 	}
 	tick := time.Tick(time.Second / 10)
@@ -489,11 +489,11 @@ func (*PortalTest) AutoRegister_ClientCert(t *testing.T) {
 			break
 		case <-tick:
 		}
-		newCert, err := ret.TLSConfig.GetCertificate(nil)
+		newCert, err := tlsconf.GetCertificate(nil)
 		if err != nil {
 			t.Error(err)
 		}
-		if _, err := tools.TLSCertificateFromBytes(newCert.Certificate, newCert.PrivateKey.(crypto.Signer)); err != nil {
+		if _, err := tools.TLSCertificateFromBytes(newCert.Certificate, newCert.PrivateKey); err != nil {
 			t.Error(err)
 		}
 		if !equalCerts(cert.Certificate, newCert.Certificate) {
@@ -516,7 +516,7 @@ func (*PortalTest) AutoRegister_Wait(t *testing.T) {
 	start := time.Now()
 	ctx, done := context.WithTimeout(t.Context(), testTime)
 	defer done()
-	_, wait, err := gate.AutoRegister(ctx, &gate.RegisterRequest{
+	_, _, wait, err := gate.AutoRegister(ctx, &gate.RegisterRequest{
 		Pattern: fmt.Sprintf("/%v/", t.Name()),
 	})
 	if err != nil {

@@ -12,12 +12,12 @@ import (
 	"sync/atomic"
 	"time"
 
-	"ask.systems/daemon/portal/gate"
+	"ask.systems/daemon/internal/portalpb"
 	"ask.systems/daemon/tools"
 	"google.golang.org/protobuf/proto"
 )
 
-func leaseKey(lease *gate.Lease) string {
+func leaseKey(lease *portalpb.Lease) string {
 	return fmt.Sprintf("%s:%d:%s", lease.Address, lease.Port, lease.Pattern)
 }
 
@@ -25,7 +25,7 @@ type stateManager struct {
 	mut          *sync.Mutex
 	saveFilepath string
 
-	registrations map[string]*Registration // leaseKey(lease) for the key
+	registrations map[string]*portalpb.Registration // leaseKey(lease) for the key
 
 	// Store the rootCAs separately so we can write them to a file, because
 	// unfortunately CertPool has no non-depracted methods to get the certs back.
@@ -47,7 +47,7 @@ func newStateManager(saveFilepath string) *stateManager {
 		mut:          &sync.Mutex{},
 		saveFilepath: saveFilepath,
 
-		registrations: make(map[string]*Registration),
+		registrations: make(map[string]*portalpb.Registration),
 
 		rootCAs:      make(map[*x509.Certificate]struct{}),
 		mutCertPool:  x509.NewCertPool(),
@@ -74,7 +74,7 @@ func (s *stateManager) Load() error {
 	if err != nil {
 		return fmt.Errorf("No save data: %w", err)
 	}
-	state := &State{}
+	state := &portalpb.State{}
 	if err := proto.Unmarshal(saveData, state); err != nil {
 		return fmt.Errorf("Failed to unmarshal save state file: %w", err)
 	}
@@ -150,7 +150,7 @@ func (s *stateManager) saveUnsafe() {
 		return
 	}
 	// Build the save state proto from the current in memory state
-	state := &State{}
+	state := &portalpb.State{}
 
 	for _, r := range s.registrations {
 		state.Registrations = append(state.Registrations, r)
@@ -186,7 +186,7 @@ func (s *stateManager) saveUnsafe() {
 			continue
 		}
 		state.Certificates = append(state.Certificates,
-			&Certificate{
+			&portalpb.Certificate{
 				Domain: domain,
 				Der:    cert.Certificate,
 				Key:    keyBytes,
@@ -244,7 +244,7 @@ func (s *stateManager) RootCAs() *x509.CertPool {
 	return s.readCertPool.Load().(*x509.CertPool)
 }
 
-func (s *stateManager) ForEachRegistration(body func(*Registration)) {
+func (s *stateManager) ForEachRegistration(body func(*portalpb.Registration)) {
 	s.mut.Lock()
 	defer s.mut.Unlock()
 	for _, r := range s.registrations {
@@ -252,14 +252,14 @@ func (s *stateManager) ForEachRegistration(body func(*Registration)) {
 	}
 }
 
-func (s *stateManager) LookupRegistration(lease *gate.Lease) *Registration {
+func (s *stateManager) LookupRegistration(lease *portalpb.Lease) *portalpb.Registration {
 	s.mut.Lock()
 	defer s.mut.Unlock()
 
 	return s.registrations[leaseKey(lease)]
 }
 
-func (s *stateManager) unsafeSaveRegistration(r *Registration) error {
+func (s *stateManager) unsafeSaveRegistration(r *portalpb.Registration) error {
 	key := leaseKey(r.Lease)
 
 	if _, ok := s.registrations[key]; ok {
@@ -270,7 +270,7 @@ func (s *stateManager) unsafeSaveRegistration(r *Registration) error {
 	return nil
 }
 
-func (s *stateManager) SaveRegistration(r *Registration) error {
+func (s *stateManager) SaveRegistration(r *portalpb.Registration) error {
 	s.mut.Lock()
 	defer s.mut.Unlock()
 	if err := s.unsafeSaveRegistration(r); err != nil {
@@ -280,7 +280,7 @@ func (s *stateManager) SaveRegistration(r *Registration) error {
 	return nil
 }
 
-func (s *stateManager) RenewRegistration(lease *gate.Lease) error {
+func (s *stateManager) RenewRegistration(lease *portalpb.Lease) error {
 	s.mut.Lock()
 	defer s.mut.Unlock()
 
@@ -295,7 +295,7 @@ func (s *stateManager) RenewRegistration(lease *gate.Lease) error {
 	return nil
 }
 
-func (s *stateManager) Unregister(oldLease *gate.Lease) {
+func (s *stateManager) Unregister(oldLease *portalpb.Lease) {
 	s.mut.Lock()
 	defer s.mut.Unlock()
 

@@ -139,7 +139,7 @@ func startDashboard(ctx context.Context, children *children, adminAuth *tools.Ba
 	// If the main  quit closes, shut down the dashboard. But, if the dashboard
 	// crashes don't shut down the main process.
 	dashboardQuit = make(chan struct{})
-	reg, wait, err := gate.AutoRegister(ctx, &gate.RegisterRequest{
+	port, tlsconf, wait, err := gate.AutoRegister(ctx, &gate.RegisterRequest{
 		Pattern: pattern,
 	})
 	if err != nil {
@@ -177,7 +177,7 @@ func startDashboard(ctx context.Context, children *children, adminAuth *tools.Ba
 	}()
 	wg.Add(1)
 	go func() {
-		tools.HTTPServer(dashboardQuit, reg.Lease.Port, reg.TLSConfig, nil)
+		tools.HTTPServer(ctx, port, tlsconf, nil)
 		wg.Done()
 	}()
 	return dashboardQuit, nil

@@ -93,6 +93,12 @@ func (c *children) StartPrograms(programs []*Command) (errCnt int) {
 func (c *children) waitForPortalToken() (string, error) {
 	logs, cancel := c.StreamLogs(true /*includeHistory*/)
 	defer cancel()
+	// TODO: A smarter way to wait would be nice. Portal loads all of the saved
+	// registrations and that can take longer if there's a lot of them, that's
+	// why this deadline is so long. Maybe we could do like 1 second per
+	// registration but I don't really want spawn reading portal's state. Maybe
+	// better would be watching for portal logs to keep going and have a timeout
+	// since last portal log or something.
 	ttl := time.After(120 * time.Second)
 	for {
 		select {

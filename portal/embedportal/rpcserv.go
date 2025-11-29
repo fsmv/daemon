@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"ask.systems/daemon/portal/gate"
+	"ask.systems/daemon/internal/portalpb"
 	"ask.systems/daemon/tools"
 
 	"google.golang.org/grpc"
@@ -26,7 +26,7 @@ import (
 
 // Methods on this type are exported as rpc calls
 type rpcServ struct {
-	gate.UnimplementedPortalServer
+	portalpb.UnimplementedPortalServer
 
 	clientLeasor *clientLeasor
 	tcpProxy     *tcpProxy
@@ -39,7 +39,7 @@ type rpcServ struct {
 func (s *rpcServ) loadRegistrations() {
 	attempted := 0
 	loaded := 0
-	s.state.ForEachRegistration(func(registration *Registration) {
+	s.state.ForEachRegistration(func(registration *portalpb.Registration) {
 		attempted += 1
 		if registration.Request.FixedPort == 0 {
 			// Request a new lease for the port we had before if the original request
@@ -68,18 +68,18 @@ func (s *rpcServ) loadRegistrations() {
 	}
 }
 
-func (s *rpcServ) MyHostname(ctx context.Context, empty *emptypb.Empty) (*gate.Hostname, error) {
+func (s *rpcServ) MyHostname(ctx context.Context, empty *emptypb.Empty) (*portalpb.Hostname, error) {
 	p, _ := peer.FromContext(ctx)
 	clientAddr, _, err := net.SplitHostPort(p.Addr.String())
 	if err != nil {
 		return nil, err
 	}
-	return &gate.Hostname{Hostname: clientAddr}, nil
+	return &portalpb.Hostname{Hostname: clientAddr}, nil
 }
 
 // Register registers a new forwarding rule to the rpc client's ip address.
 // Randomly assigns port for the client to listen on
-func (s *rpcServ) Register(ctx context.Context, request *gate.RegisterRequest) (*gate.Lease, error) {
+func (s *rpcServ) Register(ctx context.Context, request *portalpb.RegisterRequest) (*portalpb.Lease, error) {
 	// Get the RPC client's address (without the port) from gRPC
 	p, _ := peer.FromContext(ctx)
 
@@ -113,7 +113,7 @@ func (s *rpcServ) Register(ctx context.Context, request *gate.RegisterRequest) (
 		log.Printf("Registration failed (%v), failed to setup proxy: %v", request.Pattern, err)
 		return nil, err
 	}
-	if err = s.state.SaveRegistration(&Registration{
+	if err = s.state.SaveRegistration(&portalpb.Registration{
 		Request: request,
 		Lease:   lease,
 	}); err != nil {
@@ -133,7 +133,7 @@ func (s *rpcServ) Register(ctx context.Context, request *gate.RegisterRequest) (
 	return lease, nil
 }
 
-func (s *rpcServ) internalRegister(clientAddr string, request *gate.RegisterRequest, fixedTimeout time.Time) (lease *gate.Lease, err error) {
+func (s *rpcServ) internalRegister(clientAddr string, request *portalpb.RegisterRequest, fixedTimeout time.Time) (lease *portalpb.Lease, err error) {
 	if strings.HasPrefix(request.Pattern, tcpProxyPrefix) {
 		lease, err = s.tcpProxy.Register(clientAddr, request, fixedTimeout)
 	} else {
@@ -142,7 +142,7 @@ func (s *rpcServ) internalRegister(clientAddr string, request *gate.RegisterRequ
 	return
 }
 
-func (s *rpcServ) signCert(request *gate.RegisterRequest, lease *gate.Lease) error {
+func (s *rpcServ) signCert(request *portalpb.RegisterRequest, lease *portalpb.Lease) error {
 	if len(request.GetCertificateRequest()) != 0 {
 		root, err := s.rootCert.GetCertificate(nil)
 		if err != nil {
@@ -162,7 +162,7 @@ func (s *rpcServ) signCert(request *gate.RegisterRequest, lease *gate.Lease) err
 }
 
 // Unregister unregisters the forwarding rule with the given pattern
-func (s *rpcServ) Unregister(ctx context.Context, lease *gate.Lease) (*gate.Lease, error) {
+func (s *rpcServ) Unregister(ctx context.Context, lease *portalpb.Lease) (*portalpb.Lease, error) {
 	leasor := s.clientLeasor.PortLeasorForClient(lease.Address)
 	err := leasor.Unregister(lease)
 	if err != nil {
@@ -181,7 +181,7 @@ func (s *rpcServ) Unregister(ctx context.Context, lease *gate.Lease) (*gate.Leas
 }
 
 // Renew renews the lease on a currently registered pattern
-func (s *rpcServ) Renew(ctx context.Context, lease *gate.Lease) (*gate.Lease, error) {
+func (s *rpcServ) Renew(ctx context.Context, lease *portalpb.Lease) (*portalpb.Lease, error) {
 	leasor := s.clientLeasor.PortLeasorForClient(lease.Address)
 	newLease, err := leasor.Renew(lease)
 	if err != nil {
@@ -257,7 +257,7 @@ func startRPCServer(clientLeasor *clientLeasor,
 			return handler(ctx, req)
 		}),
 	)
-	gate.RegisterPortalServer(server, s)
+	portalpb.RegisterPortalServer(server, s)
 	l, err := listenerFromPortOrFD(port)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to start listener: %v", err)

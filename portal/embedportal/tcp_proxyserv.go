@@ -11,7 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"ask.systems/daemon/portal/gate"
+	"ask.systems/daemon/internal/portalpb"
 )
 
 // The RegisterRequest.Pattern prefix for tcp proxies
@@ -26,7 +26,7 @@ type tcpProxy struct {
 
 type tcpLease struct {
 	Cancel chan struct{}
-	Lease  *gate.Lease
+	Lease  *portalpb.Lease
 }
 
 func makeTCPProxy(l *clientLeasor, tlsConfig *tls.Config, quit chan struct{}) *tcpProxy {
@@ -39,7 +39,7 @@ func makeTCPProxy(l *clientLeasor, tlsConfig *tls.Config, quit chan struct{}) *t
 	return p
 }
 
-func (p *tcpProxy) Unregister(lease *gate.Lease) {
+func (p *tcpProxy) Unregister(lease *portalpb.Lease) {
 	val, _ := p.leases.Load(lease.GetPattern())
 	if l, ok := val.(*tcpLease); ok && l != nil {
 		close(l.Cancel)
@@ -47,7 +47,7 @@ func (p *tcpProxy) Unregister(lease *gate.Lease) {
 	}
 }
 
-func (p *tcpProxy) Register(clientAddr string, request *gate.RegisterRequest, fixedTimeout time.Time) (*gate.Lease, error) {
+func (p *tcpProxy) Register(clientAddr string, request *portalpb.RegisterRequest, fixedTimeout time.Time) (*portalpb.Lease, error) {
 	cancelLease := make(chan struct{})
 	go func() {
 		select {

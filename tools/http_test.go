@@ -22,7 +22,7 @@ func ExampleHTTPServer_normal() {
 	ctx, stop := context.WithTimeout(context.Background(), 30*time.Second)
 	defer stop()
 	var cert *tls.Config // get this with gate.AutoRegister
-	err := tools.HTTPServer(ctx.Done(), 8080, cert, nil)
+	err := tools.HTTPServer(ctx, 8080, cert, nil)
 	if err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Print("Server failed:", err)
 	}
@@ -31,26 +31,9 @@ func ExampleHTTPServer_normal() {
 func ExampleHTTPServer_onlyHTTP() {
 	ctx, stop := context.WithTimeout(context.Background(), 30*time.Second)
 	defer stop()
-	err := tools.HTTPServer(ctx.Done(), 8080, nil, &tools.HTTPServerOptions{
+	err := tools.HTTPServer(ctx, 8080, nil, &tools.HTTPServerOptions{
 		Server: &http.Server{Handler: tools.RedirectToHTTPS{}},
 	})
-	if err != nil && !errors.Is(err, http.ErrServerClosed) {
-		log.Print("Server failed:", err)
-	}
-}
-
-func ExampleHTTPServer_quitChan() {
-	quit := make(chan struct{})
-	go func() {
-		t := time.NewTimer(30 * time.Second)
-		defer t.Stop()
-		select {
-		case <-t.C:
-			close(quit)
-		case <-quit:
-		}
-	}()
-	err := tools.HTTPServer(quit, 8080, nil, nil)
 	if err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Print("Server failed:", err)
 	}
@@ -59,7 +42,7 @@ func ExampleHTTPServer_quitChan() {
 func ExampleHTTPServer_turnOffLogging() {
 	ctx, stop := context.WithTimeout(context.Background(), 30*time.Second)
 	defer stop()
-	err := tools.HTTPServer(ctx.Done(), 8080, nil, &tools.HTTPServerOptions{
+	err := tools.HTTPServer(ctx, 8080, nil, &tools.HTTPServerOptions{
 		Quiet: true,
 	})
 	if err != nil && !errors.Is(err, http.ErrServerClosed) {

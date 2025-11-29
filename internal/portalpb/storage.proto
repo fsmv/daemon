@@ -1,7 +1,7 @@
 syntax = "proto3";
-option go_package = "ask.systems/daemon/portal/embedportal";
+option go_package = "ask.systems/daemon/internal/portalpb";
 
-import "gate/service.proto";
+import "internal/portalpb/service.proto";
 
 message Registration {
 	RegisterRequest request = 1;

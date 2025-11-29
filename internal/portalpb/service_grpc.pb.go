@@ -2,9 +2,9 @@
 // versions:
 // - protoc-gen-go-grpc v1.2.0
 // - protoc             v5.29.5
-// source: gate/service.proto
+// source: internal/portalpb/service.proto
 
-package gate
+package portalpb
 
 import (
 	context "context"
@@ -26,9 +26,6 @@ type PortalClient interface {
 	Register(ctx context.Context, in *RegisterRequest, opts ...grpc.CallOption) (*Lease, error)
 	Renew(ctx context.Context, in *Lease, opts ...grpc.CallOption) (*Lease, error)
 	Unregister(ctx context.Context, in *Lease, opts ...grpc.CallOption) (*Lease, error)
-	// Returns the address that will be used to connect to your server if
-	// registered. It is necessary to register the correct hostname in the TLS
-	// certificate signed by portal.
 	MyHostname(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*Hostname, error)
 }
 
@@ -83,9 +80,6 @@ type PortalServer interface {
 	Register(context.Context, *RegisterRequest) (*Lease, error)
 	Renew(context.Context, *Lease) (*Lease, error)
 	Unregister(context.Context, *Lease) (*Lease, error)
-	// Returns the address that will be used to connect to your server if
-	// registered. It is necessary to register the correct hostname in the TLS
-	// certificate signed by portal.
 	MyHostname(context.Context, *emptypb.Empty) (*Hostname, error)
 	mustEmbedUnimplementedPortalServer()
 }
@@ -216,5 +210,5 @@ var Portal_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "gate/service.proto",
+	Metadata: "internal/portalpb/service.proto",
 }

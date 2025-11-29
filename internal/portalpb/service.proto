@@ -1,0 +1,57 @@
+syntax = "proto3";
+option go_package = "ask.systems/daemon/internal/portalpb";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/empty.proto";
+
+service Portal {
+	rpc Register(RegisterRequest) returns (Lease) {}
+	rpc Renew(Lease) returns (Lease) {}
+	rpc Unregister(Lease) returns (Lease) {}
+
+	rpc MyHostname(google.protobuf.Empty) returns (Hostname) {}
+}
+
+// The response proto for the [gate.PortalClient.MyHostname] RPC
+message Hostname {
+	string hostname = 1;
+}
+
+message RegisterRequest {
+	string pattern = 1;
+
+	uint32 fixed_port = 2;
+
+	string hostname = 6;
+
+	bool strip_pattern = 3;
+
+	bool allow_http = 5;
+
+	// This is ASN.1 DER data.
+	bytes certificate_request = 4;
+}
+
+// Information proto about a successful registration portal is storing.
+//
+// For the Certificate field use [tools.TLSCertificateFromBytes] for parsing the
+// Certificate field data into a [*tls.Certificate] ex:
+//
+//   cert, err := tools.TLSCertificateFromBytes([][]byte{lease.Certificate}, privateKey)
+//
+// Note: privateKey comes from [tools.GenerateCertificateRequest] before you
+// make the registration
+message Lease {
+	string pattern = 1;
+	string address = 5;
+	uint32 port = 2;
+	google.protobuf.Timestamp timeout = 3;
+
+	// If generate_certificate was set in the request, this is the signed x509
+	// certificate to use for your server. It will be renewed with the lease.
+	//
+	// This is ASN.1 DER data for the leaf certificate public key.
+	repeated bytes certificate = 4;
+}
+
+// vim: set noexpandtab:

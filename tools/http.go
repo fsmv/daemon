@@ -73,7 +73,16 @@ type HTTPServerOptions struct {
 	// The amount of time to wait for connections to close during shutdown before
 	// force quitting
 	ShutdownTimeout time.Duration
+	// Optionally bind the server listener to this address.
+	// Server.Addr is overwritten to "opt.AddrHost:port" by [HTTPServer]
+	// See net.Dial for details of the address format.
+	AddrHost string
 
+	// Optionally use this listener for the server instead of opening a new on
+	// internally. This bypasses the port argument to [HTTPServer] and the
+	// AddrHost field.
+	//
+	// Use this if you want a pipe or an FD for the server socket.
 	Listener net.Listener
 }
 
@@ -85,17 +94,9 @@ type HTTPServerOptions struct {
 // You can set up advanced options with [tools.HTTPServerOptions.Server] but
 // opt.Server.Addr and opt.Server.TLSConfig will be overwritten with the args.
 //
-// If you use [context.Context] you can pass the ctx.Done() for quit; you can
-// also pass nil for quit to never shutdown.
-//
 // If the server crashes, returns the error from [http.ListenAndServeTLS]. If
 // quit is closed, returns the error from [http.Server.Shutdown]
-//
-// Note: port is a uint32 because the most common use will be setting it to
-// [gate.Lease.Port], and protos don't have a uint16 type.
-//
-// TODO: should I just make quit a context?
-func HTTPServer(quit <-chan struct{}, port uint32, conf *tls.Config, opt *HTTPServerOptions) error {
+func HTTPServer(ctx context.Context, port uint16, conf *tls.Config, opt *HTTPServerOptions) error {
 	if opt == nil {
 		opt = &HTTPServerOptions{
 			ShutdownTimeout: 10 * time.Second,
@@ -105,11 +106,17 @@ func HTTPServer(quit <-chan struct{}, port uint32, conf *tls.Config, opt *HTTPSe
 		opt.Server = &http.Server{}
 	}
 
-	opt.Server.Addr = ":" + strconv.Itoa(int(port))
+	opt.Server.Addr = net.JoinHostPort(opt.AddrHost, strconv.Itoa(int(port)))
 	opt.Server.TLSConfig = conf
 
 	if opt.Quiet && opt.Server.ErrorLog == nil {
 		opt.Server.ErrorLog = log.New(io.Discard, "", 0)
+	}
+
+	if opt.Server.BaseContext == nil {
+		opt.Server.BaseContext = func(net.Listener) context.Context {
+			return ctx
+		}
 	}
 
 	var proto string
@@ -146,7 +153,7 @@ func HTTPServer(quit <-chan struct{}, port uint32, conf *tls.Config, opt *HTTPSe
 	}()
 
 	select {
-	case <-quit:
+	case <-ctx.Done():
 		if !opt.Quiet {
 			log.Printf("Shutting down %v server on port %d...", proto, port)
 			log.Printf("Waiting up to %v for %v connections to close on port %d.", opt.ShutdownTimeout, proto, port)
@@ -164,6 +171,15 @@ func HTTPServer(quit <-chan struct{}, port uint32, conf *tls.Config, opt *HTTPSe
 	}
 }
 
+func quitContext(quit <-chan struct{}) context.Context {
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		<-quit
+		cancel()
+	}()
+	return ctx
+}
+
 // Starts an HTTPS server on the specified port using the TLS config and block
 // until the quit channel is closed and graceful shutdown has finished.
 //
@@ -171,7 +187,7 @@ func HTTPServer(quit <-chan struct{}, port uint32, conf *tls.Config, opt *HTTPSe
 // does that [HTTPServer] can't do is this function closes quit when the server
 // crashes.
 func RunHTTPServerTLS(port uint32, cert *tls.Config, quit chan struct{}) {
-	err := HTTPServer(quit, port, cert, nil)
+	err := HTTPServer(quitContext(quit), uint16(port), cert, nil)
 	if errors.Is(err, http.ErrServerClosed) {
 		close(quit)
 	}
@@ -184,7 +200,7 @@ func RunHTTPServerTLS(port uint32, cert *tls.Config, quit chan struct{}) {
 // does that [HTTPServer] can't do is this function closes quit when the server
 // crashes.
 func RunHTTPServer(port uint32, quit chan struct{}) {
-	err := HTTPServer(quit, port, nil, nil)
+	err := HTTPServer(quitContext(quit), uint16(port), nil, nil)
 	if errors.Is(err, http.ErrServerClosed) {
 		close(quit)
 	}

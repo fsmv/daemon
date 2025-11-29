@@ -44,7 +44,7 @@ func Example() {
 	// Register with portal, generate a TLS cert signed by portal, and keep the
 	// registration and cert renewed in the background (until ctx is cancelled).
 	// Blocks until the first registration is done.
-	reg, waitForUnregister, err := gate.AutoRegister(ctx, &gate.RegisterRequest{
+	port, tlsconf, wait, err := gate.AutoRegister(ctx, &gate.RegisterRequest{
 		Pattern: *pattern,
 	})
 	if err != nil {
@@ -61,7 +61,7 @@ func Example() {
 	// If you have a more complex main function you might want to run this in a
 	// goroutine and use wg.Add(1) before and wg.Done() after. You may also want
 	// to turn on Quiet mode and do your own error logging using the return error.
-	tools.HTTPServer(ctx.Done(), reg.Lease.Port, reg.TLSConfig, nil)
-	<-waitForUnregister
+	tools.HTTPServer(ctx, port, tlsconf, nil)
+	<-wait
 	log.Print("Goodbye.")
 }

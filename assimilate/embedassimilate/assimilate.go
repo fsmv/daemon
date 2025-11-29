@@ -19,6 +19,7 @@ import (
 	_ "ask.systems/daemon/portal/flags"
 	_ "ask.systems/daemon/tools/flags"
 
+	"ask.systems/daemon/internal/portalpb"
 	"ask.systems/daemon/portal/gate"
 	"ask.systems/daemon/tools"
 	"google.golang.org/protobuf/encoding/prototext"
@@ -59,7 +60,7 @@ func Run(ctx context.Context, flags *flag.FlagSet, args []string) {
 	ctx, _ = tools.ContextWithQuitSignals(context.Background())
 	errCount := 0
 	for i, requestText := range flags.Args() {
-		registration := &gate.RegisterRequest{}
+		registration := &portalpb.RegisterRequest{}
 		err := prototext.Unmarshal([]byte(requestText), registration)
 		if err != nil {
 			log.Printf("Failed to unmarshal RegisterRequest #%v %#v: %v",
@@ -70,7 +71,13 @@ func Run(ctx context.Context, flags *flag.FlagSet, args []string) {
 		idx := i
 		wg.Add(1)
 		go func() {
-			err := client.AutoRegisterChan(ctx, registration, nil)
+			err := client.AutoRegister(ctx, &gate.RegisterRequest{
+				Pattern:      registration.Pattern,
+				FixedPort:    uint16(registration.FixedPort),
+				Hostname:     registration.Hostname,
+				StripPattern: registration.StripPattern,
+				AllowHttp:    registration.AllowHttp,
+			}, nil)
 			wg.Done()
 			if err != nil && !errors.Is(err, context.Cause(ctx)) {
 				log.Printf("Error for registration #%v: %v", idx, err)
