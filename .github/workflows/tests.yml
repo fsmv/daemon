@@ -18,7 +18,7 @@ jobs:
     - uses: actions/checkout@v4
 
     - name: Set up Go
-      uses: actions/setup-go@v5.5.0
+      uses: actions/setup-go@v6.2.0
       with:
         go-version-file: go.mod
 
@@ -70,7 +70,7 @@ jobs:
         path: 'pebble'
 
     - name: Set up Go
-      uses: actions/setup-go@v5.5.0
+      uses: actions/setup-go@v6.2.0
       with:
         go-version-file: pebble/go.mod
         cache-dependency-path: |
@@ -89,7 +89,7 @@ jobs:
         echo "127.0.0.1 one.example" | sudo tee -a /etc/hosts
         echo "127.0.0.1 two.example" | sudo tee -a /etc/hosts
 
-    - name: Test portal autocerts
+    - name: Test portal restart
       run: |
         cd ./pebble
         PEBBLE_WFE_NONCEREJECT=0 PEBBLE_AUTHZREUSE=0 pebble &
@@ -125,6 +125,104 @@ jobs:
 
         killall portal
         killall pebble
+        rm state.protodata
+
+    - name: Test acme renew
+      run: |
+        cd ./pebble
+        sed -i 's/"validityPeriod": *[0-9]\+/"validityPeriod": 10/g' ./test/config/pebble-config.json
+        PEBBLE_VA_NOSLEEP=1 PEBBLE_WFE_NONCEREJECT=0 PEBBLE_AUTHZREUSE=0 pebble -config ./test/config/pebble-config.json &
+        cd ..
+
+        sleep 5
+
+        ACME_SERVER_CERT=./pebble/test/certs/pebble.minica.pem portal \
+          -autocert_domains=one.example,two.example \
+          -autocert_server=https://127.0.0.1:14000/dir \
+          -http_port=5002 \
+          -https_port=5001 \
+          -cert_challenge_webroot='' &
+
+        echo "Checking that portal serves the certs"
+        FIRST_ONE_SERVED_CERT=$(openssl s_client -connect one.example:5001 </dev/null 2>/dev/null | openssl x509 -inform pem -text)
+        FIRST_TWO_SERVED_CERT=$(openssl s_client -connect two.example:5001 </dev/null 2>/dev/null | openssl x509 -inform pem -text)
+
+        sleep 10
+
+        echo "Checking that portal renewed the certs"
+        SECOND_ONE_SERVED_CERT=$(openssl s_client -connect one.example:5001 </dev/null 2>/dev/null | openssl x509 -inform pem -text)
+        SECOND_TWO_SERVED_CERT=$(openssl s_client -connect two.example:5001 </dev/null 2>/dev/null | openssl x509 -inform pem -text)
+        DIFFONE=$(diff <(echo "$FIRST_ONE_SERVED_CERT") <(echo "$SECOND_ONE_SERVED_CERT"); exit 0)
+        if [ -z "$DIFFONE" ]; then
+          echo "The one.example cert is the same as it was before and we meant to renew!"
+          echo "$SECOND_ONE_SERVED_CERT"
+          echo "$SECOND_TWO_SERVED_CERT"
+          exit 1
+        fi
+        DIFFTWO=$(diff <(echo "$FIRST_TWO_SERVED_CERT") <(echo "$SECOND_TWO_SERVED_CERT"); exit 0)
+        if [ -z "$DIFFTWO" ]; then
+          echo "The two.example cert is the same as it was before and we meant to renew!"
+          echo "$SECOND_ONE_SERVED_CERT"
+          echo "$SECOND_TWO_SERVED_CERT"
+          exit 1
+        fi
+
+        killall portal
+        killall pebble
+        rm state.protodata
+
+    - name: Test acme renew on restart
+      run: |
+        cd ./pebble
+        sed -i 's/"validityPeriod": *[0-9]\+/"validityPeriod": 10/g' ./test/config/pebble-config.json
+        PEBBLE_VA_NOSLEEP=1 PEBBLE_WFE_NONCEREJECT=0 PEBBLE_AUTHZREUSE=0 pebble -config ./test/config/pebble-config.json &
+        cd ..
+
+        sleep 5
+
+        ACME_SERVER_CERT=./pebble/test/certs/pebble.minica.pem portal \
+          -autocert_domains=one.example,two.example \
+          -autocert_server=https://127.0.0.1:14000/dir \
+          -http_port=5002 \
+          -https_port=5001 \
+          -cert_challenge_webroot='' &
+
+        echo "Checking that portal serves the certs"
+        FIRST_ONE_SERVED_CERT=$(openssl s_client -connect one.example:5001 </dev/null 2>/dev/null | openssl x509 -inform pem -text)
+        FIRST_TWO_SERVED_CERT=$(openssl s_client -connect two.example:5001 </dev/null 2>/dev/null | openssl x509 -inform pem -text)
+
+        killall portal
+
+        ACME_SERVER_CERT=./pebble/test/certs/pebble.minica.pem portal \
+          -autocert_domains=one.example,two.example \
+          -autocert_server=https://127.0.0.1:14000/dir \
+          -http_port=5002 \
+          -https_port=5001 \
+          -cert_challenge_webroot='' &
+
+        sleep 10
+
+        echo "Checking that portal renewed the certs"
+        SECOND_ONE_SERVED_CERT=$(openssl s_client -connect one.example:5001 </dev/null 2>/dev/null | openssl x509 -inform pem -text)
+        SECOND_TWO_SERVED_CERT=$(openssl s_client -connect two.example:5001 </dev/null 2>/dev/null | openssl x509 -inform pem -text)
+        DIFFONE=$(diff <(echo "$FIRST_ONE_SERVED_CERT") <(echo "$SECOND_ONE_SERVED_CERT"); exit 0)
+        if [ -z "$DIFFONE" ]; then
+          echo "The one.example cert is the same as it was before and we meant to renew!"
+          echo "$SECOND_ONE_SERVED_CERT"
+          echo "$SECOND_TWO_SERVED_CERT"
+          exit 1
+        fi
+        DIFFTWO=$(diff <(echo "$FIRST_TWO_SERVED_CERT") <(echo "$SECOND_TWO_SERVED_CERT"); exit 0)
+        if [ -z "$DIFFTWO" ]; then
+          echo "The two.example cert is the same as it was before and we meant to renew!"
+          echo "$SECOND_ONE_SERVED_CERT"
+          echo "$SECOND_TWO_SERVED_CERT"
+          exit 1
+        fi
+
+        killall portal
+        killall pebble
+        rm state.protodata
 
   test-certbot-certs:
     runs-on: ubuntu-latest
@@ -143,7 +241,7 @@ jobs:
         path: 'pebble'
 
     - name: Set up Go
-      uses: actions/setup-go@v5.5.0
+      uses: actions/setup-go@v6.2.0
       with:
         go-version-file: pebble/go.mod
         cache-dependency-path: |
@@ -234,6 +332,8 @@ jobs:
         sudo certbot delete --non-interactive --cert-name one.example
         sudo certbot delete --non-interactive --cert-name two.example
         sudo killall daemon
+        rm -rf ./p
+        rm config.pbtxt
 
     - name: Test portal only plain file
       run: |
@@ -294,3 +394,4 @@ jobs:
         sudo certbot delete --non-interactive --cert-name one.example
         sudo certbot delete --non-interactive --cert-name two.example
         killall daemon
+        rm -rf ./p

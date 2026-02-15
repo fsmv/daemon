@@ -222,23 +222,39 @@ func refreshTime(c *tls.Certificate) time.Duration {
 
 // Assumes startCert is not nil and startCert.Leaf is not nil
 func (t *tlsRefresher) keepCertRefreshed(startCert *tls.Certificate, refresh func() (*tls.Certificate, error)) {
-	timer := time.NewTimer(refreshTime(startCert))
+	refreshIn := refreshTime(startCert)
+	log.Print("Running cert refresh in ", refreshIn)
+	timer := time.NewTimer(refreshIn)
+	defer timer.Stop()
 	sig := t.refreshSignal()
 
 	for {
 		select {
 		case <-t.quit:
+			log.Print("Qutting cert refresh")
 			return
-		case <-timer.C:
 		case <-sig:
-			cert, err := refresh()
-			if err != nil {
-				log.Print("Error on cert refresh: ", err)
-				// TODO: exponential backoff or something?
-				timer.Reset(time.Minute)
-			} else {
-				timer.Reset(refreshTime(cert))
+			// Stop and drain the timer channel for pre-go 1.23 compatibility.
+			// This is to fix channel misfires due to old data in the buffer.
+			// It is needed any time you call reset and we always do here.
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
 			}
+		case <-timer.C:
+		}
+		log.Print("Attempting cert refresh")
+		cert, err := refresh()
+		if err != nil {
+			log.Print("Error from cert refresh: ", err)
+			// TODO: exponential backoff or something?
+			timer.Reset(time.Minute)
+		} else {
+			refreshIn := refreshTime(cert)
+			log.Print("Success! Running next cert refresh in ", refreshIn)
+			timer.Reset(refreshIn)
 		}
 	}
 }
