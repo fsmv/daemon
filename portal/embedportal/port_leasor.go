@@ -239,7 +239,7 @@ func (l *portLeasor) Unregister(lease *portalpb.Lease) error {
 
 	portLeases, ok := l.leases[lease.Port]
 	if !ok || portLeases == nil {
-		return fmt.Errorf("%w; Requested lease: %v", UnregisteredErr, leaseString(lease))
+		return fmt.Errorf("%w (port); Requested lease: %v", UnregisteredErr, leaseString(lease))
 	}
 	for _, foundLease := range portLeases {
 		if foundLease.Pattern != lease.GetPattern() {
@@ -249,7 +249,7 @@ func (l *portLeasor) Unregister(lease *portalpb.Lease) error {
 		l.deleteLeaseUnsafe(foundLease)
 		return nil
 	}
-	return fmt.Errorf("%w; Requested lease: %v", UnregisteredErr, leaseString(lease))
+	return fmt.Errorf("%w (pattern); Requested lease: %v", UnregisteredErr, leaseString(lease))
 }
 
 func makeUnusedPorts(start, end uint16, reserved map[uint16]bool) []uint16 {
@@ -295,7 +295,7 @@ func (l *portLeasor) deleteLeaseUnsafe(lease *portalpb.Lease) {
 		if foundLease.Pattern != lease.Pattern {
 			continue
 		}
-		copy(portLeases[:i], portLeases[i+1:])
+		copy(portLeases[i:], portLeases[i+1:])
 		portLeases = portLeases[:len(portLeases)-1]
 		break
 	}
