@@ -147,7 +147,7 @@ jobs:
         FIRST_ONE_SERVED_CERT=$(openssl s_client -connect one.example:5001 </dev/null 2>/dev/null | openssl x509 -inform pem -text)
         FIRST_TWO_SERVED_CERT=$(openssl s_client -connect two.example:5001 </dev/null 2>/dev/null | openssl x509 -inform pem -text)
 
-        sleep 10
+        sleep 15
 
         echo "Checking that portal renewed the certs"
         SECOND_ONE_SERVED_CERT=$(openssl s_client -connect one.example:5001 </dev/null 2>/dev/null | openssl x509 -inform pem -text)
@@ -200,7 +200,7 @@ jobs:
           -https_port=5001 \
           -cert_challenge_webroot='' &
 
-        sleep 10
+        sleep 12
 
         echo "Checking that portal renewed the certs"
         SECOND_ONE_SERVED_CERT=$(openssl s_client -connect one.example:5001 </dev/null 2>/dev/null | openssl x509 -inform pem -text)
