@@ -13,24 +13,24 @@ them easily with automatic TLS support.
 
 # Features
 
- - 🔀 Run many backend web servers and securely share a single TLS protected
+ - Run many backend web servers and securely share a single TLS protected
    domain name (via reverse proxy)
- - 🧑‍💻 Read the logs of each server streaming real time to the dashboard
+ - Read the logs of each server streaming real time to the dashboard
    which also lets you reload the config file and restart servers
- - 🔛 Launch backend servers isolated in a minimal chroot as unprivileged users,
+ - Launch backend servers isolated in a minimal chroot as unprivileged users,
    configured in a simple
    [textproto](https://developers.google.com/protocol-buffers/docs/text-format-spec)
    file
- - 🤖 Backends automatically register their paths on the domain via gRPC
+ - Backends automatically register their paths on the domain via gRPC
    (there's also support for servers that can't send the RPCs) and receive a
    port assignment and get their TLS certificate signed by the portal
    Certificate Authority
- - 📚 There's a
+ - There's a
    [client library](https://pkg.go.dev/ask.systems/daemon/portal/gate) to do all
    this in one function call, and a
    [tools library](https://pkg.go.dev/ask.systems/daemon/tools) full of helpful
    functions for writing a go webserver
- - 👾 Install as one binary that runs each server, or as individual binaries
+ - Install as one binary that runs each server, or as individual binaries
 
 # Programs
 
