@@ -15,7 +15,7 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6.0.2
 
     - name: Set up Go
       uses: actions/setup-go@v6.2.0
@@ -58,12 +58,12 @@ jobs:
 
     steps:
     - name: Clone daemon
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6.0.2
       with:
         path: 'daemon'
 
     - name: Clone Pebble ACME Server
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6.0.2
       with:
         repository: 'letsencrypt/pebble'
         ref: 'v2.7.0'
@@ -147,7 +147,7 @@ jobs:
         FIRST_ONE_SERVED_CERT=$(openssl s_client -connect one.example:5001 </dev/null 2>/dev/null | openssl x509 -inform pem -text)
         FIRST_TWO_SERVED_CERT=$(openssl s_client -connect two.example:5001 </dev/null 2>/dev/null | openssl x509 -inform pem -text)
 
-        sleep 15
+        sleep 25
 
         echo "Checking that portal renewed the certs"
         SECOND_ONE_SERVED_CERT=$(openssl s_client -connect one.example:5001 </dev/null 2>/dev/null | openssl x509 -inform pem -text)
@@ -200,7 +200,7 @@ jobs:
           -https_port=5001 \
           -cert_challenge_webroot='' &
 
-        sleep 12
+        sleep 25
 
         echo "Checking that portal renewed the certs"
         SECOND_ONE_SERVED_CERT=$(openssl s_client -connect one.example:5001 </dev/null 2>/dev/null | openssl x509 -inform pem -text)
@@ -229,12 +229,12 @@ jobs:
 
     steps:
     - name: Clone daemon
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6.0.2
       with:
         path: 'daemon'
 
     - name: Clone Pebble ACME Server
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6.0.2
       with:
         repository: 'letsencrypt/pebble'
         ref: 'v2.7.0'
